@@ -1,0 +1,5 @@
+import React from 'react'
+import { Star } from 'lucide-react'
+import useInView from '../../hooks/useInView'
+const reviews = [{ name: 'Trustpilot', mark: '★' }, { name: 'Capterra', mark: '◢' }, { name: 'G2', mark: 'G' }]
+export default function SocialProof() { const [ref, visible] = useInView(); return <section aria-labelledby="proof-title" className="bg-white px-5 py-20"><div ref={ref} className={`reveal mx-auto max-w-5xl text-center ${visible ? 'is-visible' : ''}`}><h2 id="proof-title" className="mx-auto max-w-2xl text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl">Customers have consistently rated us 4.9/5</h2><div className="mt-12 grid gap-8 sm:grid-cols-3">{reviews.map((review) => <div key={review.name}><p className="text-2xl font-extrabold"><span className="mr-1 text-orange">{review.mark}</span>{review.name}</p><p className="mt-2 text-xs text-muted">“Makes our knowledge feel usable.”</p><div className="mt-3 flex justify-center gap-1 text-orange" aria-label="5 out of 5 stars">{Array.from({ length: 5 }, (_, i) => <Star key={i} size={14} fill="currentColor" />)}</div></div>)}</div></div></section> }

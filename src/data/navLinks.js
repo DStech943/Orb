@@ -1,0 +1,2 @@
+export const navLinks = [{ label: 'Home', href: '#home' }, { label: 'Service', href: '#features' }, { label: 'Feature', href: '#features' }, { label: 'Pricing', href: '#pricing' }, { label: 'FAQ', href: '#faq' }]
+export const footerLinks = [{ title: 'Product', links: ['Features', 'Pricing', 'Changelog'] }, { title: 'Resources', links: ['Help Center', 'Guides', 'Prompt Library'] }, { title: 'Company', links: ['About us', 'Contact', 'Terms of Service'] }]

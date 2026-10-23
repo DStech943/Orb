@@ -1,0 +1,4 @@
+import React, { useRef } from 'react'
+import { X } from 'lucide-react'
+import useFocusTrap from '../../hooks/useFocusTrap'
+export default function Drawer({ open, onClose, title, children, side = 'right' }) { const ref = useRef(null); useFocusTrap(ref, open, onClose); if (!open) return null; const align = side === 'left' ? 'justify-start' : 'justify-end'; return <div className={`fixed inset-0 z-[80] flex ${align} bg-ink/45`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={ref} role="dialog" aria-modal="true" aria-labelledby="drawer-title" className="h-full w-full max-w-md overflow-y-auto border-2 border-ink bg-white p-5 shadow-brutal-lg"><div className="mb-6 flex items-center justify-between"><h2 id="drawer-title" className="text-xl font-extrabold">{title}</h2><button onClick={onClose} aria-label="Close panel"><X /></button></div>{children}</section></div> }

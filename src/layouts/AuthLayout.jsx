@@ -1,0 +1,5 @@
+import React from 'react'
+import { Link } from 'react-router-dom'
+import Doodle from '../components/ui/Doodle'
+import Badge from '../components/ui/Badge'
+export default function AuthLayout({ eyebrow, title, subtitle, children }) { return <main className="relative grid min-h-screen place-items-center overflow-hidden bg-peach px-4 py-10"><Doodle variant="loops" className="absolute left-4 top-8 h-24 w-24 text-purple/40 sm:left-12" /><Doodle variant="squiggle" className="absolute bottom-10 right-4 h-16 w-28 text-orange sm:right-12" /><section className="relative z-10 w-full max-w-md border-2 border-ink bg-white p-6 shadow-brutal-lg sm:p-8"><Link to="/" className="text-2xl font-extrabold tracking-tight">Orb<span className="text-purple">.</span></Link><div className="mt-8"><Badge className="bg-orb-gradient text-white">{eyebrow}</Badge><h1 className="mt-4 text-3xl font-extrabold tracking-tight">{title}</h1><p className="mt-2 text-sm text-muted">{subtitle}</p></div>{children}</section></main> }

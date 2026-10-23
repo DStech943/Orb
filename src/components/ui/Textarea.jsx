@@ -1,0 +1,2 @@
+import React from 'react'
+export default function Textarea({ label, error, className = '', ...props }) { return <label className={`grid gap-1.5 text-sm font-bold ${className}`}>{label && <span>{label}</span>}<textarea className="min-h-28 w-full rounded-md border-2 border-ink bg-white px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-purple" aria-invalid={Boolean(error)} {...props} />{error && <span className="text-xs text-red-700">{error}</span>}</label> }

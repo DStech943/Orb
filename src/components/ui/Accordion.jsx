@@ -1,0 +1,3 @@
+import React from 'react'
+import { Minus, Plus } from 'lucide-react'
+export default function Accordion({ item, index, isOpen, onToggle }) { const panelId = `faq-panel-${index}`; return <div className="border-b-2 border-ink/15"><h3><button className="flex w-full items-center justify-between gap-4 py-5 text-left text-sm font-bold" aria-expanded={isOpen} aria-controls={panelId} onClick={onToggle}>{item.question}{isOpen ? <Minus size={18} /> : <Plus size={18} />}</button></h3><div id={panelId} className={`grid transition-all duration-300 ${isOpen ? 'grid-rows-[1fr] pb-5' : 'grid-rows-[0fr]'}`}><div className="overflow-hidden"><p className="max-w-2xl text-sm leading-7 text-muted">{item.answer}</p></div></div></div> }

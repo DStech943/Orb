@@ -1,0 +1,5 @@
+import React from 'react'
+import Button from '../ui/Button'
+import Doodle from '../ui/Doodle'
+import useInView from '../../hooks/useInView'
+export default function CtaBand() { const [ref, visible] = useInView(); return <section id="cta" aria-labelledby="cta-title" className="bg-peach px-5 py-16"><div ref={ref} className={`reveal relative mx-auto grid max-w-5xl items-center gap-8 overflow-hidden rounded-md border-2 border-ink bg-peach p-8 shadow-brutal md:grid-cols-[1fr_auto] ${visible ? 'is-visible' : ''}`}><div><h2 id="cta-title" className="max-w-md text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl">Get started with a clearer AI brain.</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted">Give your AI agent the confident context it deserves.</p><Button href="#home" className="mt-6">Join Us Now</Button></div><div className="relative hidden h-36 w-48 md:block"><Doodle variant="loops" className="absolute left-0 top-3 h-24 w-24" /><Doodle variant="plane" className="absolute bottom-0 right-0 h-20 w-20 rotate-12" /><Doodle variant="sparkle" className="absolute right-20 top-0 h-6 w-6" /></div></div></section> }

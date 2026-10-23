@@ -1,0 +1,2 @@
+import React from 'react'
+export default function Input({ label, error, className = '', ...props }) { const id = props.id || props.name; return <label className={`grid gap-1.5 text-sm font-bold ${className}`}>{label && <span>{label}</span>}<input id={id} className="w-full rounded-md border-2 border-ink bg-white px-3 py-2.5 text-sm font-medium placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-purple" aria-invalid={Boolean(error)} {...props} />{error && <span className="text-xs text-red-700">{error}</span>}</label> }

@@ -1,0 +1,2 @@
+import { useCallback, useEffect, useState } from 'react'
+export default function useAsync(fn, deps = []) { const [state, setState] = useState({ data: null, error: null, loading: true }); const run = useCallback(async () => { setState((value) => ({ ...value, loading: true, error: null })); try { const data = await fn(); setState({ data, error: null, loading: false }); return data } catch (error) { setState({ data: null, error, loading: false }); return null } }, deps); useEffect(() => { run() }, [run]); return { ...state, reload: run } }
