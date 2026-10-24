@@ -1,0 +1,11 @@
+asyncpg==0.30.0
+fastapi==0.115.12
+httpx==0.28.1
+playwright==1.51.0
+pydantic-settings==2.8.1
+pytest==8.3.5
+pytest-asyncio==0.25.3
+respx==0.22.0
+selectolax==0.3.28
+trafilatura==2.0.0
+uvicorn[standard]==0.34.0

@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: orb
+      POSTGRES_USER: orb
+      POSTGRES_PASSWORD: orb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orb -d orb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql://orb:orb@db:5432/orb
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL}
+      ENV: dev
+      AUTH_DISABLED: "true"
+      CORS_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: .
+    command: python -m app.worker
+    environment:
+      DATABASE_URL: postgresql://orb:orb@db:5432/orb
+      ENV: dev
+      AUTH_DISABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
