@@ -102,7 +102,3 @@ drop trigger if exists orb_generated_content_updated_at on cx_copilot.orb_genera
 create trigger orb_generated_content_updated_at before update on cx_copilot.orb_generated_content
 for each row execute procedure cx_copilot.orb_set_updated_at();
 
--- The crawler's public-schema jobs can be associated with a selected brand.
-alter table public.crawl_jobs add column if not exists brand_id uuid;
-create index if not exists crawl_jobs_brand_created_idx
-  on public.crawl_jobs (brand_id, created_at desc) where brand_id is not null;
