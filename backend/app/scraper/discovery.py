@@ -23,6 +23,16 @@ _POLICY_PROBES = ("/policies/shipping", "/policies/returns", "/pages/faq", "/faq
 logger = logging.getLogger(__name__)
 
 
+class DiscoveryThrottled(RuntimeError):
+    """A host told us to slow down while discovering its site."""
+
+    def __init__(self, host: str, retry_after: float, status_code: int) -> None:
+        self.host = host
+        self.retry_after = max(1.0, retry_after)
+        self.status_code = status_code
+        super().__init__(f"{host} returned HTTP {status_code}; discovery resumes automatically")
+
+
 @dataclass(frozen=True, slots=True)
 class DiscoveredUrl:
     url: str
@@ -131,16 +141,77 @@ def _page_links(html: str, base_url: str) -> list[str]:
 
 
 class Discoverer:
-    def __init__(self, fetcher: Fetcher, user_agent: str) -> None:
+    def __init__(self, fetcher: Fetcher, user_agent: str, pool: Any | None = None) -> None:
         self.fetcher = fetcher
         self.user_agent = user_agent
+        self.pool = pool
 
-    async def _fetch(self, url: str):
+    async def _cached_response(self, url: str, kind: str):
+        if self.pool is None:
+            return None
+        async with self.pool.acquire() as connection:
+            cached = await connection.fetchrow(
+                "SELECT status_code,body_gz FROM discovery_cache WHERE url=$1 AND kind=$2 AND expires_at>now()",
+                url, kind,
+            )
+        if not cached:
+            return None
+        from app.scraper.fetcher import FetchResult
+        return FetchResult(url=url, final_url=url, status_code=cached["status_code"], content_type="application/xml", body=gzip.decompress(bytes(cached["body_gz"])))
+
+    async def _host_is_parked(self, url: str) -> None:
+        if self.pool is None:
+            return
+        host = (urlsplit(url).hostname or "").lower()
+        async with self.pool.acquire() as connection:
+            row = await connection.fetchrow("SELECT resume_at,http_status FROM host_cooldowns WHERE host=$1 AND resume_at>now()", host)
+        if row:
+            seconds = max(1.0, (row["resume_at"] - row["resume_at"].now(row["resume_at"].tzinfo)).total_seconds())
+            raise DiscoveryThrottled(host, seconds, row["http_status"] or 429)
+
+    async def _cache_response(self, url: str, kind: str, response: Any) -> None:
+        if self.pool is None or not 200 <= response.status_code < 300:
+            return
+        async with self.pool.acquire() as connection:
+            await connection.execute(
+                """INSERT INTO discovery_cache (url,kind,status_code,body_gz,expires_at)
+                   VALUES ($1,$2,$3,$4,now()+interval '1 hour')
+                   ON CONFLICT (url) DO UPDATE SET kind=EXCLUDED.kind,status_code=EXCLUDED.status_code,
+                     body_gz=EXCLUDED.body_gz,expires_at=EXCLUDED.expires_at,updated_at=now()""",
+                url, kind, response.status_code, gzip.compress(response.body),
+            )
+
+    async def _park_host(self, url: str, status_code: int, retry_after: float) -> None:
+        if self.pool is None:
+            return
+        host = (urlsplit(url).hostname or "").lower()
+        async with self.pool.acquire() as connection:
+            await connection.execute(
+                """INSERT INTO host_cooldowns (host,resume_at,http_status,reason)
+                   VALUES ($1,now()+($2 * interval '1 second'),$3,'discovery rate limited')
+                   ON CONFLICT (host) DO UPDATE SET resume_at=GREATEST(host_cooldowns.resume_at,EXCLUDED.resume_at),
+                     http_status=EXCLUDED.http_status,reason=EXCLUDED.reason,updated_at=now()""",
+                host, retry_after, status_code,
+            )
+
+    async def _fetch(self, url: str, cache_kind: str | None = None):
         """Use the shared limiter feedback path for discovery requests too."""
+        await self._host_is_parked(url)
+        if cache_kind:
+            cached = await self._cached_response(url, cache_kind)
+            if cached:
+                return cached
         response = await self.fetcher.fetch(url, attempts=1)
         note_response = getattr(self.fetcher, "note_response", None)
+        cooldown = None
         if note_response is not None:
-            await note_response(response)
+            cooldown = await note_response(response)
+        if response.status_code in {429, 503}:
+            retry_after = max(cooldown or 0, response.retry_after or 0, 1.0)
+            await self._park_host(url, response.status_code, retry_after)
+            raise DiscoveryThrottled((urlsplit(url).hostname or "").lower(), retry_after, response.status_code)
+        if cache_kind:
+            await self._cache_response(url, cache_kind, response)
         return response
 
     async def _robots(self, start_url: str) -> tuple[RobotFileParser, list[str], float | None]:
@@ -150,7 +221,7 @@ class Discoverer:
         sitemap_urls: list[str] = []
         delay: float | None = None
         try:
-            response = await self._fetch(robots_url)
+            response = await self._fetch(robots_url, "robots")
             if 200 <= response.status_code < 300:
                 content = response.text
                 parser.parse(content.splitlines())
@@ -176,7 +247,7 @@ class Discoverer:
                 continue
             seen.add(sitemap)
             try:
-                response = await self._fetch(sitemap)
+                response = await self._fetch(sitemap, "sitemap")
                 if not 200 <= response.status_code < 300:
                     summary["sitemaps_failed"] += 1
                     summary["sitemaps"].append({"url": sitemap, "status": response.status_code, "bytes": len(response.body), "entries": 0, "error": None})
@@ -223,11 +294,13 @@ class Discoverer:
         summary["total_urls"] = len(found)
         return found, summary
 
-    async def _probe_policy_paths(self, start_url: str) -> tuple[list[str], list[dict[str, Any]]]:
+    async def _probe_policy_paths(self, start_url: str, already_found: set[str]) -> tuple[list[str], list[dict[str, Any]]]:
         found: list[str] = []
         probes: list[dict[str, Any]] = []
         for path in _POLICY_PROBES:
             candidate = urljoin(start_url, path)
+            if normalize_url(candidate, start_url) in already_found:
+                continue
             try:
                 response = await self._fetch(candidate)
                 probes.append({"url": candidate, "status": response.status_code, "error": None})
@@ -248,7 +321,8 @@ class Discoverer:
         candidates: list[tuple[str, str | None]] = [(start_url, None)]
         sitemap_candidates, summary = await self._walk_sitemaps(sitemap_urls, start_url, limit)
         candidates.extend(sitemap_candidates)
-        probed, probes = await self._probe_policy_paths(start_url)
+        sitemap_known = {url for url, _ in sitemap_candidates}
+        probed, probes = await self._probe_policy_paths(start_url, sitemap_known)
         candidates.extend((candidate, None) for candidate in probed)
         summary["probes"] = probes
         summary["fallback_used"] = False

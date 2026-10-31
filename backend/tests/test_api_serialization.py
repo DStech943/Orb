@@ -59,6 +59,10 @@ class FakeConnection:
     async def fetchval(self, _query: str, *_args: object) -> int:
         return 0
 
+    async def executemany(self, _query: str, _args: object) -> None:
+        """The real connection writes the five initial pipeline stage rows."""
+        return None
+
 
 class FakePool:
     def __init__(self) -> None:
@@ -100,7 +104,7 @@ def test_create_and_list_crawls_return_options_as_objects(monkeypatch) -> None:
     assert created.status_code == 201
     assert invalid.status_code == 422
     assert created.json()["options"] == {"max_pages": 200, "catalog_source": "crawl", "discovery": DISCOVERY}
-    assert pool.connection.insert_value == {"max_pages": 200, "catalog_source": "crawl"}
+    assert pool.connection.insert_value == {"max_pages": 200, "catalog_source": "crawl", "outputs": ["sops", "faqs", "products"]}
     assert listed.status_code == 200
     assert listed.json()[0]["options"]["discovery"] == DISCOVERY
     assert detail.status_code == 200

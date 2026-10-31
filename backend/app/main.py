@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.crawls import router as crawls_router
 from app.api.knowledge import router as knowledge_router
+from app.api.pipelines import router as pipelines_router
+from app.api.shopify import router as shopify_router
 from app.config import get_settings
 from app.db import create_pool
 from app.scraper.fetcher import Fetcher
@@ -19,9 +21,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     app.state.db = await create_pool(settings)
-    # Crawls stay in the local database; brands, Vault, and generated knowledge
-    # live in Supabase when a separate connection has been configured.
-    app.state.supabase_db = await create_pool(settings, settings.supabase_db_url) if settings.supabase_db_url else app.state.db
+    # The crawler uses local Postgres. Brand reads use Supabase's REST API so
+    # the API does not need a direct network connection to Supabase Postgres.
     app.state.fetcher = Fetcher(settings)
     app.state.renderer = Renderer(settings)
     try:
@@ -29,8 +30,6 @@ async def lifespan(app: FastAPI):
     finally:
         await app.state.renderer.close()
         await app.state.fetcher.close()
-        if app.state.supabase_db is not app.state.db:
-            await app.state.supabase_db.close()
         await app.state.db.close()
 
 
@@ -45,6 +44,8 @@ app.add_middleware(
 )
 app.include_router(crawls_router)
 app.include_router(knowledge_router)
+app.include_router(pipelines_router)
+app.include_router(shopify_router)
 
 
 @app.get("/healthz")

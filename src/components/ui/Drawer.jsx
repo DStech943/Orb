@@ -21,7 +21,7 @@ export default function Drawer({ open, onClose, title, children, footer, side = 
   const drawer = <div className={`drawer-backdrop fixed inset-0 z-[80] flex ${align} bg-ink/45`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section ref={ref} role="dialog" aria-modal="true" aria-labelledby="drawer-title" className={`drawer-panel ${direction} h-full w-full ${width} overflow-y-auto border-2 border-ink bg-white p-5 ${footer ? 'pb-24' : ''}`}>
       <div className="mb-6 flex items-center justify-between">
-        <h2 id="drawer-title" className="text-xl font-extrabold">{title}</h2>
+        <h2 id="drawer-title" className="max-w-[42rem] truncate text-xl font-extrabold" title={title}>{title}</h2>
         <button onClick={onClose} aria-label="Close panel"><X /></button>
       </div>
       {children}

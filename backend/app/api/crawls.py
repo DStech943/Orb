@@ -9,7 +9,8 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from app.auth import User, current_user
 from app.db import decode_jsonb
-from app.scraper.discovery import Discoverer
+from app.pipeline import create_crawl_pipeline
+from app.scraper.discovery_service import run_discovery_job
 
 router = APIRouter(prefix="/api/crawls", tags=["crawls"])
 
@@ -24,6 +25,7 @@ class CrawlCreate(RequestModel):
     max_pages: int = Field(200, ge=1)
     catalog_source: Literal["crawl", "external"] = "crawl"
     brand_id: str | None = None
+    outputs: list[Literal["sops", "faqs", "products"]] = Field(default_factory=lambda: ["sops", "faqs", "products"])
 
     @model_validator(mode="after")
     def one_url(self) -> "CrawlCreate":
@@ -56,6 +58,7 @@ class JobOut(BaseModel):
     start_url: str
     status: str
     error: str | None
+    resume_at: datetime | None = None
     crawl_delay: float | None
     options: dict[str, Any]
     created_at: datetime
@@ -82,9 +85,18 @@ class UrlListOut(BaseModel):
 class PageOut(BaseModel):
     url: str
     title: str | None
+    page_type: str | None = None
     text_length: int
     rendered_with: str | None
     needs_parse: bool
+    fetched_at: datetime
+
+
+class PageContentOut(BaseModel):
+    url: str
+    title: str | None
+    page_type: str | None = None
+    text: str
     fetched_at: datetime
 
 
@@ -96,6 +108,8 @@ class PageListOut(BaseModel):
 class JobDetailOut(JobOut):
     progress: dict[str, int]
     discovered_by_type: dict[str, int]
+    worker_online: bool
+    worker_last_seen_at: datetime | None = None
 
 
 def _job_out(record: asyncpg.Record) -> JobOut:
@@ -114,48 +128,9 @@ async def _owned_job(pool: asyncpg.Pool, job_id: str, user: User) -> asyncpg.Rec
     return job
 
 
-async def discover_job(app, job_id: str, org_id: str, start_url: str, options: dict[str, Any]) -> None:
-    pool: asyncpg.Pool = app.state.db
-    try:
-        max_pages = min(int(options.get("max_pages", 200)), app.state.settings.max_pages_hard_limit)
-        discoverer = Discoverer(app.state.fetcher, app.state.settings.user_agent)
-        result = await discoverer.discover(start_url, max_pages)
-        discovered_options = {**options, "discovery": result.summary}
-        async with pool.acquire() as connection:
-            async with connection.transaction():
-                job_is_active = await connection.fetchval(
-                    "SELECT status = 'discovering' FROM crawl_jobs WHERE id = $1::uuid AND org_id = $2::uuid FOR UPDATE",
-                    job_id,
-                    org_id,
-                )
-                if not job_is_active:
-                    return
-                await connection.executemany(
-                    """
-                    INSERT INTO crawl_urls (job_id, url, page_type, selected, status, error, last_modified)
-                    VALUES ($1::uuid, $2, $3, false, $4, $5, $6)
-                    ON CONFLICT (job_id, url) DO NOTHING
-                    """,
-                    [
-                        (job_id, item.url, item.page_type, "pending" if item.allowed else "skipped", item.reason, item.last_modified)
-                        for item in result.urls
-                    ],
-                )
-                await connection.execute(
-                    "UPDATE crawl_jobs SET start_url = $2, crawl_delay = $3, options = $4::jsonb, status = 'ready', error = NULL WHERE id = $1::uuid",
-                    job_id,
-                    result.start_url,
-                    result.crawl_delay,
-                    discovered_options,
-                )
-
-    except Exception as exc:
-        async with pool.acquire() as connection:
-            await connection.execute(
-                "UPDATE crawl_jobs SET status = 'failed', error = $2 WHERE id = $1::uuid AND status = 'discovering'",
-                job_id,
-                str(exc)[:2000],
-            )
+async def discover_job(app, job_id: str, _org_id: str, _start_url: str, _options: dict[str, Any]) -> None:
+    """Compatibility wrapper for FastAPI background tasks and existing callers."""
+    await run_discovery_job(app.state.db, app.state.fetcher, app.state.settings, job_id)
 
 
 @router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -163,6 +138,7 @@ async def create_crawl(payload: CrawlCreate, background_tasks: BackgroundTasks, 
     options = {
         "max_pages": min(payload.max_pages, request.app.state.settings.max_pages_hard_limit),
         "catalog_source": payload.catalog_source,
+        "outputs": list(dict.fromkeys(payload.outputs)),
     }
     async with request.app.state.db.acquire() as connection:
         job = await connection.fetchrow(
@@ -174,6 +150,15 @@ async def create_crawl(payload: CrawlCreate, background_tasks: BackgroundTasks, 
             user.org_id,
             payload.crawl_url, options, payload.brand_id,
         )
+        pipeline_id = await create_crawl_pipeline(
+            connection,
+            org_id=str(user.org_id),
+            brand_id=payload.brand_id,
+            crawl_job_id=str(job["id"]),
+            options=options,
+        )
+        options = {**options, "pipeline_id": pipeline_id}
+        job = await connection.fetchrow("UPDATE crawl_jobs SET options=$2::jsonb WHERE id=$1::uuid RETURNING *", job["id"], options)
     background_tasks.add_task(discover_job, request.app, str(job["id"]), user.org_id, payload.crawl_url, options)
     return _job_out(job)
 
@@ -192,10 +177,12 @@ async def get_crawl(job_id: str, request: Request, user: User = Depends(current_
         status_rows = await connection.fetch("SELECT status, count(*) AS count FROM crawl_urls WHERE job_id=$1::uuid GROUP BY status", job_id)
         type_rows = await connection.fetch("SELECT page_type, count(*) AS count FROM crawl_urls WHERE job_id=$1::uuid GROUP BY page_type", job_id)
         throttled = await connection.fetchval("SELECT count(*) FROM crawl_urls WHERE job_id=$1::uuid AND status='pending' AND throttled_count > 0", job_id)
+        worker_seen = await connection.fetchval("SELECT updated_at FROM worker_heartbeats WHERE worker_id='crawl-worker'")
     progress = {key: 0 for key in ("pending", "processing", "done", "failed", "skipped", "throttled")}
     progress.update({row["status"]: row["count"] for row in status_rows})
     progress["throttled"] = throttled
-    return JobDetailOut(**job.model_dump(), progress=progress, discovered_by_type={row["page_type"]: row["count"] for row in type_rows})
+    worker_online = bool(worker_seen and (datetime.now(worker_seen.tzinfo) - worker_seen).total_seconds() <= 30)
+    return JobDetailOut(**job.model_dump(), progress=progress, discovered_by_type={row["page_type"]: row["count"] for row in type_rows}, worker_online=worker_online, worker_last_seen_at=worker_seen)
 
 
 @router.get("/{job_id}/urls", response_model=UrlListOut)
@@ -247,11 +234,30 @@ async def list_pages(
     await _owned_job(request.app.state.db, job_id, user)
     async with request.app.state.db.acquire() as connection:
         rows = await connection.fetch(
-            "SELECT url,title,length(coalesce(text,'')) AS text_length,rendered_with,needs_parse,fetched_at FROM pages WHERE last_job_id=$1::uuid ORDER BY fetched_at DESC LIMIT $2 OFFSET $3",
+            "SELECT url,title,structured->>'page_type' AS page_type,length(coalesce(text,'')) AS text_length,rendered_with,needs_parse,fetched_at FROM pages WHERE last_job_id=$1::uuid ORDER BY fetched_at DESC LIMIT $2 OFFSET $3",
             job_id, limit, offset,
         )
         total = await connection.fetchval("SELECT count(*) FROM pages WHERE last_job_id=$1::uuid", job_id)
     return PageListOut(items=[PageOut(**dict(row)) for row in rows], total=total)
+
+
+@router.get("/{job_id}/pages/content", response_model=PageContentOut)
+async def get_page_content(
+    job_id: str,
+    request: Request,
+    url: str = Query(min_length=1),
+    user: User = Depends(current_user),
+) -> PageContentOut:
+    await _owned_job(request.app.state.db, job_id, user)
+    async with request.app.state.db.acquire() as connection:
+        row = await connection.fetchrow(
+            """SELECT url,title,structured->>'page_type' AS page_type,text,fetched_at
+               FROM pages WHERE last_job_id=$1::uuid AND url=$2""",
+            job_id, url,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Scraped content is not available for this URL")
+    return PageContentOut(**dict(row))
 
 
 @router.post("/{job_id}/start", response_model=JobOut)
@@ -311,9 +317,46 @@ async def cancel_crawl(job_id: str, request: Request, user: User = Depends(curre
     await _owned_job(request.app.state.db, job_id, user)
     async with request.app.state.db.acquire() as connection:
         job = await connection.fetchrow(
-            "UPDATE crawl_jobs SET status = 'cancelled' WHERE id = $1::uuid AND status IN ('discovering', 'ready', 'running') RETURNING *",
+            "UPDATE crawl_jobs SET status = 'cancelled', error = 'Stopped by user', resume_at = NULL WHERE id = $1::uuid AND status IN ('discovering', 'ready', 'running', 'paused', 'throttled') RETURNING *",
             job_id,
         )
-    if not job:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This crawl has already finished")
+        if not job:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This crawl has already finished")
+        await connection.execute("UPDATE pipeline_runs SET status='cancelled',error='Stopped by user',resume_at=NULL WHERE crawl_job_id=$1::uuid", job_id)
+        await connection.execute("UPDATE pipeline_stages SET status='cancelled',error='Stopped by user',finished_at=now() WHERE pipeline_run_id IN (SELECT id FROM pipeline_runs WHERE crawl_job_id=$1::uuid) AND status IN ('queued','running','paused','throttled')", job_id)
+    return _job_out(job)
+
+
+@router.post("/{job_id}/pause", response_model=JobOut)
+async def pause_crawl(job_id: str, request: Request, user: User = Depends(current_user)) -> JobOut:
+    await _owned_job(request.app.state.db, job_id, user)
+    async with request.app.state.db.acquire() as connection:
+        job = await connection.fetchrow(
+            """UPDATE crawl_jobs SET status='paused',error='Paused by user',resume_at=NULL
+               WHERE id=$1::uuid AND status IN ('discovering','ready','running','throttled') RETURNING *""",
+            job_id,
+        )
+        if not job:
+            raise HTTPException(status_code=409, detail="This crawl cannot be paused in its current state")
+        await connection.execute("UPDATE pipeline_runs SET status='paused',error='Paused by user',resume_at=NULL WHERE crawl_job_id=$1::uuid AND status IN ('running','throttled')", job_id)
+        await connection.execute("UPDATE pipeline_stages SET status='paused',error='Paused by user' WHERE pipeline_run_id IN (SELECT id FROM pipeline_runs WHERE crawl_job_id=$1::uuid) AND stage='crawl' AND status IN ('running','throttled')", job_id)
+    return _job_out(job)
+
+
+@router.post("/{job_id}/resume", response_model=JobOut)
+async def resume_crawl(job_id: str, background_tasks: BackgroundTasks, request: Request, user: User = Depends(current_user)) -> JobOut:
+    await _owned_job(request.app.state.db, job_id, user)
+    async with request.app.state.db.acquire() as connection:
+        has_queue = await connection.fetchval("SELECT EXISTS(SELECT 1 FROM crawl_urls WHERE job_id=$1::uuid)", job_id)
+        next_status = 'running' if has_queue else 'discovering'
+        job = await connection.fetchrow(
+            "UPDATE crawl_jobs SET status=$2,error=NULL,resume_at=NULL WHERE id=$1::uuid AND status='paused' RETURNING *",
+            job_id, next_status,
+        )
+        if not job:
+            raise HTTPException(status_code=409, detail="This crawl is not paused")
+        await connection.execute("UPDATE pipeline_runs SET status='running',error=NULL,resume_at=NULL WHERE crawl_job_id=$1::uuid AND status='paused'", job_id)
+        await connection.execute("UPDATE pipeline_stages SET status='running',error=NULL WHERE pipeline_run_id IN (SELECT id FROM pipeline_runs WHERE crawl_job_id=$1::uuid) AND stage='crawl' AND status='paused'", job_id)
+    if not has_queue:
+        background_tasks.add_task(discover_job, request.app, job_id, user.org_id, job['start_url'], decode_jsonb(job['options']))
     return _job_out(job)

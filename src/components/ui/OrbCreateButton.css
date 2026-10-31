@@ -1,0 +1,85 @@
+.orb-create-button {
+  --orb-light-x: 50%;
+  --orb-light-y: 50%;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  overflow: hidden;
+  border: 1px solid rgba(44, 61, 218, .88);
+  border-radius: .375rem;
+  background: #374af6;
+  padding: .75rem 1.25rem;
+  color: #fff;
+  font-size: .875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  box-shadow: 0 2px 7px rgba(55, 74, 246, .18);
+  transition: transform 180ms cubic-bezier(.23, 1, .32, 1), box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.orb-create-button::before,
+.orb-create-button::after {
+  position: absolute;
+  pointer-events: none;
+  content: '';
+}
+
+.orb-create-button::before {
+  z-index: -1;
+  inset: 0;
+  padding: 1px;
+  opacity: 0;
+  border-radius: inherit;
+  background: conic-gradient(from var(--orb-shine-angle), transparent 0deg 52deg, rgba(196, 208, 255, .3) 82deg, rgba(255, 255, 255, 1) 112deg, rgba(208, 218, 255, .72) 142deg, transparent 182deg 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  transition: opacity 180ms ease;
+}
+
+.orb-create-button::after {
+  z-index: 1;
+  inset: 1px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: calc(.375rem - 1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), inset 0 -1px 0 rgba(19, 29, 112, .18);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.orb-create-button > * { position: relative; z-index: 2; }
+
+.orb-create-button:hover:not(:disabled),
+.orb-create-button:focus-visible:not(:disabled) {
+  background: #374af6;
+  box-shadow: 0 6px 16px rgba(55, 74, 246, .31), 0 2px 7px rgba(55, 74, 246, .24);
+  transform: translateY(-1px);
+}
+
+.orb-create-button:hover:not(:disabled)::before,
+.orb-create-button:focus-visible:not(:disabled)::before { opacity: 1; animation: orb-create-rim-spin 1.9s linear infinite; }
+
+.orb-create-button:hover:not(:disabled)::after,
+.orb-create-button:focus-visible:not(:disabled)::after {
+  border-color: rgba(255, 255, 255, .58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .38), inset 0 -1px 0 rgba(19, 29, 112, .2), 0 0 15px rgba(194, 207, 255, .34);
+}
+
+.orb-create-button:active:not(:disabled) { transform: translateY(0); box-shadow: 0 2px 7px rgba(55, 74, 246, .18); }
+.orb-create-button:focus-visible { outline: 3px solid rgba(55, 74, 246, .28); outline-offset: 3px; }
+.orb-create-button:disabled { cursor: not-allowed; opacity: .45; }
+
+@property --orb-shine-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes orb-create-rim-spin { to { --orb-shine-angle: 360deg; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-create-button,
+  .orb-create-button::before,
+  .orb-create-button::after { transition: none; }
+  .orb-create-button:hover:not(:disabled)::before,
+  .orb-create-button:focus-visible:not(:disabled)::before { animation: none; }
+}
+.orb-create-button { --orb-shine-angle: 0deg; }
+

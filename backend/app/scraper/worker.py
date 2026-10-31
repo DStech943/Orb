@@ -7,11 +7,13 @@ import signal
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import asyncpg
 
 from app.config import Settings
+from app.pipeline import advance_completed_crawl, park_crawl_pipeline, resume_due_pipelines
+from app.scraper.discovery_service import run_discovery_job
 from app.scraper.extract import ExtractedPage, extract_html
 from app.scraper.fetcher import FetchError, FetchResult, Fetcher
 from app.scraper.render import RenderUnavailable, Renderer
@@ -41,6 +43,7 @@ class CrawlWorker:
         self.started_at = time.monotonic()
         self.completed = 0
         self.last_summary = 0.0
+        self.last_heartbeat = 0.0
 
     async def reap_stalled(self) -> None:
         async with self.pool.acquire() as connection:
@@ -68,8 +71,15 @@ class CrawlWorker:
                 """
                 WITH candidates AS (
                   SELECT cu.job_id, cu.url FROM crawl_urls cu JOIN crawl_jobs cj ON cj.id = cu.job_id
-                  WHERE cu.selected AND cu.status = 'pending' AND (cu.retry_after IS NULL OR cu.retry_after <= now())
+                  WHERE cu.selected
+                    AND cu.status = CASE WHEN $2 = 'render' THEN 'render_pending' ELSE 'pending' END
+                    AND (cu.retry_after IS NULL OR cu.retry_after <= now())
                     AND cj.status = 'running'
+                    AND NOT EXISTS (
+                      SELECT 1 FROM host_cooldowns hc
+                      WHERE hc.host = lower(split_part(split_part(cu.url, '://', 2), '/', 1))
+                        AND hc.resume_at > now()
+                    )
                   ORDER BY cu.job_id, CASE cu.page_type WHEN 'policy' THEN 1 WHEN 'page' THEN 2 WHEN 'blog' THEN 3 WHEN 'product' THEN 4 WHEN 'collection' THEN 5 ELSE 6 END, cu.url
                   FOR UPDATE OF cu SKIP LOCKED LIMIT $1
                 )
@@ -78,7 +88,7 @@ class CrawlWorker:
                 WHERE cu.job_id = c.job_id AND cu.url = c.url AND cj.id = cu.job_id
                 RETURNING cu.job_id::text, cj.org_id::text, cj.start_url, cu.url, cu.attempts, cu.throttled_count,
                   cu.page_type, cj.crawl_delay, cu.last_modified
-                """, maximum,
+                """, maximum, self.settings.worker_mode,
             )
         return [ClaimedUrl(**dict(record)) for record in records]
 
@@ -101,10 +111,30 @@ class CrawlWorker:
 
     async def _refresh_job(self, job_id: str) -> None:
         async with self.pool.acquire() as connection:
-            await connection.execute(
+            finished = await connection.fetchval(
                 """UPDATE crawl_jobs SET status='done' WHERE id=$1::uuid AND status='running' AND NOT EXISTS
-                (SELECT 1 FROM crawl_urls WHERE job_id=$1::uuid AND selected AND status IN ('pending','processing'))""", job_id,
+                (SELECT 1 FROM crawl_urls WHERE job_id=$1::uuid AND selected AND status IN ('pending','render_pending','processing')) RETURNING id""", job_id,
             )
+            if finished:
+                await advance_completed_crawl(connection, job_id)
+
+    async def _heartbeat(self) -> None:
+        now = time.monotonic()
+        if now - self.last_heartbeat < 10:
+            return
+        self.last_heartbeat = now
+        async with self.pool.acquire() as connection:
+            await connection.execute(
+                """INSERT INTO worker_heartbeats (worker_id,details) VALUES ('crawl-worker',$1::jsonb)
+                   ON CONFLICT (worker_id) DO UPDATE SET updated_at=now(),details=EXCLUDED.details""",
+                {"completed": self.completed, "inflight": len(self.inflight)},
+            )
+
+    async def _resume_due_work(self) -> None:
+        async with self.pool.acquire() as connection:
+            discovery_jobs = await resume_due_pipelines(connection)
+        for job in discovery_jobs:
+            await run_discovery_job(self.pool, self.fetcher, self.settings, job["id"])
 
     async def _upsert_page(self, item: ClaimedUrl, response: FetchResult, extracted: ExtractedPage, html: str, rendered_with: str) -> None:
         canonical = urljoin(response.final_url, extracted.canonical_url) if extracted.canonical_url else response.final_url
@@ -133,13 +163,18 @@ class CrawlWorker:
         response = await self.fetcher.fetch(item.url, crawl_delay=min(10.0, item.crawl_delay or self.settings.crawl_delay))
         cooldown = await self.fetcher.note_response(response)
         if response.status_code in {429, 503}:
-            throttled = item.throttled_count + 1
-            if throttled >= 8:
-                await self._finish(item, "failed", error="rate limited", http_status=response.status_code, count_throttle=True)
-                outcome = "failed-rate-limited"
-            else:
-                await self._finish(item, "pending", error="rate limited", http_status=response.status_code, retry_seconds=cooldown, count_throttle=True)
-                outcome = "throttled"
+            cooldown = max(cooldown or 30.0, 1.0)
+            host = urlsplit(item.url).hostname or ""
+            async with self.pool.acquire() as connection:
+                await connection.execute(
+                    """INSERT INTO host_cooldowns (host,resume_at,http_status,reason)
+                       VALUES ($1,now()+($2 * interval '1 second'),$3,'rate limited')
+                       ON CONFLICT (host) DO UPDATE SET resume_at=GREATEST(host_cooldowns.resume_at,EXCLUDED.resume_at),http_status=EXCLUDED.http_status,reason=EXCLUDED.reason,updated_at=now()""",
+                    host, cooldown, response.status_code,
+                )
+                await park_crawl_pipeline(connection, item.job_id, cooldown, f"{host} rate limited; resumes automatically")
+            await self._finish(item, "pending", error="rate limited", http_status=response.status_code, retry_seconds=cooldown, count_throttle=True)
+            outcome = "throttled"
             logger.info("crawl_url job_id=%s url=%s outcome=%s status=%s fetch_ms=%d cooldown=%s", item.job_id, item.url, outcome, response.status_code, response.elapsed_seconds * 1000, cooldown)
             return
         if response.status_code >= 400:
@@ -163,7 +198,7 @@ class CrawlWorker:
                     await self._finish(item, "skipped", error=str(exc), http_status=response.status_code)
                     return
             elif len(response.body) > 20_000:
-                await self._finish(item, "skipped", error="needs javascript rendering", http_status=response.status_code)
+                await self._finish(item, "render_pending", error="queued for isolated javascript renderer", http_status=response.status_code)
                 return
             if len(extracted.text) < 80:
                 await self._finish(item, "skipped", error="extracted text shorter than 80 characters", http_status=response.status_code)
@@ -202,6 +237,8 @@ class CrawlWorker:
         logger.info("crawl_summary states=%s queue_depth=%s pages_per_second=%.3f host_delay=%s", states, depth, rates, await self.fetcher.throttle.snapshot())
 
     async def run_once(self) -> int:
+        await self._heartbeat()
+        await self._resume_due_work()
         await self.reap_stalled()
         claimed = await self.claim(self.settings.worker_concurrency)
         await asyncio.gather(*(self.process(item) for item in claimed))
@@ -209,6 +246,8 @@ class CrawlWorker:
 
     async def run_forever(self) -> None:
         while not self.stopping.is_set():
+            await self._heartbeat()
+            await self._resume_due_work()
             await self.reap_stalled()
             slots = self.settings.worker_concurrency - len(self.inflight)
             for item in await self.claim(slots):

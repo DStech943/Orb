@@ -27,10 +27,6 @@ import { useToast } from "../context/ToastContext";
 
 const tabs = [
   { id: "profile", label: "Profile" },
-  { id: "business", label: "Business" },
-  { id: "voice", label: "Brand voice" },
-  { id: "products", label: "Products" },
-  { id: "sources", label: "Sources" },
   { id: "team", label: "Team" },
   { id: "billing", label: "Billing" },
 ];

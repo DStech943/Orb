@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
+import httpx
+from selectolax.parser import HTMLParser
+
+from app.config import Settings
 from app.scraper.fetcher import FetchError, Fetcher
+
+
+logger = logging.getLogger(__name__)
+
+
+class ShopifyAdminUnavailable(RuntimeError):
+    pass
 
 
 @dataclass(slots=True)
@@ -15,6 +27,145 @@ class ShopifyProduct:
     description: str
     text: str
     structured: dict[str, Any]
+
+
+@dataclass(slots=True)
+class ShopifyResource:
+    url: str
+    title: str
+    text: str
+    page_type: str
+    structured: dict[str, Any]
+
+
+def admin_domain(value: str) -> str:
+    parsed = urlsplit(value if "://" in value else f"https://{value}")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ShopifyAdminUnavailable("SHOPIFY_THE_DEARIST_DOMAIN must be a valid Shopify admin domain")
+    return host
+
+
+def _plain_html(value: str | None) -> str:
+    return HTMLParser(value or "").text(separator=" ", strip=True)
+
+
+def _money(value: Any) -> tuple[str, str]:
+    """Return a display-safe amount and ISO currency from Shopify MoneyV2 data."""
+    if not isinstance(value, dict):
+        return "", ""
+    return str(value.get("amount") or ""), str(value.get("currencyCode") or "")
+
+
+def _admin_credentials(settings: Settings, domain: str | None, access_token: str | None) -> tuple[str, str]:
+    domain = domain or settings.shopify_the_dearist_domain
+    access_token = access_token or settings.shopify_the_dearist_token
+    if not domain or not access_token:
+        raise ShopifyAdminUnavailable("Set SHOPIFY_THE_DEARIST_DOMAIN and SHOPIFY_THE_DEARIST_TOKEN in backend/.env")
+    return admin_domain(domain), access_token
+
+
+async def _admin_query(
+    settings: Settings, query: str, variables: dict[str, Any], *, domain: str | None = None, access_token: str | None = None,
+) -> dict[str, Any]:
+    store_domain, token = _admin_credentials(settings, domain, access_token)
+    endpoint = f"https://{store_domain}/admin/api/{settings.shopify_admin_api_version}/graphql.json"
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                endpoint,
+                headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+                json={"query": query, "variables": variables},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPError as exc:
+        raise ShopifyAdminUnavailable(f"Shopify Admin API request failed: {exc}") from exc
+    if payload.get("errors"):
+        raise ShopifyAdminUnavailable(f"Shopify Admin API rejected the request: {payload['errors']}")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ShopifyAdminUnavailable("Shopify Admin API returned no data")
+    return data
+
+
+async def list_admin_resources(
+    settings: Settings, maximum: int = 250, *, domain: str | None = None, access_token: str | None = None,
+) -> list[ShopifyResource]:
+    """Read brand knowledge through the authenticated Admin API, never storefront HTML."""
+    first = max(1, min(maximum, 250))
+    products_data = await _admin_query(settings, """
+    query ImportOrbProducts($first: Int!) {
+      products(first: $first) { nodes { id handle title descriptionHtml vendor productType
+        variants(first: 100) { nodes { title sku price { amount currencyCode } availableForSale } } } }
+    }
+    """, {"first": first}, domain=domain, access_token=access_token)
+
+    content_data: dict[str, Any] = {}
+    try:
+        content_data = await _admin_query(settings, """
+        query ImportOrbContent($first: Int!) {
+      pages(first: $first) { nodes { id handle title body updatedAt } }
+      articles(first: $first) { nodes { id handle title body publishedAt blog { handle } } }
+        }
+        """, {"first": first}, domain=domain, access_token=access_token)
+    except ShopifyAdminUnavailable as exc:
+        logger.warning("Shopify content import skipped: %s", exc)
+
+    policy_data: dict[str, Any] = {}
+    try:
+        policy_data = await _admin_query(settings, """
+        query ImportOrbPolicies {
+          shop { shopPolicies { id title body url type updatedAt } }
+        }
+        """, {}, domain=domain, access_token=access_token)
+    except ShopifyAdminUnavailable as exc:
+        logger.warning("Shopify policy import skipped: %s", exc)
+
+    store_host, _ = _admin_credentials(settings, domain, access_token)
+    storefront = f"https://{store_host}"
+    resources: list[ShopifyResource] = []
+    for product in products_data.get("products", {}).get("nodes", []):
+        handle = product.get("handle")
+        if not handle:
+            continue
+        variants = product.get("variants", {}).get("nodes", []) or []
+        variant_text = "\n".join(
+            f"- {row.get('title') or 'Default'} | SKU: {row.get('sku') or ''} | Price: {' '.join(part for part in _money(row.get('price')) if part)} | Available: {bool(row.get('availableForSale'))}"
+            for row in variants
+        )
+        description = _plain_html(product.get("descriptionHtml"))
+        resources.append(ShopifyResource(
+            url=f"{storefront}/products/{handle}",
+            title=product.get("title") or handle,
+            text=f"# {product.get('title') or handle}\n\n{description}\n\n## Variants\n{variant_text}",
+            page_type="product", structured={"shopify_admin": product},
+        ))
+    for page in content_data.get("pages", {}).get("nodes", []):
+        handle = page.get("handle")
+        if handle:
+            resources.append(ShopifyResource(
+                url=f"{storefront}/pages/{handle}", title=page.get("title") or handle,
+                text=f"# {page.get('title') or handle}\n\n{_plain_html(page.get('body'))}", page_type="page",
+                structured={"shopify_admin": page},
+            ))
+    for article in content_data.get("articles", {}).get("nodes", []):
+        handle, blog = article.get("handle"), (article.get("blog") or {}).get("handle")
+        if handle and blog:
+            resources.append(ShopifyResource(
+                url=f"{storefront}/blogs/{blog}/{handle}", title=article.get("title") or handle,
+                text=f"# {article.get('title') or handle}\n\n{_plain_html(article.get('body'))}", page_type="blog",
+                structured={"shopify_admin": article},
+            ))
+    for policy in (policy_data.get("shop") or {}).get("shopPolicies", []) or []:
+        if isinstance(policy, dict) and policy.get("body"):
+            policy_name = policy.get("type") or "policy"
+            resources.append(ShopifyResource(
+                url=policy.get("url") or f"{storefront}/policies/{policy_name}", title=policy.get("title") or policy_name,
+                text=f"# {policy.get('title') or policy_name}\n\n{_plain_html(policy.get('body'))}", page_type="policy",
+                structured={"shopify_admin": policy, "policy_type": policy_name},
+            ))
+    return resources[:maximum]
 
 
 async def is_shopify_store(fetcher: Fetcher, start_url: str) -> bool:

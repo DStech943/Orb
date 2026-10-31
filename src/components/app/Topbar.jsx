@@ -7,7 +7,7 @@ import useAsync from '../../hooks/useAsync'
 import { listBrands } from '../../services/brands'
 import { useAuth } from '../../context/AuthContext'
 
-const titles = { '/app': 'Overview', '/app/sops': 'SOPs', '/app/faqs': 'FAQs', '/app/products': 'Products', '/app/settings': 'Settings' }
+const titles = { '/app': 'Overview', '/app/workspace': 'Brand workspace', '/app/sops': 'SOPs', '/app/flows': 'Flows', '/app/faqs': 'FAQs', '/app/products': 'Products', '/app/tools': 'Tools', '/app/settings': 'Settings' }
 
 export default function Topbar({ onMenu }) {
   const location = useLocation(); const navigate = useNavigate(); const { user, logout } = useAuth(); const title = titles[location.pathname] || 'Orb'
