@@ -236,12 +236,12 @@ class Discoverer:
         return parser, sitemap_urls, delay
 
     async def _walk_sitemaps(self, sitemap_urls: list[str], start_url: str, limit: int) -> tuple[list[tuple[str, str | None]], dict[str, Any]]:
-        found: list[tuple[str, str | None]] = []
+        documents: list[list[tuple[str, str | None]]] = []
         queue = list(sitemap_urls)
         seen: set[str] = set()
         summary: dict[str, Any] = {"sitemaps_read": 0, "sitemaps_failed": 0, "total_urls": 0, "sitemaps": []}
         max_sitemaps = 80
-        while queue and len(seen) < max_sitemaps and len(found) < limit * 3:
+        while queue and len(seen) < max_sitemaps:
             sitemap = _sitemap_request_url(queue.pop(0), start_url)
             if not sitemap or sitemap in seen or not is_same_site(sitemap, start_url):
                 continue
@@ -268,11 +268,23 @@ class Discoverer:
                     len(response.body),
                     len(locations),
                 )
+            except DiscoveryThrottled as exc:
+                # A partial sitemap is already enough to start a constrained
+                # crawl. Do not discard it because one later sitemap endpoint
+                # asks us to slow down; the queued URLs will honour the shared
+                # host cooldown before they are fetched.
+                if documents:
+                    summary["sitemaps_failed"] += 1
+                    summary["sitemaps"].append({"url": sitemap, "status": exc.status_code, "bytes": 0, "entries": 0, "error": str(exc)})
+                    logger.warning("Sitemap rate limited after partial discovery url=%s status=%s", sitemap, exc.status_code)
+                    break
+                raise
             except (FetchError, UnsafeUrl, OSError) as exc:
                 summary["sitemaps_failed"] += 1
                 summary["sitemaps"].append({"url": sitemap, "status": None, "bytes": 0, "entries": 0, "error": str(exc)})
                 logger.warning("Sitemap fetch failed url=%s status=None bytes=0 loc_entries=0 exception=%s", sitemap, exc)
                 continue
+            entries: list[tuple[str, str | None]] = []
             for location, last_modified in locations:
                 if is_index:
                     child_sitemap = _sitemap_request_url(location, sitemap)
@@ -287,10 +299,21 @@ class Discoverer:
                 normalized = normalize_url(html.unescape(location), sitemap)
                 if not normalized or not is_same_site(normalized, start_url):
                     continue
-                else:
-                    found.append((normalized, last_modified))
-                    if len(found) >= limit * 3:
-                        break
+                entries.append((normalized, last_modified))
+            if entries:
+                documents.append(entries)
+        # Shopify sitemap indexes commonly list products first. Round-robin
+        # across every leaf sitemap before applying the user's page limit, so
+        # a small crawl can still include policy and support pages.
+        found: list[tuple[str, str | None]] = []
+        candidate_limit = min(2000, max(limit * 3, 30))
+        for offset in range(max((len(entries) for entries in documents), default=0)):
+            for entries in documents:
+                if offset < len(entries):
+                    found.append(entries[offset])
+                    if len(found) >= candidate_limit:
+                        summary["total_urls"] = len(found)
+                        return found, summary
         summary["total_urls"] = len(found)
         return found, summary
 
@@ -318,13 +341,25 @@ class Discoverer:
             raise ValueError("Enter a valid public http(s) URL")
         limit = max(1, limit)
         robots, sitemap_urls, crawl_delay = await self._robots(start_url)
-        candidates: list[tuple[str, str | None]] = [(start_url, None)]
+        candidates: list[tuple[str, str | None]] = []
         sitemap_candidates, summary = await self._walk_sitemaps(sitemap_urls, start_url, limit)
         candidates.extend(sitemap_candidates)
         sitemap_known = {url for url, _ in sitemap_candidates}
-        probed, probes = await self._probe_policy_paths(start_url, sitemap_known)
-        candidates.extend((candidate, None) for candidate in probed)
-        summary["probes"] = probes
+        # Sitemap URLs are the site's preferred, low-request discovery path.
+        # Optional policy probes add needless storefront requests and can make
+        # an otherwise successful Shopify discovery hit a 429 before the queue
+        # is ever persisted. Only use them when the site supplied no usable
+        # sitemap pages.
+        if sitemap_candidates:
+            candidates.append((start_url, None))
+            summary["probes"] = []
+            summary["policy_probes_skipped"] = True
+        else:
+            candidates.append((start_url, None))
+            probed, probes = await self._probe_policy_paths(start_url, sitemap_known)
+            candidates.extend((candidate, None) for candidate in probed)
+            summary["probes"] = probes
+            summary["policy_probes_skipped"] = False
         summary["fallback_used"] = False
         # Probed policy pages are useful, but they are not a replacement for
         # a one-level link crawl when the site supplied no usable sitemap.
@@ -366,7 +401,11 @@ class Discoverer:
             unique.add(normalized)
             allowed = robots.can_fetch(self.user_agent, normalized)
             urls.append(DiscoveredUrl(normalized, classify_url(normalized), allowed, None if allowed else "Blocked by robots.txt", sitemap_last_modified))
-            if len(urls) >= limit:
-                break
+        # Start with support and policy material when a site supplied a sitemap.
+        # It gives the knowledge pipeline useful content sooner and prevents a
+        # protected storefront landing page from blocking every later URL.
+        priority = {"policy": 0, "page": 1, "collection": 2, "blog": 3, "product": 4, "other": 5}
+        urls.sort(key=lambda item: (priority.get(item.page_type, 99), item.url))
+        urls = urls[:limit]
         summary["total_urls"] = len(urls)
         return DiscoveryResult(start_url=start_url, crawl_delay=crawl_delay, urls=urls, summary=summary)

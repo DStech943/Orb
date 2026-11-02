@@ -43,9 +43,22 @@ async def generate_json(pool: asyncpg.Pool, settings: Settings, system: str, pro
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(endpoint, headers={"Authorization": f"Bearer {api_key}"}, json=body)
+            # Some OpenAI-compatible models intermittently reject the optional
+            # structured-output hint with a server error. The system prompt still
+            # requires JSON, so retry once without that provider-specific field.
+            if response.status_code >= 500:
+                fallback_body = {key: value for key, value in body.items() if key != "response_format"}
+                response = await client.post(endpoint, headers={"Authorization": f"Bearer {api_key}"}, json=fallback_body)
             response.raise_for_status()
             payload = response.json()
         content = payload["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in {401, 403}:
+            raise GenerationUnavailable(
+                "LLM authentication failed. Ensure ORB_LLM_API_KEY belongs to the provider in LLM_BASE_URL."
+            ) from exc
+        raise GenerationUnavailable(f"Generation request failed with HTTP {status}") from exc
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise GenerationUnavailable(f"Generation request failed: {exc}") from exc
     try:

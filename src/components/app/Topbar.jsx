@@ -10,10 +10,13 @@ import { useAuth } from '../../context/AuthContext'
 const titles = { '/app': 'Overview', '/app/workspace': 'Brand workspace', '/app/sops': 'SOPs', '/app/flows': 'Flows', '/app/faqs': 'FAQs', '/app/products': 'Products', '/app/tools': 'Tools', '/app/settings': 'Settings' }
 
 export default function Topbar({ onMenu }) {
-  const location = useLocation(); const navigate = useNavigate(); const { user, logout } = useAuth(); const title = titles[location.pathname] || 'Orb'
+  const location = useLocation(); const navigate = useNavigate(); const { user, logout } = useAuth()
   const { data: fetchedBrands, loading: brandsLoading } = useAsync(listBrands, [])
   const brands = Array.isArray(fetchedBrands) ? fetchedBrands : []
   const [brandId, setBrandId] = useState(() => localStorage.getItem('orb_selected_brand') || '')
+  const selectedBrand = brands.find((brand) => brand.id === brandId)
+  const agentName = selectedBrand?.ai_agent_name || 'AI'
+  const title = location.pathname === '/app/chat' ? `Chat with ${agentName}` : titles[location.pathname] || 'Orb'
   useEffect(() => {
     if (!brands.length) return
     if (!brands.some((brand) => brand.id === brandId)) setBrandId(brands[0].id)
@@ -23,6 +26,7 @@ export default function Topbar({ onMenu }) {
     if (!brand) return
     localStorage.setItem('orb_selected_brand', brand.id)
     localStorage.setItem('orb_selected_brand_name', brand.name)
+    localStorage.setItem('orb_selected_brand_agent_name', brand.ai_agent_name || '')
     window.dispatchEvent(new CustomEvent('orb:brand-changed', { detail: brand }))
   }, [brandId, brands])
   const signOut = async () => { await logout(); navigate('/login') }

@@ -139,6 +139,7 @@ const DotGrid = ({
   intro = true,
   mouseInteraction = true,
   clickShock = true,
+  ambient = false,
   paused = false,
   dpr,
   className = '',
@@ -149,8 +150,8 @@ const DotGrid = ({
   const settings = {
     dotSize,
     gap,
-    baseColor,
-    activeColor,
+    baseColor: ambient ? '#e1e4fd' : baseColor,
+    activeColor: ambient ? '#7067ed' : activeColor,
     proximity,
     strength,
     bounce,
@@ -167,6 +168,7 @@ const DotGrid = ({
     intro,
     mouseInteraction,
     clickShock,
+    ambient,
     paused,
     dpr
   };
@@ -235,6 +237,7 @@ const DotGrid = ({
     let visible = true;
     let raf = 0;
     let last = 0;
+    let nextAmbientShock = 0;
 
     const rebuild = () => {
       const { dotSize: size, gap: spacing } = settingsRef.current;
@@ -484,6 +487,7 @@ const DotGrid = ({
     };
 
     const settled = now => {
+      if (settingsRef.current.ambient && !reduced) return false;
       if (shocks.length) return false;
       if (introStart !== null) {
         if (introStart < 0 || (now - introStart) / 1000 < 1.6) return false;
@@ -502,6 +506,11 @@ const DotGrid = ({
       raf = 0;
       if (settingsRef.current.paused || !visible) return;
       if (introStart !== null && introStart < 0) introStart = now;
+      if (settingsRef.current.ambient && !reduced && now >= nextAmbientShock) {
+        shocks.push({ x: Math.random() * view.width, y: Math.random() * view.height, start: now });
+        if (shocks.length > 6) shocks.shift();
+        nextAmbientShock = now + 2300 + Math.random() * 1200;
+      }
       const dt = Math.min(0.05, (now - last) / 1000 || 0);
       last = now;
       step(dt, now);
@@ -630,7 +639,7 @@ const DotGrid = ({
 
   useEffect(() => {
     engineRef.current?.refresh();
-  }, [baseColor, activeColor, swell, stretch, glow, shape, fade, opacity, paused, proximity, mouseInteraction]);
+  }, [baseColor, activeColor, swell, stretch, glow, shape, fade, opacity, paused, proximity, mouseInteraction, ambient]);
 
   return (
     <div className={`dot-grid ${className}`.trim()} style={style}>

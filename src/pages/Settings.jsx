@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Mail, Plus, Save, Trash2, Upload } from "lucide-react";
+import { Mail, Mic, MicOff, Plus, Save, Trash2, Upload } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import Avatar from "../components/ui/Avatar";
 import Button from "../components/ui/Button";
@@ -24,6 +24,7 @@ import {
 } from "../services/generation";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, ORB_VOICE_WAKE_STATUS_EVENT, setOrbVoiceWakeEnabled, supportsOrbVoiceWake } from "../lib/orbVoiceWake";
 
 const tabs = [
   { id: "profile", label: "Profile" },
@@ -68,6 +69,9 @@ export default function Settings() {
   });
   const [inviteOpen, setInviteOpen] = useState(false);
   const [deleteAccount, setDeleteAccount] = useState(false);
+  const [voiceWakeEnabled, setVoiceWakeEnabled] = useState(isOrbVoiceWakeEnabled);
+  const [voiceWakeSaving, setVoiceWakeSaving] = useState(false);
+  const [voiceWakeStatus, setVoiceWakeStatus] = useState("off");
   const products = useAsync(listProducts, []);
   const sources = useAsync(listSources, []);
   useEffect(() => {
@@ -80,6 +84,16 @@ export default function Settings() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+  useEffect(() => {
+    const onVoiceWakeChange = (event) => setVoiceWakeEnabled(Boolean(event.detail?.enabled));
+    const onVoiceWakeStatus = (event) => setVoiceWakeStatus(event.detail?.status || "off");
+    window.addEventListener(ORB_VOICE_WAKE_EVENT, onVoiceWakeChange);
+    window.addEventListener(ORB_VOICE_WAKE_STATUS_EVENT, onVoiceWakeStatus);
+    return () => {
+      window.removeEventListener(ORB_VOICE_WAKE_EVENT, onVoiceWakeChange);
+      window.removeEventListener(ORB_VOICE_WAKE_STATUS_EVENT, onVoiceWakeStatus);
+    };
+  }, []);
   const tabChange = (next) => {
     if (dirty && !window.confirm("You have unsaved changes. Leave this tab?"))
       return;
@@ -107,6 +121,38 @@ export default function Settings() {
     setProduct({ name: "", price: "", url: "", description: "" });
     products.reload();
     showToast("Product saved.");
+  };
+  const toggleVoiceWake = async () => {
+    if (voiceWakeEnabled) {
+      setOrbVoiceWakeEnabled(false);
+      setVoiceWakeEnabled(false);
+      setVoiceWakeStatus("off");
+      showToast("Hey Orb voice activation turned off.");
+      return;
+    }
+    if (!supportsOrbVoiceWake()) {
+      showToast("Voice activation is not supported by this browser. Use Chrome or Edge.", "error");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast("This browser cannot request microphone access.", "error");
+      return;
+    }
+    setVoiceWakeSaving(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      stream.getTracks().forEach((track) => track.stop());
+      setOrbVoiceWakeEnabled(true);
+      setVoiceWakeEnabled(true);
+      setVoiceWakeStatus("starting");
+      showToast("Hey Orb is ready. Say “Hey Orb” while this tab is open.");
+    } catch {
+      showToast("Microphone permission is required to enable Hey Orb.", "error");
+    } finally {
+      setVoiceWakeSaving(false);
+    }
   };
   return (
     <div className="mx-auto max-w-6xl">
@@ -147,6 +193,30 @@ export default function Settings() {
                 <Save size={16} />
                 Save profile
               </Button>
+              <section className="mt-3 rounded-xl border border-primary/15 bg-primary-tint/35 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-primary">
+                      {voiceWakeEnabled ? <Mic size={16} /> : <MicOff size={16} />}
+                      <p className="text-xs font-extrabold uppercase tracking-wider">Voice activation</p>
+                    </div>
+                    <h3 className="mt-1 font-extrabold text-ink">Wake Orb with your voice</h3>
+                    <p className="mt-1 text-sm text-muted">Say “Hey Orb” to open the page guide on supported browsers. It pauses when the tab is hidden and is unavailable in the flow builder.</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={voiceWakeEnabled}
+                    aria-label="Enable Hey Orb voice activation"
+                    disabled={voiceWakeSaving}
+                    onClick={toggleVoiceWake}
+                    className={`relative mt-1 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 ${voiceWakeEnabled ? "bg-primary" : "bg-slate-300"} disabled:cursor-wait disabled:opacity-60`}
+                  >
+                    <span className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${voiceWakeEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </button>
+                </div>
+                <p className="mt-3 border-t border-primary/10 pt-3 text-xs text-muted">{voiceWakeEnabled && voiceWakeStatus === "listening" ? "Listening for “Hey Orb” while this app tab is visible." : voiceWakeEnabled && voiceWakeStatus === "starting" ? "Starting your microphone…" : voiceWakeEnabled && voiceWakeStatus === "retrying" ? "Reconnecting to speech recognition…" : voiceWakeEnabled && voiceWakeStatus === "paused" ? "Paused until you return to an eligible app page." : voiceWakeStatus === "permission-denied" ? "Microphone access was denied, so voice activation has been turned off." : voiceWakeStatus === "microphone-unavailable" ? "No microphone is available, so voice activation has been turned off." : voiceWakeStatus === "unsupported" ? "This browser does not support voice activation, so it has been turned off." : voiceWakeStatus === "connection-error" ? "Speech recognition could not connect. Orb will retry while this tab stays open." : voiceWakeEnabled ? "Preparing voice activation for this browser…" : "Off by default. Enabling it requests microphone permission and saves the choice only in this browser."}</p>
+              </section>
               <div className="mt-8 border-t border-red-200 pt-5">
                 <h3 className="font-extrabold text-red-700">Danger zone</h3>
                 <p className="mt-1 text-sm text-muted">

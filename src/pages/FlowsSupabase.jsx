@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, ChevronRight, ClipboardCheck, Database, Diamond, FileUp, GitBranch, GripVertical, Link2, Loader2, MessageSquareText, Mic, Minus, Play, Plus, RotateCcw, Save, Search, Send, Trash2, Upload, UserRoundCheck, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowLeft, ArrowUp, ChevronRight, ClipboardCheck, Database, Diamond, FileUp, GitBranch, GripVertical, Link2, Loader2, MessageSquareText, Mic, Minus, Play, Plus, RotateCcw, Save, Search, Trash2, Upload, UserRoundCheck, X } from 'lucide-react'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
@@ -10,6 +11,7 @@ import ThoughtLine from '../components/ui/ThoughtLine'
 import useAsync from '../hooks/useAsync'
 import { activeBrandName, assistFlow, createFlow, deleteFlow, hasOrbApi, listFlows, updateFlow } from '../services/orbApi'
 import { useToast } from '../context/ToastContext'
+import { startBrowserDictation } from '../lib/browserDictation'
 
 const STAGE = { width: 1920, height: 840 }, MIN_ZOOM = .35, MAX_ZOOM = 1.4, DEFAULT_ZOOM = 1
 const types = [
@@ -22,6 +24,7 @@ const types = [
 ].map(([type, label, icon, tone, hint]) => ({ type, label, icon, tone, hint }))
 const id = (type) => `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 const block = (type) => types.find((item) => item.type === type) || types[2]
+const flowSnapshot = (flow) => JSON.stringify(flow)
 const outputs = (node) => Array.isArray(node.outputs) ? node.outputs : node.type === 'condition' ? ['Yes', 'No'] : ['Next']
 function OrbMark({ className = '', backgroundColor = '#ffffff', size = 0.85 }) {
   return <span className={`orb-mark ${className}`} aria-hidden="true"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor={backgroundColor} size={size} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span>
@@ -85,6 +88,12 @@ function makeImportedFlows(text, label) {
 function OrbComposer({ prompt, setPrompt, messages, working, completed, onSubmit }) {
   const suggestions = ['Handle a customer asking when an out-of-stock item will return', 'Create an order-delivery exception flow', 'Build a flow for a return or exchange request']
   const [typedPrompt, setTypedPrompt] = useState('')
+  const [dictating, setDictating] = useState(false)
+  const [dictationError, setDictationError] = useState('')
+  const dictationRef = useRef(null)
+  const promptRef = useRef('')
+  useEffect(() => { promptRef.current = prompt }, [prompt])
+  useEffect(() => () => dictationRef.current?.stop(), [])
   useEffect(() => {
     if (prompt || working) { setTypedPrompt(''); return undefined }
     let example = 0, cursor = 0, deleting = false, timeout
@@ -106,6 +115,19 @@ function OrbComposer({ prompt, setPrompt, messages, working, completed, onSubmit
     return () => window.clearTimeout(timeout)
   }, [prompt, working])
   const submit = (event) => { event.preventDefault(); onSubmit() }
+  const startDictation = () => {
+    if (working) return
+    if (dictationRef.current) { dictationRef.current.stop(); return }
+    const base = promptRef.current.trim()
+    setDictationError('')
+    setDictating(true)
+    const session = startBrowserDictation({
+      onTranscript: (transcript) => setPrompt([base, transcript].filter(Boolean).join(base && transcript ? ' ' : '')),
+      onError: (error) => setDictationError(error === 'unsupported' ? 'Speech-to-text is not supported in this browser.' : error === 'not-allowed' || error === 'service-not-allowed' ? 'Microphone permission is required for dictation.' : 'Could not start speech-to-text.'),
+      onEnd: () => { dictationRef.current = null; setDictating(false) },
+    })
+    if (session) dictationRef.current = session
+  }
   return (
     <aside className="orb-composer flex min-h-0 flex-col border-l border-slate-200 bg-white xl:w-[350px]">
       <header className="border-b border-slate-200 px-4 py-3">
@@ -127,8 +149,8 @@ function OrbComposer({ prompt, setPrompt, messages, working, completed, onSubmit
         <div className={`orb-prompt-field rounded-xl border p-3 transition ${working ? 'opacity-70' : ''}`}>
           <textarea value={prompt} disabled={working} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSubmit() } }} rows={2} className="block w-full resize-none bg-transparent text-sm leading-5 outline-none disabled:cursor-not-allowed" placeholder="" />
           {!prompt && !working && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPrompt}<i /></span>}
-          <div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><span className="orb-prompt-field__icon" aria-hidden="true"><Mic size={16} /></span><button type="submit" disabled={working || !prompt.trim()} aria-label="Create flow with Orb" className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{working ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}</button></div>
-        </div>
+          <div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><button type="button" onClick={startDictation} disabled={working} aria-label={dictating ? 'Stop dictation' : 'Start dictation'} title={dictating ? 'Stop dictation' : 'Dictate your flow request'} className={`orb-prompt-field__icon grid h-8 w-8 place-items-center rounded-lg transition hover:bg-primary/10 disabled:cursor-not-allowed ${dictating ? 'bg-primary/10 text-primary' : ''}`}>{dictating ? <X size={16} /> : <Mic size={16} />}</button><button type="submit" disabled={working || !prompt.trim()} aria-label="Create flow with Orb" className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{working ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={17} strokeWidth={2.5} />}</button></div>
+        </div>{dictationError && <p role="alert" className="pt-2 text-[11px] font-medium text-red-600">{dictationError}</p>}
       </form>
     </aside>
   )
@@ -148,6 +170,14 @@ function ToolIcon({ name }) {
     {tool.icon && <img src={tool.icon} alt="" className="h-3.5 w-3.5" onError={(event) => { event.currentTarget.style.display = 'none'; event.currentTarget.nextElementSibling?.classList.remove('hidden') }} />}
     <Database size={12} className={tool.icon ? 'hidden text-slate-500' : 'text-slate-500'} />
   </span>
+}
+function FlowDenoisePreview({ nodes, zoom, phase }) {
+  return <div className="flow-denoise-preview" data-phase={phase} aria-hidden="true">
+    <span className="flow-denoise-preview__grain" />
+    {nodes.map((node, index) => <span key={node.id} className="flow-denoise-preview__node" style={{ left: Number(node.x || 0) * zoom, top: Number(node.y || 0) * zoom, width: CARD.width * zoom, height: CARD.height * zoom, animationDelay: `${Math.min(index * 55, 360)}ms` }}>
+      <i /><i /><i />
+    </span>)}
+  </div>
 }
 function Node({ node, selected, connecting, onSelect, onChange, onDrag, onConnect }) {
   const item = block(node.type), Icon = item.icon, nodeOutputs = outputs(node), nodeTools = Array.isArray(node.tools) && node.tools.length ? node.tools : extractTools(node.body), geometry = visibleNodeGeometry.get(node.id) || { left: node.x, top: node.y, height: CARD.height, output: new Map() }
@@ -182,15 +212,70 @@ function arrangeImportedFlow(flow) {
   return { ...flow, nodes: flow.nodes.map((node) => positions.has(node.id) ? { ...node, ...positions.get(node.id) } : node), import_source: { ...flow.import_source, layout_version: 2 } }
 }
 
+// Keep sibling branches clear of one another whenever a connector gains or loses
+// a card. This deliberately preserves a card's horizontal placement so manual
+// canvas positioning still feels predictable, while moving the entire branch
+// vertically as one unit.
+const BRANCH_VERTICAL_GAP = CARD.height + 56
+function spaceConnectedBranches(flow, sourceId) {
+  const byId = new Map(flow.nodes.map((node) => [node.id, node]))
+  const source = byId.get(sourceId)
+  if (!source) return flow
+
+  const outgoing = (nodeId) => flow.edges
+    .filter((edge) => edge.source === nodeId && byId.has(edge.target))
+    .sort((left, right) => {
+      const node = byId.get(nodeId)
+      const ports = outputs(node)
+      const leftIndex = ports.indexOf(left.sourcePort)
+      const rightIndex = ports.indexOf(right.sourcePort)
+      return (leftIndex < 0 ? ports.length : leftIndex) - (rightIndex < 0 ? ports.length : rightIndex)
+    })
+
+  const positions = new Map()
+  const visited = new Set([sourceId])
+  const layoutFrom = (nodeId, parentY) => {
+    const branches = outgoing(nodeId)
+    if (!branches.length) return
+    const firstY = Math.max(48, parentY - ((branches.length - 1) * BRANCH_VERTICAL_GAP) / 2)
+    branches.forEach((edge, index) => {
+      const targetId = edge.target
+      if (visited.has(targetId)) return
+      visited.add(targetId)
+      const targetY = firstY + index * BRANCH_VERTICAL_GAP
+      positions.set(targetId, targetY)
+      layoutFrom(targetId, targetY)
+    })
+  }
+
+  layoutFrom(sourceId, Number(source.y || 0))
+  if (!positions.size) return flow
+  return {
+    ...flow,
+    nodes: flow.nodes.map((node) => positions.has(node.id) ? { ...node, y: positions.get(node.id) } : node)
+  }
+}
+
 function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
+  const navigate = useNavigate()
   const [orbPanelOpen, setOrbPanelOpen] = useState(withOrb)
   useEffect(() => { setOrbPanelOpen(withOrb) }, [withOrb])
-  const { showToast } = useToast(); const [draft, setDraftState] = useState(flow), [historyStatus, setHistoryStatus] = useState({ undo: 0, redo: 0 }), [selectedId, setSelectedId] = useState(flow.nodes[0]?.id || null), [from, setFrom] = useState(null), [zoom, setZoom] = useState(DEFAULT_ZOOM), [orbPrompt, setOrbPrompt] = useState(''), [orbMessages, setOrbMessages] = useState([]), [orbWorking, setOrbWorking] = useState(false), [orbComplete, setOrbComplete] = useState(false); const stageRef = useRef(null), zoomControlsRef = useRef(null), dragRef = useRef(null), fittedFlowRef = useRef(null), draftRef = useRef(flow), historyRef = useRef({ past: [], future: [] }); const selected = draft.nodes.find((node) => node.id === selectedId); const canvasSize = useMemo(() => ({ width: Math.max(STAGE.width, ...draft.nodes.map((node) => Number(node.x || 0) + CARD.width + 420)), height: Math.max(STAGE.height, ...draft.nodes.map((node) => Number(node.y || 0) + CARD.height + 260)) }), [draft.nodes]); const editorGeometry = useMemo(() => geometryFor(draft.nodes, draft.edges), [draft.nodes, draft.edges]); visibleNodeGeometry = editorGeometry
+  const { showToast } = useToast(); const [draft, setDraftState] = useState(flow), [historyStatus, setHistoryStatus] = useState({ undo: 0, redo: 0 }), [selectedId, setSelectedId] = useState(flow.nodes[0]?.id || null), [from, setFrom] = useState(null), [zoom, setZoom] = useState(DEFAULT_ZOOM), [orbPrompt, setOrbPrompt] = useState(''), [orbMessages, setOrbMessages] = useState([]), [orbWorking, setOrbWorking] = useState(false), [orbComplete, setOrbComplete] = useState(false), [flowReveal, setFlowReveal] = useState(null), [leaveAction, setLeaveAction] = useState(null); const stageRef = useRef(null), zoomControlsRef = useRef(null), dragRef = useRef(null), fittedFlowRef = useRef(null), draftRef = useRef(flow), historyRef = useRef({ past: [], future: [] }), savedSnapshotRef = useRef(flowSnapshot(flow)), flowRevealTimersRef = useRef([]); const selected = draft.nodes.find((node) => node.id === selectedId); const canvasSize = useMemo(() => ({ width: Math.max(STAGE.width, ...draft.nodes.map((node) => Number(node.x || 0) + CARD.width + 420)), height: Math.max(STAGE.height, ...draft.nodes.map((node) => Number(node.y || 0) + CARD.height + 260)) }), [draft.nodes]); const editorGeometry = useMemo(() => geometryFor(draft.nodes, draft.edges), [draft.nodes, draft.edges]); const isDirty = flowSnapshot(draft) !== savedSnapshotRef.current; visibleNodeGeometry = editorGeometry
   const publishHistory = (history) => { historyRef.current = history; setHistoryStatus({ undo: history.past.length, redo: history.future.length }) }
   const setDraft = (change) => setDraftState((current) => { const next = typeof change === 'function' ? change(current) : change; if (JSON.stringify(next) === JSON.stringify(current)) return current; draftRef.current = next; publishHistory({ past: [...historyRef.current.past, current].slice(-60), future: [] }); return next })
   const undo = () => { const { past, future } = historyRef.current; if (!past.length) return; const current = draftRef.current, previous = past[past.length - 1]; draftRef.current = previous; publishHistory({ past: past.slice(0, -1), future: [current, ...future] }); setDraftState(previous); setFrom(null) }
   const redo = () => { const { past, future } = historyRef.current; if (!future.length) return; const next = future[0]; const current = draftRef.current; draftRef.current = next; publishHistory({ past: [...past, current].slice(-60), future: future.slice(1) }); setDraftState(next); setFrom(null) }
-  useEffect(() => { setDraft((current) => arrangeImportedFlow(current)) }, [])
+  useEffect(() => { setDraft((current) => { const next = arrangeImportedFlow(current); savedSnapshotRef.current = flowSnapshot(next); return next }) }, [])
+  useEffect(() => () => flowRevealTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
+  const revealGeneratedFlow = (next) => {
+    flowRevealTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    setFlowReveal({ phase: 'denoise', nodes: next.nodes })
+    requestAnimationFrame(() => setFlowReveal((current) => current ? { ...current, phase: 'resolve' } : current))
+    flowRevealTimersRef.current = [
+      window.setTimeout(() => setFlowReveal((current) => current ? { ...current, phase: 'sharp' } : current), 520),
+      window.setTimeout(() => setFlowReveal(null), 1180),
+    ]
+  }
   useEffect(() => {
     fittedFlowRef.current = null
     const frame = requestAnimationFrame(() => {
@@ -215,23 +300,24 @@ function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
       const result = await assistFlow(prompt)
       const [generated] = makeImportedFlows(result.csv, 'Created with Orb')
       if (!generated) throw new Error('Orb did not return a usable flow table.')
-      const next = { ...generated, title: result.title || generated.title, import_source: { ...generated.import_source, kind: 'orb', prompt } }
-      setDraft(next); setSelectedId(next.nodes[0]?.id || null); setFrom(null)
+      const next = { ...generated, title: result.title || generated.title, import_source: { ...generated.import_source, kind: 'orb', prompt, references_used: result.references_used || {} } }
+      setDraft(next); setSelectedId(next.nodes[0]?.id || null); setFrom(null); revealGeneratedFlow(next)
       requestAnimationFrame(() => { const viewport = stageRef.current?.parentElement?.parentElement; if (!viewport || !next.nodes.length) return; const right = Math.max(...next.nodes.map((node) => Number(node.x || 0) + CARD.width)) + 64; const bottom = Math.max(...next.nodes.map((node) => Number(node.y || 0) + CARD.height)) + 64; setZoom(zoomLimit(Math.min(DEFAULT_ZOOM, (viewport.clientWidth - 48) / right, (viewport.clientHeight - 48) / bottom))) })
-      setOrbMessages((messages) => [...messages, { role: 'assistant', text: `I created “${next.title}”. Review the cards on the canvas, then save when it looks right.` }]); setOrbComplete(true)
+      const usedReferences = Object.entries(result.references_used || {}).filter(([, count]) => Number(count) > 0).map(([kind, count]) => `${count} ${kind === 'faqs' ? 'FAQ' : kind === 'sops' ? 'SOP' : 'template'}${Number(count) === 1 ? '' : 's'}`).join(', ')
+      setOrbMessages((messages) => [...messages, { role: 'assistant', text: `I created “${next.title}”${usedReferences ? ` using ${usedReferences}` : ''}. Review the cards on the canvas, then save when it looks right.` }]); setOrbComplete(true)
     } catch (error) {
       setOrbMessages((messages) => [...messages, { role: 'assistant', text: error.message || 'I could not create that flow. Please try a more specific request.' }]); setOrbComplete(false); showToast(error.message || 'Could not create the flow.')
     } finally { setOrbWorking(false) }
   }
-  const select = (nodeId) => { if (from && from.nodeId !== nodeId) { setDraft((current) => ({ ...current, edges: [...current.edges, { id: id('edge'), source: from.nodeId, sourcePort: from.port, target: nodeId }] })); setFrom(null) }; setSelectedId(nodeId) }
+  const select = (nodeId) => { if (from && from.nodeId !== nodeId) { setDraft((current) => spaceConnectedBranches({ ...current, edges: [...current.edges, { id: id('edge'), source: from.nodeId, sourcePort: from.port, target: nodeId }] }, from.nodeId)); setFrom(null) }; setSelectedId(nodeId) }
   const connect = (nodeId, index = 0) => { const node = draft.nodes.find((item) => item.id === nodeId); if (node) { setSelectedId(nodeId); setFrom({ nodeId, port: outputs(node)[index] || 'Next' }) } }
-  const add = (type, position) => { const selectedNode = draft.nodes.find((node) => node.id === selectedId); if (!from && selectedNode && outputs(selectedNode).length > 1) { showToast('Choose a specific output connector before adding the next card.'); return } const source = from || (selectedNode ? { nodeId: selectedNode.id, port: outputs(selectedNode)[0] } : null), sourceNode = source && draft.nodes.find((node) => node.id === source.nodeId), portIndex = sourceNode ? Math.max(0, outputs(sourceNode).indexOf(source.port)) : 0, nodeId = id('node'); setDraft((current) => { const node = { id: nodeId, type, title: block(type).label, body: '', outputs: type === 'condition' ? ['Yes', 'No'] : ['Next'], x: Math.max(32, position?.x ?? (sourceNode ? sourceNode.x + 340 : 120 + current.nodes.length * 60)), y: Math.max(48, position?.y ?? (sourceNode ? sourceNode.y + portIndex * 118 : 140 + current.nodes.length * 48)) }; return { ...current, nodes: [...current.nodes, node], edges: source ? [...current.edges, { id: id('edge'), source: source.nodeId, sourcePort: source.port, target: nodeId }] : current.edges } }); setSelectedId(nodeId); setFrom(null) }
+  const add = (type, position) => { const selectedNode = draft.nodes.find((node) => node.id === selectedId); if (!from && selectedNode && outputs(selectedNode).length > 1) { showToast('Choose a specific output connector before adding the next card.'); return } const source = from || (selectedNode ? { nodeId: selectedNode.id, port: outputs(selectedNode)[0] } : null), sourceNode = source && draft.nodes.find((node) => node.id === source.nodeId), portIndex = sourceNode ? Math.max(0, outputs(sourceNode).indexOf(source.port)) : 0, nodeId = id('node'); setDraft((current) => { const node = { id: nodeId, type, title: block(type).label, body: '', outputs: type === 'condition' ? ['Yes', 'No'] : ['Next'], x: Math.max(32, position?.x ?? (sourceNode ? sourceNode.x + 340 : 120 + current.nodes.length * 60)), y: Math.max(48, position?.y ?? (sourceNode ? sourceNode.y + portIndex * BRANCH_VERTICAL_GAP : 140 + current.nodes.length * 48)) }; const next = { ...current, nodes: [...current.nodes, node], edges: source ? [...current.edges, { id: id('edge'), source: source.nodeId, sourcePort: source.port, target: nodeId }] : current.edges }; return source ? spaceConnectedBranches(next, source.nodeId) : next }); setSelectedId(nodeId); setFrom(null) }
   const drag = (event, nodeId) => { if (event.button !== 0) return; const node = draft.nodes.find((item) => item.id === nodeId); if (!node) return; event.currentTarget.setPointerCapture?.(event.pointerId); dragRef.current = { nodeId, x: node.x, y: node.y, pointerX: event.clientX, pointerY: event.clientY } }
   const move = (event) => { const state = dragRef.current; if (state) update(state.nodeId, { x: Math.max(24, state.x + (event.clientX - state.pointerX) / zoom), y: Math.max(30, state.y + (event.clientY - state.pointerY) / zoom) }) }
   const removeSelected = () => { if (!selectedId) return; setDraft((current) => ({ ...current, nodes: current.nodes.filter((node) => node.id !== selectedId), edges: current.edges.filter((edge) => edge.source !== selectedId && edge.target !== selectedId) })); setSelectedId(null); setFrom(null) }
   const addPort = (nodeId = selectedId) => { if (nodeId) setDraft((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, outputs: [...outputs(node), `Path ${outputs(node).length + 1}`] } : node) })) }
-  const removePort = (nodeId, port) => { if (!nodeId || !port) return; setDraft((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, outputs: outputs(node).filter((item) => item !== port) } : node), edges: current.edges.filter((edge) => edge.source !== nodeId || edge.sourcePort !== port) })); setFrom((current) => current?.nodeId === nodeId && current.port === port ? null : current) }
-  const disconnectPort = (nodeId, port) => { if (!nodeId || !port) return; setDraft((current) => ({ ...current, edges: current.edges.filter((edge) => edge.source !== nodeId || edge.sourcePort !== port) })); setFrom((current) => current?.nodeId === nodeId && current.port === port ? null : current) }
+  const removePort = (nodeId, port) => { if (!nodeId || !port) return; setDraft((current) => spaceConnectedBranches({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, outputs: outputs(node).filter((item) => item !== port) } : node), edges: current.edges.filter((edge) => edge.source !== nodeId || edge.sourcePort !== port) }, nodeId)); setFrom((current) => current?.nodeId === nodeId && current.port === port ? null : current) }
+  const disconnectPort = (nodeId, port) => { if (!nodeId || !port) return; setDraft((current) => spaceConnectedBranches({ ...current, edges: current.edges.filter((edge) => edge.source !== nodeId || edge.sourcePort !== port) }, nodeId)); setFrom((current) => current?.nodeId === nodeId && current.port === port ? null : current) }
   useEffect(() => { const addListener = (event) => addPort(event.detail?.nodeId); const cutListener = (event) => disconnectPort(event.detail?.nodeId, event.detail?.port); const removeListener = (event) => removePort(event.detail?.nodeId, event.detail?.port); window.addEventListener('orb:add-flow-port', addListener); window.addEventListener('orb:disconnect-flow-port', cutListener); window.addEventListener('orb:remove-flow-port', removeListener); return () => { window.removeEventListener('orb:add-flow-port', addListener); window.removeEventListener('orb:disconnect-flow-port', cutListener); window.removeEventListener('orb:remove-flow-port', removeListener) } }, [])
   useEffect(() => { const listener = (event) => { const tag = event.target?.tagName?.toLowerCase(), typing = tag === 'input' || tag === 'textarea' || event.target?.isContentEditable; if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return } if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return } if (event.key !== 'Delete' || typing) return; if (from) { event.preventDefault(); removePort(from.nodeId, from.port) } else if (selectedId) { event.preventDefault(); removeSelected() } }; window.addEventListener('keydown', listener); return () => window.removeEventListener('keydown', listener) }, [selectedId, from])
   useEffect(() => { const canvas = stageRef.current; if (!canvas) return undefined; const listener = (event) => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); event.stopPropagation(); setZoom((value) => zoomLimit(value + (event.deltaY < 0 ? .08 : -.08))) }; canvas.addEventListener('wheel', listener, { passive: false }); return () => canvas.removeEventListener('wheel', listener) }, [])
@@ -273,17 +359,34 @@ function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
   }, [orbPanelOpen])
   const drop = (event) => { event.preventDefault(); const type = event.dataTransfer.getData('application/orb-flow-block'); if (!type || !stageRef.current) return; const box = stageRef.current.getBoundingClientRect(); add(type, { x: (event.clientX - box.left) / zoom, y: (event.clientY - box.top) / zoom }) }
   const disconnectedCards = () => { const start = draft.nodes.find((node) => node.type === 'trigger'); if (!start) return ['a Trigger card']; const known = new Set(draft.nodes.map((node) => node.id)); const nextBySource = new Map(); draft.edges.filter((edge) => known.has(edge.source) && known.has(edge.target)).forEach((edge) => nextBySource.set(edge.source, [...(nextBySource.get(edge.source) || []), edge.target])); const reachable = new Set([start.id]); const pending = [start.id]; while (pending.length) { const current = pending.shift(); (nextBySource.get(current) || []).forEach((target) => { if (!reachable.has(target)) { reachable.add(target); pending.push(target) } }) } return draft.nodes.filter((node) => node.id !== start.id && !reachable.has(node.id)).map((node) => node.title || block(node.type).label) }
-  const persist = async () => { const disconnected = disconnectedCards(); if (disconnected.length) { showToast(`Connect every card to the Trigger before saving. Unconnected: ${disconnected.slice(0, 2).join(', ')}${disconnected.length > 2 ? ` +${disconnected.length - 2} more` : ''}.`); return } try { let result; if (hasOrbApi) result = draft.id ? await updateFlow(draft.id, draft) : await createFlow(draft); else { const existing = localFlows(activeBrandName()), saved = draft.id ? draft : { ...draft, id: id('flow') }; saveLocal(activeBrandName(), draft.id ? existing.map((item) => item.id === saved.id ? saved : item) : [saved, ...existing]); result = { point: { id: saved.id, payload: saved } } } const next = normalise(result.point); setDraft(next); onSaved(next); showToast('Flow saved to Supabase.') } catch (error) { showToast(error.message || 'Could not save this flow.') } }
+  const persist = async () => { const disconnected = disconnectedCards(); if (disconnected.length) { showToast(`Connect every card to the Trigger before saving. Unconnected: ${disconnected.slice(0, 2).join(', ')}${disconnected.length > 2 ? ` +${disconnected.length - 2} more` : ''}.`); return false } try { let result; if (hasOrbApi) result = draft.id ? await updateFlow(draft.id, draft) : await createFlow(draft); else { const existing = localFlows(activeBrandName()), saved = draft.id ? draft : { ...draft, id: id('flow') }; saveLocal(activeBrandName(), draft.id ? existing.map((item) => item.id === saved.id ? saved : item) : [saved, ...existing]); result = { point: { id: saved.id, payload: saved } } } const next = normalise(result.point); savedSnapshotRef.current = flowSnapshot(next); setDraft(next); onSaved(next); showToast('Flow saved to Supabase.'); return true } catch (error) { showToast(error.message || 'Could not save this flow.'); return false } }
+  const requestLeave = (action) => { if (!isDirty) { action(); return } setLeaveAction(() => action) }
+  const discardAndLeave = () => { const action = leaveAction; savedSnapshotRef.current = flowSnapshot(draft); setLeaveAction(null); action?.() }
+  const saveAndLeave = async () => { const action = leaveAction; if (await persist()) { setLeaveAction(null); action?.() } }
+  useEffect(() => { const beforeUnload = (event) => { if (!isDirty) return undefined; event.preventDefault(); event.returnValue = ''; return '' }; window.addEventListener('beforeunload', beforeUnload); return () => window.removeEventListener('beforeunload', beforeUnload) }, [isDirty])
+  useEffect(() => {
+    const guardNavigation = (event) => {
+      if (!isDirty || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      const link = event.target instanceof Element ? event.target.closest('a[href]') : null
+      if (!link || link.target === '_blank' || link.hasAttribute('download')) return
+      const destination = new URL(link.href, window.location.href)
+      if (destination.origin !== window.location.origin || `${destination.pathname}${destination.search}${destination.hash}` === `${window.location.pathname}${window.location.search}${window.location.hash}`) return
+      event.preventDefault(); event.stopPropagation()
+      requestLeave(() => navigate(`${destination.pathname}${destination.search}${destination.hash}`))
+    }
+    document.addEventListener('click', guardNavigation, true)
+    return () => document.removeEventListener('click', guardNavigation, true)
+  }, [isDirty, navigate])
   const erase = async () => { if (!draft.id) return onBack(); try { if (hasOrbApi) await deleteFlow(draft.id); else saveLocal(activeBrandName(), localFlows(activeBrandName()).filter((item) => item.id !== draft.id)); onDeleted(); showToast('Flow deleted.') } catch (error) { showToast(error.message || 'Could not delete this flow.') } }
-  return <div className="page-enter -mx-1 flex min-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-    <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-3"><button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-600 hover:text-primary"><ArrowLeft size={16} />All flows</button><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="min-w-[220px] flex-1 bg-transparent text-lg font-extrabold outline-none" aria-label="Flow title" /><span className="rounded-full bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary">{draft.status}</span><Button size="sm" variant="purple" onClick={persist}><Save size={15} />Save flow</Button></header>
+  return <><Modal open={Boolean(leaveAction)} onClose={() => setLeaveAction(null)} title="Save this flow?"><div className="space-y-5"><p className="text-sm leading-6 text-slate-600">You have unsaved changes. Save them before leaving this flow, or discard the changes and continue.</p><div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" size="sm" onClick={discardAndLeave}>Discard flow</Button><Button type="button" variant="purple" size="sm" onClick={saveAndLeave}><Save size={15} />Save &amp; leave</Button></div></div></Modal><div className="page-enter -mx-1 flex min-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-3"><button type="button" onClick={() => requestLeave(onBack)} className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-600 hover:text-primary"><ArrowLeft size={16} />All flows</button><input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className="min-w-[220px] flex-1 bg-transparent text-lg font-extrabold outline-none" aria-label="Flow title" /><span className="rounded-full bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary">{draft.status}</span><Button size="sm" variant="purple" onClick={persist}><Save size={15} />Save flow</Button></header>
     <div className={`grid min-h-0 flex-1 ${orbPanelOpen ? 'xl:grid-cols-[238px_minmax(0,1fr)_350px]' : 'lg:grid-cols-[238px_1fr]'}`}>
       <aside className="border-b border-slate-200 bg-slate-50 p-4 lg:border-b-0 lg:border-r"><div className="flex items-center justify-between"><h2 className="font-extrabold">Toolbox</h2><span className="text-[10px] text-slate-400">v1.0</span></div><p className="mt-1 text-xs leading-5 text-slate-500">Click or drag a block onto the canvas.</p><label className="mt-4 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400"><Search size={15} /><input className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Search blocks" /></label><p className="mt-5 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Flow cards</p><div className="mt-3 grid grid-cols-2 gap-2">{types.map((item) => <ToolboxCard key={item.type} item={item} onAdd={add} />)}</div><div className="mt-6 border-t border-slate-200 pt-4"><p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Selected card</p>{selected ? <><p className="mt-2 text-sm font-bold text-slate-800">{selected.title || block(selected.type).label}</p><div className="mt-3 grid gap-2"><button type="button" onClick={() => connect(selectedId)} className={`inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-bold ${from ? 'border-primary bg-primary-tint text-primary' : 'border-slate-200 bg-white text-slate-700'}`}><Link2 size={14} />{from ? 'Choose destination' : 'Link default path'}</button><button type="button" onClick={() => addPort()} className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700"><Plus size={14} />Add connector</button><button type="button" onClick={removeSelected} className="inline-flex items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-bold text-red-600"><Trash2 size={14} />Delete card</button></div><p className="mt-3 text-[11px] leading-4 text-slate-500">Click an output to select its path. Press Delete to remove that connector.</p></> : <p className="mt-2 text-xs text-slate-500">Select a card to edit it.</p>}</div>{draft.id && <button type="button" onClick={erase} className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-red-600"><Trash2 size={14} />Delete this flow</button>}</aside>
-      <main className={`relative min-w-0 overflow-auto bg-[#fcfdff] p-5 ${orbWorking ? 'orb-flow-generating' : ''}`}>{/* DotGrid rendering is intentionally paused; restore this exact layer later: {withOrb && !orbComplete && <div className="flow-dot-grid" aria-hidden="true"><DotGrid baseColor="#3a3446" activeColor="#ffffff" shape="circle" dotSize={5} gap={18} proximity={140} strength={1} bounce={0.6} tension={0.4} returnDuration={0.8} shockRadius={320} shockStrength={5} swell={0.8} stretch={0.5} glow={0.5} fade={0} intro={true} /></div>} */}<div className="relative z-10" style={{ width: canvasSize.width * zoom, height: canvasSize.height * zoom }}><div ref={stageRef} onDragOver={(event) => event.preventDefault()} onDrop={drop} onPointerMove={move} onPointerUp={() => { dragRef.current = null }} onPointerCancel={() => { dragRef.current = null }} className="absolute left-0 top-0 overflow-visible" style={{ width: canvasSize.width, minHeight: canvasSize.height, transform: `scale(${zoom})`, transformOrigin: 'top left' }}><Edges nodes={draft.nodes} edges={draft.edges} stage={canvasSize} />{draft.nodes.map((node) => <Node key={node.id} node={node} selected={node.id === selectedId} connecting={Boolean(from)} onSelect={select} onChange={update} onDrag={drag} onConnect={connect} />)}{from && <div className="absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-full border border-primary/20 bg-white px-3 py-1.5 text-xs font-bold text-primary shadow-sm">Choose a card to connect the {from.port} path <button type="button" onClick={() => setFrom(null)} className="ml-2 text-slate-500"><X size={14} /></button></div>}</div></div>{zoom !== DEFAULT_ZOOM && <button type="button" onClick={() => setZoom(DEFAULT_ZOOM)} className="absolute right-4 top-4 z-30 inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm"><RotateCcw size={14} />Reset view</button>}<div ref={zoomControlsRef} className="absolute bottom-4 right-4 z-30 flex items-center overflow-hidden rounded-md border border-slate-200 bg-white shadow-md"><button type="button" disabled={zoom <= MIN_ZOOM} onClick={() => setZoom((value) => zoomLimit(value - .1))} className="grid h-9 w-9 place-items-center border-r border-slate-200"><Minus size={16} /></button><span className="min-w-14 text-center text-xs font-bold text-slate-600">{Math.round(zoom * 100)}%</span><button type="button" disabled={zoom >= MAX_ZOOM} onClick={() => setZoom((value) => zoomLimit(value + .1))} className="grid h-9 w-9 place-items-center border-l border-slate-200"><Plus size={16} /></button></div></main>
+      <main className={`relative min-w-0 overflow-auto bg-[#fcfdff] p-5 ${(orbWorking || flowReveal) ? 'orb-flow-generating' : ''}`}>{(orbWorking || flowReveal) && <div className="flow-dot-grid" aria-hidden="true"><DotGrid baseColor="#9c43fe" activeColor="#4cc2e9" shape="circle" dotSize={5} gap={18} proximity={140} strength={1} bounce={0.6} tension={0.4} returnDuration={0.8} shockRadius={320} shockStrength={5} swell={0.8} stretch={0.5} glow={0.5} fade={0} intro ambient /></div>}<div className="relative z-10" style={{ width: canvasSize.width * zoom, height: canvasSize.height * zoom }}><div ref={stageRef} onDragOver={(event) => event.preventDefault()} onDrop={drop} onPointerMove={move} onPointerUp={() => { dragRef.current = null }} onPointerCancel={() => { dragRef.current = null }} className={`absolute left-0 top-0 overflow-visible ${flowReveal ? `flow-stage--${flowReveal.phase}` : ''}`} style={{ width: canvasSize.width, minHeight: canvasSize.height, transform: `scale(${zoom})`, transformOrigin: 'top left' }}><Edges nodes={draft.nodes} edges={draft.edges} stage={canvasSize} />{draft.nodes.map((node) => <Node key={node.id} node={node} selected={node.id === selectedId} connecting={Boolean(from)} onSelect={select} onChange={update} onDrag={drag} onConnect={connect} />)}{from && <div className="absolute left-1/2 top-5 z-20 -translate-x-1/2 rounded-full border border-primary/20 bg-white px-3 py-1.5 text-xs font-bold text-primary shadow-sm">Choose a card to connect the {from.port} path <button type="button" onClick={() => setFrom(null)} className="ml-2 text-slate-500"><X size={14} /></button></div>}</div>{flowReveal && <FlowDenoisePreview nodes={flowReveal.nodes} zoom={zoom} phase={flowReveal.phase} />}</div>{zoom !== DEFAULT_ZOOM && <button type="button" onClick={() => setZoom(DEFAULT_ZOOM)} className="absolute right-4 top-4 z-30 inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm"><RotateCcw size={14} />Reset view</button>}<div ref={zoomControlsRef} className="absolute bottom-4 right-4 z-30 flex items-center overflow-hidden rounded-md border border-slate-200 bg-white shadow-md"><button type="button" disabled={zoom <= MIN_ZOOM} onClick={() => setZoom((value) => zoomLimit(value - .1))} className="grid h-9 w-9 place-items-center border-r border-slate-200"><Minus size={16} /></button><span className="min-w-14 text-center text-xs font-bold text-slate-600">{Math.round(zoom * 100)}%</span><button type="button" disabled={zoom >= MAX_ZOOM} onClick={() => setZoom((value) => zoomLimit(value + .1))} className="grid h-9 w-9 place-items-center border-l border-slate-200"><Plus size={16} /></button></div></main>
       {!orbPanelOpen && withOrb && <button type="button" onClick={() => setOrbPanelOpen(true)} className="create-panel-launcher" aria-label="Open Create with Orb"><OrbMark className="orb-launcher-icon" /></button>}
       {orbPanelOpen && <OrbComposerShell prompt={orbPrompt} setPrompt={setOrbPrompt} messages={orbMessages} working={orbWorking} completed={orbComplete} onSubmit={createWithOrb} onClose={() => setOrbPanelOpen(false)} />}
     </div>
-  </div>
+  </div></>
 }
 
 function ImportModal({ open, onClose, onImport }) { const [text, setText] = useState(''), [label, setLabel] = useState('Pasted flow table'), [error, setError] = useState(''); const fileRef = useRef(null); const readFile = async (event) => { const file = event.target.files?.[0]; if (file) { setLabel(file.name); setText(await file.text()) } }; const submit = async () => { try { setError(''); if (!text.trim()) throw new Error('Paste a CSV or tab-separated table first.'); await onImport(text, label); setText(''); onClose() } catch (cause) { setError(cause.message || 'Could not import this flow.') } }; return <Modal open={open} onClose={onClose} title="Upload flow"><div className="space-y-4"><p className="text-sm leading-6 text-slate-600">Paste a CSV or tab-separated Google Sheet. Each row becomes a named branch; matching Checks become one shared Condition card.</p><input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="hidden" onChange={readFile} /><Button type="button" variant="outline" size="sm" className="w-full" onClick={() => fileRef.current?.click()}><FileUp size={15} />Choose CSV / TSV file</Button><input value={label} onChange={(event) => setLabel(event.target.value)} className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-primary" placeholder="Source label" /><textarea value={text} onChange={(event) => setText(event.target.value)} className="h-48 w-full resize-y rounded-md border border-slate-200 p-3 font-mono text-xs outline-none focus:border-primary" placeholder="Lifecycle stage,Flow title,Query category,Pre-requisites,Checks,Situation,Actions,Level,Customer message (template),Escalate to" />{error && <p className="text-sm font-semibold text-red-600">{error}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button><Button type="button" variant="purple" size="sm" onClick={submit}><Upload size={15} />Create visual flow</Button></div></div></Modal> }

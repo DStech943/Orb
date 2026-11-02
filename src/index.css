@@ -104,7 +104,8 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 }
 
 .orb-composer__prompt .orb-prompt-field { position: relative; min-height: 112px; border-color: #c7ceff; background: #edf0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 1px 2px rgba(55, 74, 246, .08); }
-.orb-composer__prompt textarea { min-height: 48px; color: #25358d; }
+.orb-composer__prompt textarea, .orb-guide-prompt textarea { min-height: 48px; color: #25358d; }
+.orb-guide-prompt .orb-prompt-field { position: relative; min-height: 112px; border-color: #c7ceff; background: #edf0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 1px 2px rgba(55, 74, 246, .08); }
 .orb-prompt-field__typing { position: absolute; top: .75rem; left: .75rem; right: .75rem; overflow: hidden; color: #5969ba; font-size: .875rem; line-height: 1.25rem; white-space: nowrap; pointer-events: none; }
 .orb-prompt-field__typing i { display: inline-block; width: 1px; height: 1em; margin-left: 2px; vertical-align: -2px; background: #5969ba; animation: orb-prompt-caret 850ms steps(1, end) infinite; }
 .orb-prompt-field__icon { display: grid; place-items: center; color: #6070bd; }
@@ -119,6 +120,21 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 
 @keyframes orb-prompt-caret { 50% { opacity: 0; } }
 
+.pipeline-progress__indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 34%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(99, 102, 241, .25), #6366f1 48%, rgba(56, 189, 248, .72));
+  animation: pipeline-progress-slide 1.7s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+
+@keyframes pipeline-progress-slide {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(220%); }
+}
+
 .orb-composer-close { position: absolute; z-index: 5; top: .75rem; right: .75rem; display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .375rem; color: #94a3b8; transition: color 160ms ease, background 160ms ease; }
 .orb-composer-close:hover { background: #f1f5f9; color: #334155; }
 .orb-composer-close:focus-visible { outline: 3px solid rgba(55, 74, 246, .25); outline-offset: 2px; }
@@ -131,10 +147,40 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 .create-panel-launcher { position: fixed; z-index: 40; right: 2rem; bottom: 4.75rem; display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 9999px; background: transparent; box-shadow: none; transition: transform 180ms ease; }
 .create-panel-launcher:hover { transform: translateY(-2px) scale(1.04); }
 .create-panel-launcher:focus-visible { outline: 3px solid rgba(55, 74, 246, .25); outline-offset: 3px; }
-.flow-dot-grid { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
+.flow-dot-grid { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; transform-origin: center; animation: flow-dot-grid-enter 560ms cubic-bezier(.16, 1, .3, 1) both; will-change: opacity, filter, transform; }
+@keyframes flow-dot-grid-enter { from { opacity: 0; filter: blur(8px); transform: scale(1.015); } to { opacity: 1; filter: blur(0); transform: scale(1); } }
+
+/* Generated flows first resolve as a soft, abstract layout, then crossfade
+   into the real editable cards. This gives Create with Orb a denoise-like
+   reveal without treating the flow itself as a generated bitmap. */
+.flow-stage--denoise, .flow-stage--resolve { opacity: .16; filter: blur(15px) saturate(1.25); pointer-events: none; }
+.flow-stage--sharp { pointer-events: none; animation: flow-stage-sharpen 640ms cubic-bezier(.16, 1, .3, 1) both; }
+.flow-denoise-preview { position: absolute; z-index: 20; inset: 0; overflow: hidden; pointer-events: none; }
+.flow-denoise-preview__grain { position: absolute; inset: -12%; opacity: .48; background-image: radial-gradient(circle, rgba(55,74,246,.5) 0 1px, transparent 1.7px), radial-gradient(circle, rgba(76,194,233,.48) 0 1px, transparent 1.8px); background-position: 0 0, 10px 13px; background-size: 18px 18px, 23px 23px; filter: blur(.25px); animation: flow-denoise-grain 740ms steps(6, end) infinite; }
+.flow-denoise-preview__node { position: absolute; display: grid; align-content: start; gap: 9%; padding: 11% 12%; overflow: hidden; border: 1px solid rgba(115, 105, 255, .4); border-radius: 10px; background: linear-gradient(125deg, rgba(156,67,254,.31), rgba(76,194,233,.25) 52%, rgba(55,74,246,.3)); box-shadow: 0 12px 28px rgba(55,74,246,.16); filter: blur(7px); opacity: 0; transform: scale(.94) rotate(-.5deg); animation: flow-denoise-node 520ms cubic-bezier(.16, 1, .3, 1) both; }
+.flow-denoise-preview__node i { display: block; height: 10%; border-radius: 999px; background: rgba(255,255,255,.78); }
+.flow-denoise-preview__node i:nth-child(2) { width: 76%; opacity: .72; }
+.flow-denoise-preview__node i:nth-child(3) { width: 58%; opacity: .48; }
+.flow-denoise-preview[data-phase='sharp'] { animation: flow-denoise-crossfade 660ms cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes flow-denoise-grain { 0% { transform: translate3d(-1.5%, -1%, 0); } 50% { transform: translate3d(1.5%, 1%, 0); } 100% { transform: translate3d(-.5%, 1.5%, 0); } }
+@keyframes flow-denoise-node { from { opacity: 0; filter: blur(18px); transform: scale(.86) rotate(-2deg); } to { opacity: .92; filter: blur(5px); transform: scale(1) rotate(0); } }
+@keyframes flow-denoise-crossfade { from { opacity: 1; filter: blur(0); } to { opacity: 0; filter: blur(13px); } }
+@keyframes flow-stage-sharpen { from { opacity: .2; filter: blur(12px) saturate(1.18); } to { opacity: 1; filter: blur(0) saturate(1); } }
+.orb-guide-panel { transform-origin: right bottom; animation: orb-guide-enter 220ms cubic-bezier(.16, 1, .3, 1) both; }
+.orb-guide-copy { font-family: inherit; font-size: .875rem; font-weight: 500; line-height: 1.25rem; color: rgb(71 85 105); }
+.orb-guide-greeting { animation: orb-guide-greeting-enter 620ms cubic-bezier(.22, 1, .36, 1) 140ms both; will-change: transform, opacity; }
+.orb-guide-thinking__dots { display: inline-flex; align-items: center; gap: 3px; height: 1em; }
+.orb-guide-thinking__dots i { width: 5px; height: 5px; border-radius: 9999px; background: #6374d7; animation: orb-guide-dot 1.05s ease-in-out infinite; }
+.orb-guide-thinking__dots i:nth-child(2) { animation-delay: 140ms; }
+.orb-guide-thinking__dots i:nth-child(3) { animation-delay: 280ms; }
+@keyframes orb-guide-enter { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes orb-guide-greeting-enter { 0% { opacity: 0; transform: translateY(48px) scale(.98); } 72% { opacity: 1; transform: translateY(-1px) scale(1); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes orb-guide-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .38; } 30% { transform: translateY(-3px); opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .orb-composer { animation: none; }
+  .orb-composer, .orb-guide-panel, .orb-guide-greeting, .orb-guide-thinking__dots i, .flow-dot-grid, .flow-stage--sharp, .flow-denoise-preview, .flow-denoise-preview__grain, .flow-denoise-preview__node, .pipeline-progress__indeterminate { animation: none; }
+  .flow-stage--denoise, .flow-stage--resolve, .flow-stage--sharp { opacity: 1; filter: none; pointer-events: auto; }
+  .flow-denoise-preview { display: none; }
 }
 .app-shell .border-ink, .app-shell .border-ink\/20, .app-shell .border-ink\/25 { border-color: rgb(226 232 240) !important; }
 .app-shell .border-2 { border-width: 1px; }

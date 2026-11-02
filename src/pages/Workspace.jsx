@@ -1,38 +1,26 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Trash2, Upload } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
-import Modal from '../components/ui/Modal'
 import Tabs from '../components/ui/Tabs'
 import Textarea from '../components/ui/Textarea'
 import BrandCategorySetup from '../components/app/BrandCategorySetup'
 import BrandVoiceSetup from '../components/app/BrandVoiceSetup'
-import SourcePicker from '../components/app/SourcePicker'
-import useAsync from '../hooks/useAsync'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { addSource, deleteProduct, listProducts, listSources, removeSource, saveProduct, seedSampleData } from '../services/generation'
 import { listBrands } from '../services/brands'
 import { hasOrbApi, setRemoteBrandProfile } from '../services/orbApi'
-
-const tabs = [
-  { id: 'business', label: 'Business' },
-  { id: 'voice', label: 'Brand voice' },
-  { id: 'products', label: 'Products' },
-  { id: 'sources', label: 'Sources' },
-]
+import AgentChat from './AgentChat'
 
 export default function Workspace() {
+  const location = useLocation()
   const { user } = useAuth()
   const { showToast } = useToast()
-  const [active, setActive] = useState('business')
-  const [productModal, setProductModal] = useState(false)
-  const [business, setBusiness] = useState({ id: '', name: '', website_url: '', support_email: '', description: '' })
+  const [active, setActive] = useState(() => new URLSearchParams(location.search).get('tab') === 'chat' ? 'chat' : 'business')
+  const [business, setBusiness] = useState({ id: '', name: '', website_url: '', support_email: '', description: '', ai_agent_name: '' })
   const [businessLoading, setBusinessLoading] = useState(true)
   const [savingBusiness, setSavingBusiness] = useState(false)
-  const [product, setProduct] = useState({ name: '', price: '', url: '', description: '' })
-  const products = useAsync(listProducts, [])
-  const sources = useAsync(listSources, [])
+  useEffect(() => { if (new URLSearchParams(location.search).get('tab') === 'chat') setActive('chat') }, [location.search])
 
   useEffect(() => {
     let live = true
@@ -44,7 +32,7 @@ export default function Workspace() {
         const activeId = window.localStorage.getItem('orb_selected_brand') || ''
         const brand = brands.find((item) => item.id === activeId) || brands[0]
         if (brand) {
-          setBusiness({ id: brand.id, name: brand.name, website_url: brand.profile?.website_url || '', support_email: brand.profile?.support_email || '', description: brand.description || '' })
+          setBusiness({ id: brand.id, name: brand.name, website_url: brand.profile?.website_url || '', support_email: brand.profile?.support_email || '', description: brand.description || '', ai_agent_name: brand.ai_agent_name || '' })
         }
       } finally {
         if (live) setBusinessLoading(false)
@@ -67,7 +55,7 @@ export default function Workspace() {
         description: business.description,
       })
       const updated = result.brand
-      setBusiness({ id: updated.id, name: updated.name, website_url: updated.profile?.website_url || '', support_email: updated.profile?.support_email || '', description: updated.description || '' })
+      setBusiness({ id: updated.id, name: updated.name, website_url: updated.profile?.website_url || '', support_email: updated.profile?.support_email || '', description: updated.description || '', ai_agent_name: updated.ai_agent_name || '' })
       showToast('Brand profile saved.')
     } catch (error) {
       showToast(error.message || 'Could not save the brand profile.')
@@ -75,21 +63,15 @@ export default function Workspace() {
       setSavingBusiness(false)
     }
   }
-  const add = async (source) => { await addSource(source); sources.reload(); showToast('Source added.') }
-  const remove = async (id) => { await removeSource(id); sources.reload(); showToast('Source removed.') }
-  const saveNewProduct = async (event) => {
-    event.preventDefault()
-    await saveProduct(product)
-    setProductModal(false)
-    setProduct({ name: '', price: '', url: '', description: '' })
-    products.reload()
-    showToast('Product saved.')
-  }
-
+  const tabs = [
+    { id: 'business', label: 'Business' },
+    { id: 'voice', label: 'Brand voice' },
+    { id: 'chat', label: `Chat with ${business.ai_agent_name || 'AI'}` },
+  ]
   return <div className="mx-auto max-w-6xl">
     <p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand workspace</p>
     <h2 className="mt-1 text-3xl font-extrabold tracking-tight">Build your brand knowledge</h2>
-    <p className="mt-2 max-w-2xl text-sm text-muted">Set the active brand's category, voice, products, and source material before generating knowledge.</p>
+    <p className="mt-2 max-w-2xl text-sm text-muted">Set the active brand's category and voice, then test its deployed support agent in one focused workspace.</p>
     <section className="mt-6 rounded-lg border-2 border-ink bg-white shadow-brutal">
       <Tabs tabs={tabs} active={active} onChange={setActive} />
       <div className="p-5 sm:p-6">
@@ -109,21 +91,8 @@ export default function Workspace() {
           </div>
         </>}
         {active === 'voice' && <BrandVoiceSetup isAdmin={user?.role === 'admin'} />}
-        {active === 'products' && <div>
-          <div className="flex flex-wrap justify-between gap-3"><div><h3 className="text-xl font-extrabold">Product catalog</h3><p className="text-sm text-muted">Generated products appear here for correction.</p></div><div className="flex gap-2"><Button variant="outline"><Upload size={15} />Import CSV</Button><Button variant="purple" onClick={() => setProductModal(true)}><Plus size={15} />Add product</Button></div></div>
-          <div className="mt-5 overflow-x-auto rounded-lg border border-ink/20"><table className="w-full text-left text-sm"><thead><tr className="border-b border-ink/20 text-xs uppercase"><th className="p-3">Name</th><th>Price</th><th>URL</th><th>Description</th><th /></tr></thead><tbody>{products.data?.map((item) => <tr key={item.id} className="border-b border-ink/10"><td className="p-3 font-bold">{item.name}</td><td>{item.price}</td><td className="max-w-36 truncate">{item.url}</td><td>{item.description}</td><td><button onClick={async () => { await deleteProduct(item.id); products.reload() }} aria-label={`Delete ${item.name}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
-        </div>}
-        {active === 'sources' && <div><div className="flex flex-wrap justify-between gap-3"><div><h3 className="text-xl font-extrabold">Sources</h3><p className="text-sm text-muted">Websites, files, and pasted text used by Orb.</p></div><button className="text-sm font-bold underline" onClick={async () => { await seedSampleData(); sources.reload(); showToast('Sample data loaded.') }}>Load sample data</button></div><div className="mt-5"><SourcePicker sources={sources.data || []} onAdd={add} onRemove={remove} /></div></div>}
+        {active === 'chat' && <AgentChat embedded />}
       </div>
     </section>
-    <Modal open={productModal} onClose={() => setProductModal(false)} title="Add product">
-      <form className="grid gap-4" onSubmit={saveNewProduct}>
-        <Input label="Name" value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} />
-        <Input label="Price" value={product.price} onChange={(event) => setProduct({ ...product, price: event.target.value })} />
-        <Input label="URL" value={product.url} onChange={(event) => setProduct({ ...product, url: event.target.value })} />
-        <Textarea label="Short description" value={product.description} onChange={(event) => setProduct({ ...product, description: event.target.value })} />
-        <Button variant="purple" type="submit">Save product</Button>
-      </form>
-    </Modal>
   </div>
 }

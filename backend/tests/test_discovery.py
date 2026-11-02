@@ -80,6 +80,30 @@ async def test_shopify_sitemap_index_expands_query_children_without_storing_site
 
 
 @pytest.mark.asyncio
+async def test_sitemap_discovery_skips_optional_policy_probes() -> None:
+    class SitemapFetcher:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def fetch(self, url: str, attempts: int = 1) -> FetchResult:
+            self.calls.append(url)
+            if url.endswith("robots.txt"):
+                return FetchResult(url, url, 200, "text/plain", b"User-agent: *\nSitemap: https://shop.example/sitemap.xml\n")
+            if url.endswith("sitemap.xml"):
+                return FetchResult(url, url, 200, "application/xml", b"<urlset><url><loc>https://shop.example/products/serum</loc></url></urlset>")
+            # This represents a storefront route which is protected even
+            # though the site's official sitemap is public.
+            return FetchResult(url, url, 429, "application/json", b"{}", retry_after=60)
+
+    fetcher = SitemapFetcher()
+    result = await Discoverer(fetcher, "OrbBot/1.0").discover("https://shop.example", 20)
+
+    assert "https://shop.example/products/serum" in {item.url for item in result.urls}
+    assert result.summary["policy_probes_skipped"] is True
+    assert all("/policies/" not in call for call in fetcher.calls)
+
+
+@pytest.mark.asyncio
 async def test_sitemap_lastmod_survives_query_child_expansion() -> None:
     class LastModifiedFetcher:
         async def fetch(self, url: str, attempts: int = 1) -> FetchResult:

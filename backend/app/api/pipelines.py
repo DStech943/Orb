@@ -1,9 +1,11 @@
 """Polling endpoints for durable source-to-review pipeline runs."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from app.auth import User, current_user
+from app.api.crawls import discover_job
+from app.db import decode_jsonb
 from app.pipeline import pipeline_snapshot
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
@@ -66,7 +68,13 @@ async def pause_pipeline(pipeline_id: str, request: Request, user: User = Depend
 
 
 @router.post("/{pipeline_id}/resume")
-async def resume_pipeline(pipeline_id: str, request: Request, user: User = Depends(current_user)) -> dict:
+async def resume_pipeline(
+    pipeline_id: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict:
+    discovery_job: tuple[str, str, dict] | None = None
     async with request.app.state.db.acquire() as connection:
         pipeline = await connection.fetchrow(
             """UPDATE pipeline_runs SET status='running', error=NULL, resume_at=NULL
@@ -82,11 +90,28 @@ async def resume_pipeline(pipeline_id: str, request: Request, user: User = Depen
             pipeline_id, pipeline["current_stage"],
         )
         if pipeline["current_stage"] == "crawl":
-            await connection.execute(
-                """UPDATE crawl_jobs SET status='running', error=NULL, resume_at=NULL
-                   WHERE id=$1::uuid AND status='paused'""",
+            crawl = await connection.fetchrow(
+                "SELECT start_url, options, EXISTS(SELECT 1 FROM crawl_urls WHERE job_id=$1::uuid) AS has_queue "
+                "FROM crawl_jobs WHERE id=$1::uuid",
                 pipeline["crawl_job_id"],
             )
+            if not crawl:
+                raise HTTPException(status_code=404, detail="The crawl for this pipeline no longer exists")
+            crawl_status = "running" if crawl["has_queue"] else "discovering"
+            await connection.execute(
+                """UPDATE crawl_jobs SET status=$2, error=NULL, resume_at=NULL
+                   WHERE id=$1::uuid AND status='paused'""",
+                pipeline["crawl_job_id"], crawl_status,
+            )
+            if not crawl["has_queue"]:
+                discovery_job = (
+                    str(pipeline["crawl_job_id"]),
+                    str(crawl["start_url"]),
+                    decode_jsonb(crawl["options"]),
+                )
+    if discovery_job:
+        job_id, start_url, options = discovery_job
+        background_tasks.add_task(discover_job, request.app, job_id, user.org_id, start_url, options)
     return {"pipeline": await pipeline_snapshot(request.app.state.db, pipeline_id, str(user.org_id))}
 
 

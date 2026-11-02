@@ -37,6 +37,13 @@ import {
 
 const STORAGE_KEY = "orb_active_pipeline_v2";
 const stageOrder = ["crawl", "parse", "generate", "review", "publish"];
+const DISMISSED_PIPELINE_STATUSES = new Set(["cancelled", "canceled", "stopped"]);
+
+function isDismissedPipeline(pipeline, crawl) {
+  const pipelineStatus = String(pipeline?.status || "").toLowerCase();
+  const crawlStatus = String(crawl?.status || "").toLowerCase();
+  return DISMISSED_PIPELINE_STATUSES.has(pipelineStatus) || DISMISSED_PIPELINE_STATUSES.has(crawlStatus);
+}
 const stageLabels = {
   crawl: "Collect",
   parse: "Parse",
@@ -137,6 +144,84 @@ function StageTrack({ pipeline }) {
         );
       })}
     </ol>
+  );
+}
+
+function formatRetryTime(value) {
+  if (!value) return null;
+  const retryAt = new Date(value);
+  if (Number.isNaN(retryAt.getTime())) return null;
+  const seconds = Math.ceil((retryAt.getTime() - Date.now()) / 1000);
+  if (seconds <= 0) return "Retrying now";
+  if (seconds < 60) return `Retrying in ${seconds}s`;
+  return `Retrying in ${Math.ceil(seconds / 60)} min`;
+}
+
+function PipelineProgress({ pipeline, crawl }) {
+  const stages = Object.fromEntries(
+    (pipeline?.stages || []).map((stage) => [stage.stage, String(stage.status || "queued").toLowerCase()]),
+  );
+  const crawlProgress = crawl?.progress || {};
+  const found = ["pending", "processing", "done", "failed", "skipped"].reduce(
+    (total, key) => total + Number(crawlProgress[key] || 0),
+    0,
+  );
+  const processed = Number(crawlProgress.done || 0) + Number(crawlProgress.failed || 0) + Number(crawlProgress.skipped || 0);
+  const complete = (status) => ["done", "completed", "published"].includes(status);
+  const active = (status) => ["running", "throttled", "paused", "waiting_review"].includes(status);
+  const firstOpen = stageOrder.findIndex((stage) => !complete(stages[stage] || "queued"));
+  const activeIndex = stageOrder.findIndex((stage) => active(stages[stage] || "queued"));
+  const currentIndex = activeIndex >= 0 ? activeIndex : firstOpen >= 0 ? firstOpen : stageOrder.length - 1;
+  const currentStage = stageOrder[currentIndex];
+  const currentStatus = stages[currentStage] || "queued";
+  const finishedCount = stageOrder.filter((stage) => complete(stages[stage] || "queued")).length;
+  const currentFraction = currentStage === "crawl" && found ? Math.min(1, processed / found) : complete(currentStatus) ? 1 : 0;
+  const completedShare = finishedCount / stageOrder.length;
+  const value = Math.min(1, Math.max(completedShare, (currentIndex + currentFraction) / stageOrder.length));
+  const determinate = (currentStage === "crawl" && found > 0) || finishedCount === stageOrder.length;
+  const throttled = currentStatus === "throttled" || String(pipeline?.status || crawl?.status || "").toLowerCase() === "throttled";
+  const retryText = formatRetryTime(crawl?.resume_at || pipeline?.resume_at);
+
+  let detail = "Waiting for this step to begin.";
+  if (throttled) {
+    detail = `The site is rate-limiting requests (HTTP 429). ${retryText || "Orb will retry automatically."}`;
+  } else if (currentStatus === "paused") {
+    detail = "This step is paused. Resume it when you are ready.";
+  } else if (currentStatus === "waiting_review") {
+    detail = "Content is ready for review before publishing.";
+  } else if (currentStage === "crawl" && found) {
+    detail = `${processed} of ${found} discovered page${found === 1 ? "" : "s"} processed.`;
+  } else if (currentStage === "crawl") {
+    detail = "Discovering the site and waiting for the first page to be found.";
+  } else if (currentStatus === "running") {
+    detail = "This step is in progress.";
+  }
+
+  const baseWidth = `${Math.round(completedShare * 100)}%`;
+  return (
+    <section className="mt-6 rounded-lg border border-slate-200 bg-slate-50/70 p-4" aria-label="Pipeline progress">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="text-sm font-extrabold text-slate-800">
+          {stageLabels[currentStage]} <span className="font-medium text-slate-500">{currentStatus.replace("_", " ")}</span>
+        </p>
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Step {currentIndex + 1} of {stageOrder.length}</p>
+      </div>
+      <div
+        className="relative mt-3 h-2 overflow-hidden rounded-full bg-slate-200"
+        role="progressbar"
+        aria-label={`Pipeline progress: ${stageLabels[currentStage]}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={determinate ? Math.round(value * 100) : undefined}
+        aria-valuetext={determinate ? `${Math.round(value * 100)}% complete` : `${stageLabels[currentStage]} in progress`}
+      >
+        <span className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-purple via-indigo-500 to-sky-400 transition-[width] duration-500" style={{ width: determinate ? `${Math.max(value * 100, 4)}%` : baseWidth }} />
+        {!determinate && currentStatus !== "paused" && currentStatus !== "queued" && (
+          <span className="pipeline-progress__indeterminate" style={{ left: baseWidth }} aria-hidden="true" />
+        )}
+      </div>
+      <p className={`mt-2 text-xs ${throttled ? "text-amber-700" : "text-slate-500"}`} role="status" aria-live="polite">{detail}</p>
+    </section>
   );
 }
 
@@ -434,6 +519,7 @@ function ProgressView({ run, snapshot, refresh, reset, onControl, controlling, o
   const status = pipeline?.status || crawl?.status || "starting";
   const counts = pipeline?.counts || {};
   const scraping = scrapeMarker(pipeline, crawl);
+  const rateLimited = String(status).toLowerCase() === "throttled" || /(?:http\s*)?429|rate[ -]?limit/i.test(pipeline?.error || "");
   const canControl = ["discovering", "ready", "running", "throttled"].includes(status);
   return (
     <div className="space-y-5">
@@ -470,7 +556,7 @@ function ProgressView({ run, snapshot, refresh, reset, onControl, controlling, o
             </Button>
           </div>
         </div>
-        {pipeline?.error && (
+        {pipeline?.error && !rateLimited && (
           <p className="mt-5 flex gap-2 rounded-md bg-red-50 p-3 text-sm text-red-700">
             <AlertCircle size={17} className="shrink-0" />
             {pipeline.error}
@@ -483,7 +569,8 @@ function ProgressView({ run, snapshot, refresh, reset, onControl, controlling, o
             crawl.
           </p>
         )}
-        <div className="mt-6">
+        <PipelineProgress pipeline={pipeline} crawl={crawl} />
+        <div className="mt-4">
           <StageTrack pipeline={pipeline} />
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-4">
@@ -605,6 +692,12 @@ export default function PipelineWorkspace() {
         const result = await listPipelines(brandId);
         const latest = result?.pipelines?.[0];
         if (!active || !latest) return;
+        if (isDismissedPipeline(latest)) {
+          saveRun(brandId, null);
+          setRun(null);
+          clearSnapshot();
+          return;
+        }
         const next = runFromPipeline(latest, brandName);
         saveRun(brandId, next);
         setRun(next);
@@ -627,6 +720,12 @@ export default function PipelineWorkspace() {
         run.kind === "shopify"
           ? await listCrawlPages(run.crawlJobId)
           : await listCrawlUrls(run.crawlJobId);
+      if (isDismissedPipeline(pipelineResult.pipeline, crawlResult)) {
+        saveRun(run.brandId, null);
+        setRun(null);
+        clearSnapshot();
+        return;
+      }
       setSnapshot({
         pipeline: pipelineResult.pipeline,
         crawl: crawlResult,
@@ -641,7 +740,7 @@ export default function PipelineWorkspace() {
         error: cause.message || "Unknown error",
       }));
     }
-  }, [run]);
+  }, [run, clearSnapshot]);
   useEffect(() => {
     if (!run) return undefined;
     refresh();
@@ -710,7 +809,13 @@ export default function PipelineWorkspace() {
     try {
       if (action === "pause") await (run.pipelineId ? pausePipeline(run.pipelineId) : pauseCrawl(run.crawlJobId));
       if (action === "resume") await (run.pipelineId ? resumePipeline(run.pipelineId) : resumeCrawl(run.crawlJobId));
-      if (action === "cancel") await (run.pipelineId ? cancelPipeline(run.pipelineId) : cancelCrawl(run.crawlJobId));
+      if (action === "cancel") {
+        await (run.pipelineId ? cancelPipeline(run.pipelineId) : cancelCrawl(run.crawlJobId));
+        // Cancelled crawls cannot be resumed. Remove the inactive card rather
+        // than leaving a dead run as the dashboard's active workspace.
+        reset();
+        return;
+      }
       await refresh();
     } catch (cause) {
       setSnapshot((current) => ({ ...current, error: cause.message || "Could not update this crawl." }));

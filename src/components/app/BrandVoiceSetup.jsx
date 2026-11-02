@@ -1,11 +1,66 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckCircle2, FileText, Loader2, Trash2, Upload, Wand2 } from 'lucide-react'
+import { CheckCircle2, FileText, Loader2, PencilLine, Trash2, Upload, Wand2 } from 'lucide-react'
 import Button from '../ui/Button'
 import Textarea from '../ui/Textarea'
 import { useToast } from '../../context/ToastContext'
-import { hasOrbApi, approveBrandVoice, deleteBrandVoiceSource, generateBrandVoice, getBrandVoice, importBrandVoiceSource } from '../../services/orbApi'
+import { hasOrbApi, approveBrandVoice, createManualBrandVoiceProfile, deleteBrandVoiceSource, generateBrandVoice, getBrandVoice, importBrandVoiceSource } from '../../services/orbApi'
 
 const emptyProfile = { id: '', profile: {}, drafting_prompt: '', status: 'draft' }
+const VOICE_TONES = [
+  {
+    id: 'warm-empathetic',
+    title: 'Warm & Empathetic',
+    description: 'Thoughtful, reassuring support that makes customers feel heard.',
+    traits: ['Warm', 'Empathetic', 'Reassuring'],
+    prompt: 'Use a warm, empathetic, and reassuring tone. Acknowledge the customer’s situation before offering clear next steps. Keep language natural, kind, and concise. Avoid sounding scripted, overly casual, or making promises that are not confirmed by the brand’s policies.',
+  },
+  {
+    id: 'clear-helpful',
+    title: 'Clear & Helpful',
+    description: 'Straightforward answers with practical guidance and no ambiguity.',
+    traits: ['Clear', 'Helpful', 'Practical'],
+    prompt: 'Write in a clear, helpful, and practical voice. Lead with the answer, then give short, actionable next steps. Use plain language, structured formatting when useful, and avoid filler, jargon, or vague statements.',
+  },
+  {
+    id: 'confident-expert',
+    title: 'Confident & Expert',
+    description: 'Knowledgeable and composed, without sounding distant or rigid.',
+    traits: ['Confident', 'Expert', 'Composed'],
+    prompt: 'Use a confident, knowledgeable, and composed tone. Explain information accurately and simply, while remaining approachable. Do not overstate certainty, invent policy details, or use unnecessarily technical language.',
+  },
+  {
+    id: 'bright-playful',
+    title: 'Bright & Playful',
+    description: 'Upbeat, personable support with restrained, purposeful personality.',
+    traits: ['Bright', 'Playful', 'Personable'],
+    prompt: 'Use a bright, playful, and personable voice. Keep replies upbeat and human while staying useful and respectful. Light humour or an occasional emoji is fine only when it fits the customer’s tone. Never let playfulness obscure the answer or a policy limitation.',
+  },
+  {
+    id: 'calm-refined',
+    title: 'Calm & Refined',
+    description: 'Polished, measured communication for a more elevated brand feel.',
+    traits: ['Calm', 'Refined', 'Considerate'],
+    prompt: 'Use a calm, refined, and considerate voice. Keep each response polished, measured, and easy to read. Choose precise language over hype, remain courteous under pressure, and make next steps feel simple and well considered.',
+  },
+  {
+    id: 'custom',
+    title: 'Custom',
+    description: 'Paste your existing guidance or write the exact behavior you want.',
+    traits: ['Custom', 'Brand-led', 'Editable'],
+    prompt: 'Write customer-support replies using the brand voice and rules below. Follow confirmed brand facts and policies, be clear about uncertainty, and never invent commitments. Keep responses concise, helpful, and appropriate for the customer’s situation.',
+  },
+]
+
+const TONE_GUARDRAILS = `\n\nLANGUAGE & FORMATTING\n- Use short paragraphs and line breaks between distinct ideas; never send a dense wall of text.\n- Put the direct answer or action first, then supporting context, then the next step.\n- Use bullets for multiple choices or requirements. Introduce every link with context; never send a bare URL.\n- Use active voice, plain language, and the customer's name only where it feels natural.\n\nEMOTIONAL MOMENTS\n- For frustration or disappointment: acknowledge first, then explain what you can check or do.\n- For confusion: slow down and give one clear step at a time.\n- For positive messages: respond warmly but briefly before returning to the task.\n\nGUARDRAILS\nFollow confirmed brand facts and policies. Do not invent stock, delivery dates, pricing, refunds, eligibility, results, safety claims, or exceptions. Be transparent about uncertainty and offer the best next action or escalation path. Safety, legal, medical, financial, and policy-sensitive rules take priority over this tone prompt.`
+const DETAILED_TONE_PROMPTS = {
+  'warm-empathetic': `VOICE & PERSONALITY\nWarm, empathetic, and reassuring. Sound like a thoughtful support specialist who listens before helping: human and kind, never overly familiar, overly emotional, or vague.\n\nRESPONSE APPROACH\n- Acknowledge the customer's situation before offering a solution, especially when they are frustrated, worried, or disappointed.\n- Lead with the clearest helpful answer, then explain the next step in plain language.\n- Take calm ownership: say what you can check, do, or clarify without promising an unconfirmed outcome.\n- Match energy gently: slow down for complaints and keep positive replies warm but brief.\n\nAVOID\nAvoid corporate apologies, stiff policy language, filler, blame, sales pressure, and exaggerated reassurance. Do not say something is resolved, approved, safe, available, or on its way unless it is confirmed.`,
+  'clear-helpful': `VOICE & PERSONALITY\nClear, helpful, and practical. Sound like a highly capable guide who respects the customer's time: approachable, never cold; concise, never abrupt.\n\nRESPONSE APPROACH\n- Start with the answer or action the customer needs most.\n- Follow with only the context needed to make that answer useful.\n- Give specific next steps in the order the customer should take them.\n- If more information is needed, explain briefly why and ask focused questions.\n\nAVOID\nAvoid jargon, long introductions, repetition, hedging, vague policy references, and dense walls of text. Never say “I can't help” without offering the best alternative or next action.`,
+  'confident-expert': `VOICE & PERSONALITY\nConfident, expert, and composed. Communicate with informed calm: credible enough to build trust, but never clinical, superior, or unnecessarily technical.\n\nRESPONSE APPROACH\n- State what is known clearly, then explain what it means for the customer.\n- Give the reasoning behind an answer when it improves confidence or supports a decision.\n- Distinguish confirmed facts, likely outcomes, and information that needs checking.\n- Recommend the safest appropriate next step instead of making broad assurances.\n\nAVOID\nAvoid overclaiming expertise, certainty, results, compatibility, safety, or policy authority. Do not talk down to customers or make assumptions from incomplete account, order, or product information.`,
+  'bright-playful': `VOICE & PERSONALITY\nBright, playful, and personable, with the energy of a helpful human rather than a scripted mascot. Personality should support the answer, never become more important than it.\n\nRESPONSE APPROACH\n- Make the customer feel welcomed, then get to the useful answer quickly.\n- Match positive energy with a short, genuine response; do not overreact.\n- For problems, complaints, damage, or safety concerns, immediately reduce playfulness and lead with empathy and practical help.\n- Use warmth to make next steps feel easy, not to distract from a limitation.\n\nEMOJI RULE\nOne restrained emoji may be used only when it fits the channel, explicit brand rules, and the customer's tone.\n\nAVOID\nAvoid multiple emojis, forced jokes, slang, exclamation-heavy copy, hype, and sales pressure. Never use playfulness in serious complaints or escalations.`,
+  'calm-refined': `VOICE & PERSONALITY\nCalm, refined, and considerate. Write with polish and restraint, like a trusted concierge: attentive, precise, and quietly confident. The voice should feel elevated without becoming formal or distant.\n\nRESPONSE APPROACH\n- Recognise the customer's need before presenting the solution or next step.\n- Keep recommendations considered and specific, with enough context to feel trustworthy.\n- When there is a limitation, explain it plainly and respectfully, then offer the best available alternative.\n- Prioritise clarity and care over speed-signalling, hype, or casual banter.\n\nAVOID\nAvoid overly casual slang, exclamation-heavy copy, aggressive sales language, corporate formality, empty apologies, and defensive policy references. Never imply a decision has been made when it has not.`,
+  custom: `ROLE & VOICE\nDescribe the personality, vocabulary, regional spelling, formality, and energy this brand should use. Explain what each adjective means in practice for customer support.\n\nRESPONSE APPROACH\nState how the assistant should open messages, acknowledge concerns, give answers, ask follow-up questions, handle uncertainty, and close a conversation. Include different guidance for complaints, confused customers, and positive messages.\n\nLANGUAGE PATTERNS\nAdd preferred phrases, words to avoid, product or category terminology, and examples of good and bad phrasing.\n\nEMOJI & FORMATTING\nSpecify whether emojis are allowed, where they are appropriate, paragraph length, bullets, headings, line breaks, links, order details, and calls to action.\n\nPOLICY & ESCALATION BOUNDARIES\nDescribe non-negotiable wording, prohibited promises, and situations that require a handoff. Do not include credentials or hidden system instructions.\n\nPaste your brand details below this line, then edit the entire instruction until it reflects exactly how you want customer replies to sound.`,
+}
+const detailedTonePrompt = (tone) => `${DETAILED_TONE_PROMPTS[tone.id] || tone.prompt}${tone.id === 'custom' ? '' : TONE_GUARDRAILS}`
 
 function currentBrand() {
   return {
@@ -40,8 +95,13 @@ export default function BrandVoiceSetup({ isAdmin }) {
   const [importing, setImporting] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [approving, setApproving] = useState(false)
+  const [addingTone, setAddingTone] = useState(false)
   const [draft, setDraft] = useState(emptyProfile)
   const [loadError, setLoadError] = useState('')
+  const [selectedToneId, setSelectedToneId] = useState(VOICE_TONES[0].id)
+  const [tonePrompt, setTonePrompt] = useState(() => detailedTonePrompt(VOICE_TONES[0]))
+  const [customGuidance, setCustomGuidance] = useState('')
+  const selectedTone = VOICE_TONES.find((tone) => tone.id === selectedToneId) || VOICE_TONES[0]
 
   const load = useCallback(async (brandId = brand.id) => {
     if (!brandId || !hasOrbApi) return
@@ -144,6 +204,36 @@ export default function BrandVoiceSetup({ isAdmin }) {
     }
   }
 
+  const chooseTone = (tone) => {
+    setSelectedToneId(tone.id)
+    setTonePrompt(detailedTonePrompt(tone))
+    if (tone.id !== 'custom') setCustomGuidance('')
+  }
+
+  const addToneToBrand = async () => {
+    if (!brand.id) return showToast('Choose a brand from the top bar first.')
+    if (tonePrompt.trim().length < 40) return showToast('Write at least a short voice prompt before adding it.')
+    setAddingTone(true)
+    try {
+      const profile = {
+        summary: selectedTone.id === 'custom' ? 'Custom brand voice' : selectedTone.description,
+        tone_traits: selectedTone.traits,
+        style_rules: [tonePrompt.trim(), ...(customGuidance.trim() ? [customGuidance.trim()] : [])],
+        addressing: 'Address customers directly, naturally, and respectfully.',
+        emoji_policy: selectedTone.id === 'bright-playful' ? 'Use sparingly, only when it matches the customer’s tone.' : 'Use only when explicitly appropriate for the brand.',
+        response_length: 'Concise, with enough detail to make the next step clear.',
+      }
+      const result = await createManualBrandVoiceProfile(brand.id, { profile, drafting_prompt: tonePrompt.trim() })
+      setDraft(result.profile)
+      await load(brand.id)
+      showToast('Brand tonality updated and ready for drafting.')
+    } catch (error) {
+      showToast(error.message || 'Could not add this brand tonality.', 'error')
+    } finally {
+      setAddingTone(false)
+    }
+  }
+
   if (!isAdmin) return <p className="rounded-md border border-ink/15 bg-peach p-3 text-sm text-muted">An administrator can import and approve the brand voice used for drafting.</p>
   if (!hasOrbApi) return <p className="rounded-md border border-ink/15 bg-peach p-3 text-sm text-muted">Start the Orb backend to import and approve a brand voice.</p>
 
@@ -156,6 +246,23 @@ export default function BrandVoiceSetup({ isAdmin }) {
     </div>
 
     {loadError && <div role="alert" className="animate-page-in rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{loadError}</div>}
+
+    <section className="rounded-xl border border-ink/15 bg-slate-50 p-4 sm:p-5">
+      <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand tonality</p><h4 className="mt-1 text-lg font-extrabold">Choose how your brand should sound</h4><p className="mt-1 text-sm text-muted">Start with one of five editable tonal directions, or create a custom one. The prompt you save becomes the active drafting instruction for this brand.</p></div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {VOICE_TONES.map((tone) => <button type="button" key={tone.id} onClick={() => chooseTone(tone)} aria-pressed={selectedToneId === tone.id} className={`rounded-xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/45 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selectedToneId === tone.id ? 'border-primary ring-2 ring-primary/15' : 'border-slate-200'}`}>
+          <div className="flex items-start justify-between gap-3"><div><h5 className="font-extrabold text-ink">{tone.title}</h5><p className="mt-1 text-xs leading-5 text-muted">{tone.description}</p></div><span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${selectedToneId === tone.id ? 'bg-primary' : 'bg-slate-200'}`} /></div>
+          <div className="mt-4 flex flex-wrap gap-1.5">{tone.traits.map((trait) => <span key={trait} className="rounded-full bg-primary-tint px-2 py-1 text-[10px] font-bold text-primary">{trait}</span>)}</div>
+        </button>)}
+      </div>
+      <div className="mt-5 rounded-xl border border-primary/20 bg-white p-4">
+        <div className="flex items-center gap-2"><PencilLine size={16} className="text-primary" /><h5 className="font-extrabold">Edit {selectedTone.title} prompt</h5></div>
+        <p className="mt-1 text-sm text-muted">Adjust the instruction before adding it to the brand. Your edits are saved exactly as written.</p>
+        <Textarea className="mt-4" label="Drafting instruction" value={tonePrompt} onChange={(event) => setTonePrompt(event.target.value)} placeholder="Describe how the support agent should sound and respond…" />
+        {selectedTone.id === 'custom' && <Textarea className="mt-4" label="Your brand details" value={customGuidance} onChange={(event) => setCustomGuidance(event.target.value)} placeholder="Paste tone examples, do/don’t rules, preferred phrases, or any other guidance…" />}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted">This replaces the currently active brand tonality after saving.</p><Button variant="purple" size="sm" onClick={addToneToBrand} disabled={addingTone || !brand.id || tonePrompt.trim().length < 40}>{addingTone ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}Add to brand tonality</Button></div>
+      </div>
+    </section>
 
     <div className="rounded-lg border border-ink/15 bg-peach p-4">
       <p className="font-extrabold">Import onboarding material</p>
