@@ -19,14 +19,23 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       DATABASE_URL: postgresql://orb:orb@db:5432/orb
+      # Compose does not reliably resolve nested fallbacks here. Pass both
+      # supported names through explicitly so either local .env convention
+      # reaches the application container.
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL:-}
+      SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL:-}
       SUPABASE_URL: ${SUPABASE_URL:-${VITE_SUPABASE_URL:-}}
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-${VITE_SUPABASE_PUBLISHABLE_KEY:-}}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       ORB_LLM_API_KEY: ${ORB_LLM_API_KEY:-}
+      ORB_DRAFT_API_KEY: ${ORB_DRAFT_API_KEY:-}
       ORB_EMBEDDING_API_KEY: ${ORB_EMBEDDING_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      DRAFT_BASE_URL: ${DRAFT_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      DRAFT_MODEL: ${DRAFT_MODEL:-gemini-3.5-flash-lite}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}

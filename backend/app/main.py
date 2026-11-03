@@ -1,6 +1,7 @@
 """Orb's standalone, Postgres-backed crawling API."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -21,8 +22,13 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
     app.state.db = await create_pool(settings)
-    # The crawler uses local Postgres. Brand reads use Supabase's REST API so
-    # the API does not need a direct network connection to Supabase Postgres.
+    # Keep startup independent of the optional brand-content database. A
+    # slow/unreachable Supabase connection must not make crawling, dashboard
+    # polling, or health checks unavailable. Generation opens this pool only
+    # when a generation request is made.
+    app.state.supabase_db = app.state.db
+    app.state.generation_db = None
+    app.state.generation_db_lock = asyncio.Lock()
     app.state.fetcher = Fetcher(settings)
     app.state.renderer = Renderer(settings)
     try:
@@ -30,6 +36,8 @@ async def lifespan(app: FastAPI):
     finally:
         await app.state.renderer.close()
         await app.state.fetcher.close()
+        if app.state.generation_db is not None:
+            await app.state.generation_db.close()
         await app.state.db.close()
 
 

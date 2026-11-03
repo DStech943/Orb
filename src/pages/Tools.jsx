@@ -1,5 +1,8 @@
-import React, { useMemo, useState } from "react";
-import { Boxes, CheckCircle2, Search, Wrench } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Boxes, CheckCircle2, KeyRound, Link2, Loader2, Search, Store, Wrench } from "lucide-react";
+import Modal from "../components/ui/Modal";
+import { activeBrandName, getShopifyCredentialStatus, hasOrbApi, importShopifySource, listRemoteBrands } from "../services/orbApi";
+import { useToast } from "../context/ToastContext";
 
 const categoryMeta = {
   commerce: {
@@ -129,9 +132,9 @@ function ToolLogo({ tool }) {
   );
 }
 
-function ToolCard({ tool }) {
+function ToolCard({ tool, onOpen }) {
   return (
-    <article className="flex min-h-24 items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-purple/40 hover:shadow-md">
+    <article role="button" tabIndex={0} onClick={() => onOpen?.(tool)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen?.(tool); } }} className="flex min-h-24 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-purple/40 hover:shadow-md">
       <ToolLogo tool={tool} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -141,24 +144,43 @@ function ToolCard({ tool }) {
         </div>
         <p className="mt-0.5 line-clamp-2 text-sm text-slate-500">{tool.description}</p>
       </div>
-      <span className="shrink-0 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-ink shadow-sm">
-        {tool.installed ? "Configure ↗" : "Install ↗"}
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-ink shadow-sm transition hover:border-purple/35 hover:bg-slate-50">
+        {tool.installed ? "Configure" : "Install"}<Link2 size={13} strokeWidth={2.25} aria-hidden="true" />
       </span>
     </article>
   );
 }
 
+function ShopifySetupModal({ open, onClose, brandName, brandId, onInstalled }) {
+  const [domain, setDomain] = useState(''); const [accessToken, setAccessToken] = useState(''); const [credential, setCredential] = useState(null); const [manual, setManual] = useState(false); const [loading, setLoading] = useState(false); const [installing, setInstalling] = useState(false); const [error, setError] = useState('')
+  useEffect(() => { if (!open) return undefined; setError(''); setManual(false); setAccessToken(''); setCredential(null); if (!hasOrbApi || !brandName) return undefined; let active = true; setLoading(true); getShopifyCredentialStatus(brandName).then((result) => { if (active) { setCredential(result); if (result?.domain) setDomain(result.domain) } }).catch(() => { if (active) setCredential({ source: 'unavailable', token_available: false }) }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [open, brandName])
+  const vaultReady = Boolean(credential?.token_available && credential?.domain) && !manual
+  const submit = async (event) => { event.preventDefault(); setError(''); if (!brandId || !brandName) return setError('Choose a brand from the top bar before installing Shopify.'); if (!vaultReady && (!domain.trim() || !accessToken.trim())) return setError('Enter both the Shopify domain and Admin API token.'); try { setInstalling(true); const result = await importShopifySource({ brandId, brandName, domain: vaultReady ? '' : domain.trim(), accessToken: vaultReady ? '' : accessToken.trim(), useVault: vaultReady }); onInstalled(result?.domain || domain.trim()); onClose() } catch (cause) { setError(cause.message || 'Shopify could not be installed.') } finally { setInstalling(false) } }
+  const vaultMessage = loading ? 'Checking the secure Vault…' : vaultReady ? 'Credentials found in Vault. The Admin token stays on the server.' : credential?.source === 'unavailable' ? 'Vault is unavailable right now. Enter credentials once to continue.' : 'No complete Shopify credentials were found for this brand in Vault.'
+  return <Modal open={open} onClose={onClose} title="Install Shopify"><form onSubmit={submit} className="space-y-4"><div className="rounded-lg border border-purple/20 bg-purple/5 p-3"><div className="flex items-center gap-2 text-sm font-extrabold text-ink"><Store size={16} className="text-purple" />{brandName || 'Choose a brand'}</div><p className="mt-1 text-xs leading-5 text-slate-600">Orb checks <code>SHOPIFY_&lt;BRAND&gt;_TOKEN</code> and <code>SHOPIFY_&lt;BRAND&gt;_DOMAIN</code> in Vault first.</p><p className="mt-2 text-xs font-semibold text-purple">{vaultMessage}</p></div><label className="grid gap-1.5 text-sm font-bold">Shopify domain<input value={domain} onChange={(event) => setDomain(event.target.value)} disabled={vaultReady} placeholder="your-store.myshopify.com" className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-purple disabled:bg-slate-100" /></label><label className="grid gap-1.5 text-sm font-bold">Admin API token<div className="relative"><input type="password" value={vaultReady ? 'vault-managed-token' : accessToken} onChange={(event) => setAccessToken(event.target.value)} disabled={vaultReady} placeholder="shpat_…" className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 pr-10 text-sm font-normal outline-none focus:border-purple disabled:bg-slate-100" />{vaultReady && <KeyRound size={16} className="absolute right-3 top-3 text-emerald-600" />}</div></label>{vaultReady ? <button type="button" onClick={() => { setManual(true); setAccessToken('') }} className="text-left text-xs font-bold text-purple hover:underline">Use different credentials instead</button> : <p className="text-xs leading-5 text-slate-500">Manual credentials are used only to start this import and are not stored in Orb.</p>}{error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}<div className="flex justify-end gap-2 pt-1"><button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold">Cancel</button><button type="submit" disabled={installing || loading} className="inline-flex items-center gap-2 rounded-md bg-purple px-3 py-2 text-sm font-extrabold text-white disabled:opacity-60">{installing && <Loader2 size={15} className="animate-spin" />}{vaultReady ? 'Install from Vault' : 'Install Shopify'}</button></div></form></Modal>
+}
+
 export default function Tools() {
+  const { showToast } = useToast();
   const [selected, setSelected] = useState("all");
   const [query, setQuery] = useState("");
+  const [shopifyOpen, setShopifyOpen] = useState(false);
+  const [brandName, setBrandName] = useState(() => activeBrandName());
+  const [brandId, setBrandId] = useState(() => window.localStorage.getItem('orb_selected_brand') || '');
+  const [installedIds, setInstalledIds] = useState(() => new Set());
+  useEffect(() => { const syncBrand = async () => { const nextName = activeBrandName(), storedId = window.localStorage.getItem('orb_selected_brand') || ''; setBrandName(nextName); setBrandId(storedId); if (!storedId && nextName && hasOrbApi) { try { const result = await listRemoteBrands(); const match = result?.brands?.find((brand) => brand.name === nextName); if (match?.id) setBrandId(match.id) } catch {} } }; syncBrand(); window.addEventListener('orb:brand-changed', syncBrand); return () => window.removeEventListener('orb:brand-changed', syncBrand) }, []);
+  useEffect(() => { try { setInstalledIds(new Set(JSON.parse(window.localStorage.getItem(`orb_installed_tools:${brandName || 'unassigned'}`) || '[]'))) } catch { setInstalledIds(new Set()) } }, [brandName]);
+  const workspaceTools = useMemo(() => tools.map((tool) => ({ ...tool, installed: installedIds.has(tool.id) })), [installedIds]);
+  const openTool = (tool) => { if (tool.id === 'shopify') setShopifyOpen(true); else showToast(`${tool.name} setup is coming soon.`) };
+  const markShopifyInstalled = (domain) => { setInstalledIds((current) => { const next = new Set(current); next.add('shopify'); window.localStorage.setItem(`orb_installed_tools:${brandName || 'unassigned'}`, JSON.stringify([...next])); return next }); showToast(`Shopify import started for ${domain}.`) };
   const category = categories.find((item) => item.id === selected) || categories[0];
   const visibleTools = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return tools.filter((tool) => {
+    return workspaceTools.filter((tool) => {
       const correctSection = selected === "all" ? true : selected === "installed" ? tool.installed : tool.category === selected;
       return correctSection && (!term || `${tool.name} ${tool.description}`.toLowerCase().includes(term));
     });
-  }, [query, selected]);
+  }, [query, selected, workspaceTools]);
   const groups = useMemo(
     () =>
       Object.entries(categoryMeta)
@@ -187,7 +209,7 @@ export default function Tools() {
 
       <div className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-200">
         {categories.map((item) => {
-          const count = item.id === "all" ? tools.length : item.id === "installed" ? tools.filter((tool) => tool.installed).length : tools.filter((tool) => tool.category === item.id).length;
+          const count = item.id === "all" ? workspaceTools.length : item.id === "installed" ? workspaceTools.filter((tool) => tool.installed).length : workspaceTools.filter((tool) => tool.category === item.id).length;
           return (
             <button type="button" key={item.id} onClick={() => setSelected(item.id)} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold transition-colors ${selected === item.id ? "border-purple text-purple" : "border-transparent text-slate-500 hover:text-ink"}`}>
               {item.label}
@@ -213,12 +235,12 @@ export default function Tools() {
               <section key={group.id}>
                 <h3 className="font-extrabold">{group.label} <span className="ml-1 text-sm font-medium text-slate-400">{group.tools.length} integrations</span></h3>
                 <p className="mt-1 text-sm text-slate-500">{group.description}</p>
-                <div className="mt-4 grid gap-3 lg:grid-cols-3">{group.tools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}</div>
+                <div className="mt-4 grid gap-3 lg:grid-cols-3">{group.tools.map((tool) => <ToolCard key={tool.id} tool={tool} onOpen={openTool} />)}</div>
               </section>
             ))}
           </div>
         ) : (
-          <div className="mt-5 grid gap-3 lg:grid-cols-3">{visibleTools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}</div>
+          <div className="mt-5 grid gap-3 lg:grid-cols-3">{visibleTools.map((tool) => <ToolCard key={tool.id} tool={tool} onOpen={openTool} />)}</div>
         ) : (
           <div className="mt-8 grid place-items-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-14 text-center">
             <Wrench size={26} className="text-purple" />
@@ -227,6 +249,7 @@ export default function Tools() {
           </div>
         )}
       </section>
+      <ShopifySetupModal open={shopifyOpen} onClose={() => setShopifyOpen(false)} brandName={brandName} brandId={brandId} onInstalled={markShopifyInstalled} />
     </div>
   );
 }

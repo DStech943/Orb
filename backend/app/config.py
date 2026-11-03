@@ -12,10 +12,23 @@ class Settings(BaseSettings):
     """Runtime settings read from environment variables."""
 
     database_url: str = Field(alias="DATABASE_URL")
+    # Generation jobs live with the brand and content tables.  In the common
+    # single-Postgres deployment this is the same database as the crawler; a
+    # separate URL is supported when those tables remain in Supabase.
+    supabase_database_url: str | None = Field(
+        None,
+        validation_alias=AliasChoices("SUPABASE_DATABASE_URL", "SUPABASE_DB_URL"),
+    )
     supabase_url: str | None = Field(None, validation_alias=AliasChoices("SUPABASE_URL", "VITE_SUPABASE_URL"))
     supabase_publishable_key: str | None = Field(
         None,
         validation_alias=AliasChoices("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_KEY", "VITE_SUPABASE_PUBLISHABLE_KEY"),
+    )
+    # Server-only elevated key used for narrowly scoped Supabase RPC calls.
+    # Never send this value to the browser or put it in Vite variables.
+    supabase_service_role_key: str | None = Field(
+        None,
+        validation_alias=AliasChoices("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"),
     )
     user_agent: str = Field("OrbBot/1.0 (+https://yourdomain.com/bot)", alias="USER_AGENT")
     max_pages_hard_limit: int = Field(2000, alias="MAX_PAGES_HARD_LIMIT", ge=1)
@@ -34,6 +47,11 @@ class Settings(BaseSettings):
     env: Literal["dev", "production"] = Field("dev", alias="ENV")
     llm_base_url: str | None = Field(None, alias="LLM_BASE_URL")
     llm_model: str | None = Field(None, alias="LLM_MODEL")
+    # Source-to-draft can use a separate compatible provider and key from the
+    # conversational/guide features. This keeps OpenRouter configuration
+    # independent from a Google AI Studio draft key.
+    draft_base_url: str | None = Field("https://generativelanguage.googleapis.com/v1beta/openai/", alias="DRAFT_BASE_URL")
+    draft_model: str | None = Field("gemini-3.5-flash-lite", alias="DRAFT_MODEL")
     embedding_base_url: str | None = Field(None, alias="EMBEDDING_BASE_URL")
     embedding_model: str | None = Field(None, alias="EMBEDDING_MODEL")
     embedding_dimensions: int = Field(768, alias="EMBEDDING_DIMENSIONS", ge=1)

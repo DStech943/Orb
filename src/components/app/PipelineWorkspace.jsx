@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle2,
@@ -17,6 +18,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import Orb from "../Orb";
 import Button from "../ui/Button";
 import {
   cancelCrawl,
@@ -33,6 +35,7 @@ import {
   pausePipeline,
   resumeCrawl,
   resumePipeline,
+  startPipelineGeneration,
 } from "../../services/orbApi";
 
 const STORAGE_KEY = "orb_active_pipeline_v2";
@@ -52,6 +55,24 @@ const stageLabels = {
   publish: "Publish",
 };
 const outputOptions = ["sops", "faqs", "products"];
+
+function OrbMark({ className = "" }) {
+  return (
+    <span className={`block shrink-0 overflow-hidden rounded-full ${className}`} aria-hidden="true">
+      <Orb
+        colors={["#9c43fe", "#4cc2e9", "#101499"]}
+        backgroundColor="#ffffff"
+        size={1.08}
+        glow={1}
+        hoverIntensity={1}
+        trail={1}
+        rotateOnHover
+        followCursor
+        intro
+      />
+    </span>
+  );
+}
 
 function storageKey(brandId) {
   return brandId ? `${STORAGE_KEY}:${brandId}` : null;
@@ -128,6 +149,12 @@ function StageTrack({ pipeline }) {
     <ol className="grid gap-2 sm:grid-cols-5">
       {stageOrder.map((name) => {
         const stage = byStage[name] || { status: "queued" };
+        const isDraftGate = name === "generate" &&
+          ["waiting_review", "running"].includes(stage.status) &&
+          !stage.counts?.generation_job_id;
+        const statusLabel = isDraftGate
+          ? "Ready to draft"
+          : stage.status.replaceAll("_", " ");
         return (
           <li
             key={name}
@@ -138,7 +165,7 @@ function StageTrack({ pipeline }) {
               <span className="text-sm font-bold">{stageLabels[name]}</span>
             </div>
             <p className="mt-1 text-xs capitalize text-slate-500">
-              {stage.status.replace("_", " ")}
+              {statusLabel}
             </p>
           </li>
         );
@@ -158,9 +185,15 @@ function formatRetryTime(value) {
 }
 
 function PipelineProgress({ pipeline, crawl }) {
+  const stageRows = pipeline?.stages || [];
   const stages = Object.fromEntries(
-    (pipeline?.stages || []).map((stage) => [stage.stage, String(stage.status || "queued").toLowerCase()]),
+    stageRows.map((stage) => [stage.stage, String(stage.status || "queued").toLowerCase()]),
   );
+  const draftStage = stageRows.find((stage) => stage.stage === "generate");
+  const generationStatus = String(draftStage?.counts?.generation_status || "").toLowerCase();
+  const draftReady = ["waiting_review", "running"].includes(stages.generate) &&
+    !draftStage?.counts?.generation_job_id && generationStatus !== "done";
+  const draftFailed = stages.generate === "failed";
   const crawlProgress = crawl?.progress || {};
   const found = ["pending", "processing", "done", "failed", "skipped"].reduce(
     (total, key) => total + Number(crawlProgress[key] || 0),
@@ -171,14 +204,15 @@ function PipelineProgress({ pipeline, crawl }) {
   const active = (status) => ["running", "throttled", "paused", "waiting_review"].includes(status);
   const firstOpen = stageOrder.findIndex((stage) => !complete(stages[stage] || "queued"));
   const activeIndex = stageOrder.findIndex((stage) => active(stages[stage] || "queued"));
-  const currentIndex = activeIndex >= 0 ? activeIndex : firstOpen >= 0 ? firstOpen : stageOrder.length - 1;
+  const failedIndex = stageOrder.findIndex((stage) => stages[stage] === "failed");
+  const currentIndex = failedIndex >= 0 ? failedIndex : activeIndex >= 0 ? activeIndex : firstOpen >= 0 ? firstOpen : stageOrder.length - 1;
   const currentStage = stageOrder[currentIndex];
   const currentStatus = stages[currentStage] || "queued";
   const finishedCount = stageOrder.filter((stage) => complete(stages[stage] || "queued")).length;
   const currentFraction = currentStage === "crawl" && found ? Math.min(1, processed / found) : complete(currentStatus) ? 1 : 0;
   const completedShare = finishedCount / stageOrder.length;
   const value = Math.min(1, Math.max(completedShare, (currentIndex + currentFraction) / stageOrder.length));
-  const determinate = (currentStage === "crawl" && found > 0) || finishedCount === stageOrder.length;
+  const determinate = (currentStage === "crawl" && found > 0) || finishedCount === stageOrder.length || draftReady || draftFailed;
   const throttled = currentStatus === "throttled" || String(pipeline?.status || crawl?.status || "").toLowerCase() === "throttled";
   const retryText = formatRetryTime(crawl?.resume_at || pipeline?.resume_at);
 
@@ -187,6 +221,11 @@ function PipelineProgress({ pipeline, crawl }) {
     detail = `The site is rate-limiting requests (HTTP 429). ${retryText || "Orb will retry automatically."}`;
   } else if (currentStatus === "paused") {
     detail = "This step is paused. Resume it when you are ready.";
+  } else if (draftFailed) {
+    detail = draftStage?.error || "Drafting could not finish. Check the connection and try again.";
+  } else if (draftReady) {
+    const pagesReady = Number(draftStage?.counts?.pages_ready || pipeline?.counts?.pages_ready || processed || 0);
+    detail = `${pagesReady} cleaned source page${pagesReady === 1 ? " is" : "s are"} ready. Start drafting to create the selected content.`;
   } else if (currentStatus === "waiting_review") {
     detail = "Content is ready for review before publishing.";
   } else if (currentStage === "crawl" && found) {
@@ -202,7 +241,7 @@ function PipelineProgress({ pipeline, crawl }) {
     <section className="mt-6 rounded-lg border border-slate-200 bg-slate-50/70 p-4" aria-label="Pipeline progress">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-sm font-extrabold text-slate-800">
-          {stageLabels[currentStage]} <span className="font-medium text-slate-500">{currentStatus.replace("_", " ")}</span>
+          {stageLabels[currentStage]} <span className="font-medium text-slate-500">{draftReady ? "ready to draft" : currentStatus.replace("_", " ")}</span>
         </p>
         <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Step {currentIndex + 1} of {stageOrder.length}</p>
       </div>
@@ -220,7 +259,74 @@ function PipelineProgress({ pipeline, crawl }) {
           <span className="pipeline-progress__indeterminate" style={{ left: baseWidth }} aria-hidden="true" />
         )}
       </div>
-      <p className={`mt-2 text-xs ${throttled ? "text-amber-700" : "text-slate-500"}`} role="status" aria-live="polite">{detail}</p>
+      <p className={`mt-2 text-xs ${throttled ? "text-amber-700" : draftFailed ? "text-red-700" : "text-slate-500"}`} role="status" aria-live="polite">{detail}</p>
+    </section>
+  );
+}
+
+function DraftReadyPanel({ pipeline, onStart, starting }) {
+  const draftStage = (pipeline?.stages || []).find((stage) => stage.stage === "generate");
+  const counts = draftStage?.counts || pipeline?.counts || {};
+  const hasJob = Boolean(counts.generation_job_id);
+  const retrying = draftStage?.status === "failed";
+  const ready = ["waiting_review", "running"].includes(draftStage?.status) && !hasJob;
+  if (!ready && !retrying) return null;
+  const outputs = (counts.outputs || pipeline?.options?.outputs || []).filter((item) => outputOptions.includes(item));
+  const pagesReady = Number(counts.pages_ready || pipeline?.counts?.pages_ready || 0);
+  return (
+    <section className={`mt-5 rounded-xl border p-5 ${retrying ? "border-red-200 bg-red-50/50" : "border-purple/20 bg-gradient-to-br from-purple/5 via-white to-sky-50"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900"><OrbMark className="h-5 w-5" /> {retrying ? "Drafting needs attention" : "Ready to draft from your source"}</p>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">
+            {retrying
+              ? draftStage?.error || "Orb could not finish creating the drafts. You can safely try again."
+              : `${pagesReady ? `${pagesReady} cleaned page${pagesReady === 1 ? " is" : "s are"}` : "Your cleaned pages are"} ready. Orb will create source-grounded drafts for the selected outputs, then bring you to review.`}
+          </p>
+          {outputs.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{outputs.map((output) => <span key={output} className="rounded-full bg-white px-2.5 py-1 text-xs font-bold uppercase text-purple shadow-sm ring-1 ring-purple/15">{output}</span>)}</div>}
+        </div>
+        <Button onClick={onStart} disabled={starting || !outputs.length}>
+          {starting ? <><Loader2 size={16} className="animate-spin" /> Starting drafts</> : <><OrbMark className="h-5 w-5" /> {retrying ? "Try again" : "Start drafting"}</>}
+        </Button>
+      </div>
+      {!outputs.length && <p className="mt-3 text-xs text-amber-700">No output type was selected for this source. Start a new source and select at least one output.</p>}
+    </section>
+  );
+}
+
+function ReviewReadyPanel({ pipeline }) {
+  const stages = Object.fromEntries((pipeline?.stages || []).map((stage) => [stage.stage, stage]));
+  const draft = stages.generate;
+  const review = stages.review;
+  const isReady = draft?.status === "done" && review?.status === "waiting_review";
+  if (!isReady) return null;
+
+  const counts = draft?.counts || pipeline?.counts || {};
+  const generated = counts.generated || {};
+  const destinations = [
+    { key: "sops", label: "Review SOPs", to: "/app/sops" },
+    { key: "faqs", label: "Review FAQs", to: "/app/faqs" },
+    { key: "products", label: "Review products", to: "/app/products" },
+  ].filter((item) => Number(generated[item.key] || 0) > 0 || (pipeline?.options?.outputs || []).includes(item.key));
+
+  return (
+    <section className="mt-5 rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-purple/5 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900"><OrbMark className="h-5 w-5" /> Drafts are ready to review</p>
+          <p className="mt-1 max-w-2xl text-sm text-slate-600">Open each content area to review, edit, approve, or reject Orb’s source-grounded drafts before publishing.</p>
+          {Object.values(generated).some((value) => Number(value) > 0) && (
+            <p className="mt-2 text-xs font-semibold text-slate-500">Generated: {Number(generated.sops || 0)} SOPs · {Number(generated.faqs || 0)} FAQs · {Number(generated.products || 0)} products</p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {destinations.map((destination) => (
+            <Link key={destination.key} to={destination.to} className="inline-flex items-center justify-center rounded-md bg-purple px-3 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-purple/90">
+              {destination.label}
+            </Link>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -511,7 +617,7 @@ function ActivityTable({ run, activities, loading, onView }) {
   );
 }
 
-function ProgressView({ run, snapshot, refresh, reset, onControl, controlling, onView }) {
+function ProgressView({ run, snapshot, refresh, reset, onControl, controlling, onStartDraft, drafting, onView }) {
   const { pipeline, crawl, activities, loading, error } = snapshot;
   const failed = activities.filter(
     (item) => item.status === "failed" || item.error,
@@ -573,6 +679,8 @@ function ProgressView({ run, snapshot, refresh, reset, onControl, controlling, o
         <div className="mt-4">
           <StageTrack pipeline={pipeline} />
         </div>
+        <DraftReadyPanel pipeline={pipeline} onStart={onStartDraft} starting={drafting} />
+        <ReviewReadyPanel pipeline={pipeline} />
         <div className="mt-6 grid gap-3 sm:grid-cols-4">
           <div className="rounded-lg bg-slate-50 p-4">
             <p className="text-xs font-bold uppercase text-slate-500">Found</p>
@@ -659,6 +767,7 @@ export default function PipelineWorkspace() {
   const [brandName, setBrandName] = useState(() => window.localStorage.getItem("orb_selected_brand_name") || "");
   const [run, setRun] = useState(null);
   const [starting, setStarting] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const [controlling, setControlling] = useState(false);
   const [content, setContent] = useState(null);
   const [snapshot, setSnapshot] = useState({
@@ -823,6 +932,18 @@ export default function PipelineWorkspace() {
       setControlling(false);
     }
   };
+  const startDrafting = async () => {
+    if (!run?.pipelineId) return;
+    setDrafting(true);
+    try {
+      await startPipelineGeneration(run.pipelineId);
+      await refresh();
+    } catch (cause) {
+      setSnapshot((current) => ({ ...current, error: cause.message || "Could not start drafting." }));
+    } finally {
+      setDrafting(false);
+    }
+  };
   const viewContent = async (url) => {
     setContent({ loading: true });
     try {
@@ -841,6 +962,8 @@ export default function PipelineWorkspace() {
           reset={reset}
           onControl={control}
           controlling={controlling}
+          onStartDraft={startDrafting}
+          drafting={drafting}
           onView={viewContent}
         />
       ) : (

@@ -168,8 +168,6 @@ class CrawlWorker:
         cooldown = await self.fetcher.note_response(response)
         if response.status_code in {429, 503}:
             cooldown = max(cooldown or 30.0, 1.0)
-            next_attempt = item.attempts + 1
-            retryable = next_attempt < self.settings.max_attempts
             host = urlsplit(item.url).hostname or ""
             async with self.pool.acquire() as connection:
                 await connection.execute(
@@ -178,12 +176,13 @@ class CrawlWorker:
                        ON CONFLICT (host) DO UPDATE SET resume_at=GREATEST(host_cooldowns.resume_at,EXCLUDED.resume_at),http_status=EXCLUDED.http_status,reason=EXCLUDED.reason,updated_at=now()""",
                     host, cooldown, response.status_code,
                 )
-                if retryable:
-                    await park_crawl_pipeline(connection, item.job_id, cooldown, f"{host} rate limited; resumes automatically")
-            outcome = "pending" if retryable else "failed"
-            error = "rate limited" if retryable else f"HTTP {response.status_code} rate limited after {next_attempt} attempts"
-            await self._finish(item, outcome, error=error, http_status=response.status_code, retry_seconds=cooldown if retryable else None, count_failure=not retryable, count_throttle=True)
-            logger.info("crawl_url job_id=%s url=%s outcome=%s status=%s attempts=%s cooldown=%s", item.job_id, item.url, outcome, response.status_code, next_attempt, cooldown)
+                await park_crawl_pipeline(connection, item.job_id, cooldown, f"{host} rate limited; resumes automatically")
+            # A server that explicitly asks us to slow down is not a failed
+            # page. Keep it pending behind the shared host cooldown so a
+            # temporary storefront throttle can recover naturally instead of
+            # discarding most of a crawl after a few attempts.
+            await self._finish(item, "pending", error="rate limited", http_status=response.status_code, retry_seconds=cooldown, count_throttle=True)
+            logger.info("crawl_url job_id=%s url=%s outcome=throttled status=%s cooldown=%s", item.job_id, response.status_code, cooldown)
             return
         if response.status_code >= 400:
             next_attempt = item.attempts + 1

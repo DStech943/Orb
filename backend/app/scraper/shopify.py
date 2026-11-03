@@ -52,6 +52,11 @@ def _plain_html(value: str | None) -> str:
 
 def _money(value: Any) -> tuple[str, str]:
     """Return a display-safe amount and ISO currency from Shopify MoneyV2 data."""
+    # Some Admin API versions expose Money as a scalar instead of MoneyV2.
+    # Preserve its amount even though that older shape does not include a
+    # currency code alongside it.
+    if isinstance(value, (str, int, float)):
+        return str(value), ""
     if not isinstance(value, dict):
         return "", ""
     return str(value.get("amount") or ""), str(value.get("currencyCode") or "")
@@ -89,17 +94,93 @@ async def _admin_query(
     return data
 
 
+async def list_admin_products(
+    settings: Settings, maximum: int = 250, *, domain: str | None = None, access_token: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return the editable Shopify catalog fields used by Orb's product library.
+
+    Credentials are supplied only by the server route and are never copied into
+    the returned product records.  Shopify limits each nested connection to a
+    page of 100 values, which comfortably covers normal variants/metafields.
+    """
+    first = max(1, min(maximum, 250))
+    query = """
+    query OrbProductLibrary($first: Int!) {
+      shop { currencyCode }
+      products(first: $first) {
+        nodes {
+          id handle title descriptionHtml status vendor productType tags templateSuffix createdAt updatedAt
+          featuredImage { url altText }
+          media(first: 100) {
+            nodes {
+              alt mediaContentType status
+              preview { image { url altText width height } }
+              ... on MediaImage { image { url altText width height } }
+            }
+          }
+          seo { title description }
+          options { name values }
+          variants(first: 100) {
+            nodes {
+              id title sku barcode price compareAtPrice
+              inventoryQuantity inventoryPolicy availableForSale selectedOptions { name value }
+              image { url altText }
+            }
+          }
+          metafields(first: 90) {
+            nodes {
+              id namespace key type value description
+              definition { name pinnedPosition }
+              reference {
+                __typename
+                ... on MediaImage { image { url altText width height } }
+                ... on GenericFile { url alt mimeType }
+                ... on Video { preview { image { url altText width height } } }
+                ... on Product { id title handle featuredImage { url altText } }
+                ... on Metaobject { id displayName handle type }
+              }
+              references(first: 20) {
+                nodes {
+                  __typename
+                  ... on MediaImage { image { url altText width height } }
+                  ... on GenericFile { url alt mimeType }
+                  ... on Video { preview { image { url altText width height } } }
+                  ... on Product { id title handle featuredImage { url altText } }
+                  ... on Metaobject { id displayName handle type }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = await _admin_query(settings, query, {"first": first}, domain=domain, access_token=access_token)
+    except ShopifyAdminUnavailable:
+        # `inventoryQuantity` needs Shopify's optional read_inventory scope.
+        # Do not make an otherwise valid read_products connection unusable just
+        # because that extra scope has not been granted.
+        data = await _admin_query(
+            settings,
+            query.replace("inventoryQuantity ", ""),
+            {"first": first},
+            domain=domain,
+            access_token=access_token,
+        )
+    currency = str((data.get("shop") or {}).get("currencyCode") or "")
+    nodes = data.get("products", {}).get("nodes", [])
+    # Older Admin API versions expose variant prices as a Money scalar. Carry
+    # the shop currency alongside each product so the UI can still format it.
+    return [{**item, "_orb_currency": currency} for item in nodes if isinstance(item, dict) and item.get("id")]
+
+
 async def list_admin_resources(
     settings: Settings, maximum: int = 250, *, domain: str | None = None, access_token: str | None = None,
 ) -> list[ShopifyResource]:
     """Read brand knowledge through the authenticated Admin API, never storefront HTML."""
     first = max(1, min(maximum, 250))
-    products_data = await _admin_query(settings, """
-    query ImportOrbProducts($first: Int!) {
-      products(first: $first) { nodes { id handle title descriptionHtml vendor productType
-        variants(first: 100) { nodes { title sku price { amount currencyCode } availableForSale } } } }
-    }
-    """, {"first": first}, domain=domain, access_token=access_token)
+    products = await list_admin_products(settings, first, domain=domain, access_token=access_token)
 
     content_data: dict[str, Any] = {}
     try:
@@ -125,7 +206,7 @@ async def list_admin_resources(
     store_host, _ = _admin_credentials(settings, domain, access_token)
     storefront = f"https://{store_host}"
     resources: list[ShopifyResource] = []
-    for product in products_data.get("products", {}).get("nodes", []):
+    for product in products:
         handle = product.get("handle")
         if not handle:
             continue

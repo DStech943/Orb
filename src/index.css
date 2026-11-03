@@ -187,3 +187,13 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 .app-shell .border-b-2, .app-shell .border-y-2, .app-shell .border-r-2, .app-shell .border-t-2, .app-shell .border-x-2 { border-color: rgb(226 232 240) !important; }
 .app-shell .bg-ink { background-color: #ffffff; color: #111111; }
 .app-shell .bg-ink .text-white, .app-shell .bg-ink .text-white\/70, .app-shell .bg-ink .text-white\/75 { color: #64748b; }
+
+/* Separate the Shopify-inspired product workspace into calm, distinct surfaces.
+   Form controls and media tiles deliberately stay white for a clear editing target. */
+.product-workspace > div > main > section,
+.product-workspace > div > aside > section {
+  /* Deliberately a full slate-100 panel: these are the large product sections,
+     not the white input fields inside them. */
+  background-color: #f1f5f9 !important;
+  border-color: #dbe3ed;
+}

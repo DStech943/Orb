@@ -86,21 +86,52 @@ async def resume_due_pipelines(connection: asyncpg.Connection) -> list[dict[str,
 
 
 async def advance_completed_crawl(connection: asyncpg.Connection, job_id: str) -> None:
-    """Advance crawl and parse automatically; review remains the human gate.
+    """Advance crawl and parse automatically; drafting is an explicit action.
 
     Extraction already creates clean page text. The explicit parse stage records
     that normalization so pipeline consumers have one stable progress object.
+    Do not mark generation as running until a generation job has actually been
+    scheduled; doing so previously left the UI showing an indefinite loader.
     """
-    pipeline = await connection.fetchrow("SELECT id FROM pipeline_runs WHERE crawl_job_id=$1::uuid AND status='running'", job_id)
+    pipeline = await connection.fetchrow(
+        "SELECT id,options FROM pipeline_runs WHERE crawl_job_id=$1::uuid AND status='running'",
+        job_id,
+    )
     if not pipeline:
         return
     pipeline_id = str(pipeline["id"])
     page_count = await connection.fetchval("SELECT count(*) FROM pages WHERE last_job_id=$1::uuid", job_id)
-    await connection.execute("UPDATE pipeline_stages SET status='done', counts=$2::jsonb, finished_at=coalesce(finished_at,now()) WHERE pipeline_run_id=$1::uuid AND stage='crawl'", pipeline_id, {"pages_fetched": page_count})
-    await connection.execute("UPDATE pipeline_stages SET status='done', counts=$2::jsonb, started_at=coalesce(started_at,now()), finished_at=now() WHERE pipeline_run_id=$1::uuid AND stage='parse'", pipeline_id, {"pages_parsed": page_count})
-    await connection.execute("UPDATE pipeline_stages SET status='running', started_at=coalesce(started_at,now()) WHERE pipeline_run_id=$1::uuid AND stage='generate'", pipeline_id)
-    # Generation is enabled only when model credentials and a category template
-    # are configured. Until then, expose an explicit review gate rather than
-    # silently inventing content.
-    await connection.execute("UPDATE pipeline_stages SET status='waiting_review', counts=$2::jsonb, started_at=coalesce(started_at,now()) WHERE pipeline_run_id=$1::uuid AND stage='review'", pipeline_id, {"pages_ready": page_count})
-    await connection.execute("UPDATE pipeline_runs SET current_stage='generate', counts=$2::jsonb WHERE id=$1::uuid", pipeline_id, {"pages_fetched": page_count, "pages_parsed": page_count})
+    options = pipeline["options"] or {}
+    outputs = [item for item in options.get("outputs", []) if item in {"sops", "faqs", "products"}]
+    draft_context = {
+        "pages_ready": page_count,
+        "outputs": outputs,
+        "generation_status": "not_started",
+        "message": "Source pages are ready. Start drafting when you are ready to create content.",
+    }
+    await connection.execute(
+        """UPDATE pipeline_stages SET status='done', counts=$2::jsonb, error=NULL,
+           finished_at=coalesce(finished_at,now()) WHERE pipeline_run_id=$1::uuid AND stage='crawl'""",
+        pipeline_id, {"pages_fetched": page_count},
+    )
+    await connection.execute(
+        """UPDATE pipeline_stages SET status='done', counts=$2::jsonb, error=NULL,
+           started_at=coalesce(started_at,now()), finished_at=now() WHERE pipeline_run_id=$1::uuid AND stage='parse'""",
+        pipeline_id, {"pages_parsed": page_count},
+    )
+    await connection.execute(
+        """UPDATE pipeline_stages SET status='waiting_review', counts=$2::jsonb, error=NULL,
+           started_at=coalesce(started_at,now()), finished_at=coalesce(finished_at,now())
+           WHERE pipeline_run_id=$1::uuid AND stage='generate'""",
+        pipeline_id, draft_context,
+    )
+    await connection.execute(
+        """UPDATE pipeline_stages SET status='queued', counts='{}'::jsonb, error=NULL,
+           started_at=NULL, finished_at=NULL WHERE pipeline_run_id=$1::uuid AND stage='review'""",
+        pipeline_id,
+    )
+    await connection.execute(
+        """UPDATE pipeline_runs SET status='review', current_stage='generate', error=NULL,
+           counts=$2::jsonb WHERE id=$1::uuid""",
+        pipeline_id, {"pages_fetched": page_count, "pages_parsed": page_count, **draft_context},
+    )
