@@ -50,22 +50,40 @@ async def publish_points(pool: asyncpg.Pool, settings: Settings, brand_name: str
     base_url, headers = await _client(pool)
     collection = collection_name(settings.qdrant_collection_prefix, brand_name, kind)
     try:
+        points = []
+        for item in items:
+            payload = dict(item["payload"])
+            payload.update({"brand_name": brand_name, "kind": kind, "orb_id": str(item["id"]), "status": "published"})
+            source_text = "\n".join(str(value) for value in payload.values() if isinstance(value, str))
+            points.append({"id": str(item["id"]), "vector": await embed_text(pool, settings, source_text), "payload": payload})
+        vector_size = len(points[0]["vector"])
         async with httpx.AsyncClient(timeout=60) as client:
             exists = await client.get(f"{base_url}/collections/{collection}", headers=headers)
             if exists.status_code == 404:
                 created = await client.put(
                     f"{base_url}/collections/{collection}", headers=headers,
-                    json={"vectors": {"size": settings.embedding_dimensions, "distance": "Cosine"}},
+                    json={"vectors": {"size": vector_size, "distance": "Cosine"}},
                 )
                 created.raise_for_status()
             else:
                 exists.raise_for_status()
-            points = []
-            for item in items:
-                payload = dict(item["payload"])
-                payload.update({"brand_name": brand_name, "kind": kind, "orb_id": str(item["id"]), "status": "published"})
-                source_text = "\n".join(str(value) for value in payload.values() if isinstance(value, str))
-                points.append({"id": str(item["id"]), "vector": await embed_text(pool, settings, source_text), "payload": payload})
+                result = exists.json().get("result", {})
+                vectors = result.get("config", {}).get("params", {}).get("vectors", {})
+                existing_size = vectors.get("size") if isinstance(vectors, dict) else None
+                if isinstance(existing_size, int) and existing_size != vector_size:
+                    point_count = int(result.get("points_count") or 0)
+                    if point_count:
+                        raise PublishUnavailable(
+                            f"Qdrant collection {collection} uses {existing_size}-dimension vectors, but the embedding provider returned {vector_size}. "
+                            "Use a matching embedding model or recreate the collection."
+                        )
+                    deleted = await client.delete(f"{base_url}/collections/{collection}", headers=headers)
+                    deleted.raise_for_status()
+                    created = await client.put(
+                        f"{base_url}/collections/{collection}", headers=headers,
+                        json={"vectors": {"size": vector_size, "distance": "Cosine"}},
+                    )
+                    created.raise_for_status()
             result = await client.put(f"{base_url}/collections/{collection}/points?wait=true", headers=headers, json={"points": points})
             result.raise_for_status()
     except (httpx.HTTPError, PublishUnavailable, GenerationUnavailable) as exc:
@@ -101,7 +119,7 @@ async def scroll_points(
     return [point for point in points if isinstance(point, dict) and point.get("id") is not None and isinstance(point.get("payload"), dict)]
 
 
-async def _ensure_display_collection(client: httpx.AsyncClient, base_url: str, headers: dict[str, str], settings: Settings, collection: str) -> None:
+async def _ensure_display_collection(client: httpx.AsyncClient, base_url: str, headers: dict[str, str], collection: str, vector_size: int) -> None:
     exists = await client.get(f"{base_url}/collections/{collection}", headers=headers)
     if exists.status_code != 404:
         exists.raise_for_status()
@@ -109,7 +127,7 @@ async def _ensure_display_collection(client: httpx.AsyncClient, base_url: str, h
     created = await client.put(
         f"{base_url}/collections/{collection}",
         headers=headers,
-        json={"vectors": {"size": settings.embedding_dimensions, "distance": "Cosine"}},
+        json={"vectors": {"size": vector_size, "distance": "Cosine"}},
     )
     created.raise_for_status()
 
@@ -132,12 +150,13 @@ async def upsert_display_point(
             node_text.extend(str(node.get(key, "")) for key in ("type", "title", "body"))
     source_text = "\n".join([*(str(value) for value in stored_payload.values() if isinstance(value, str)), *node_text])
     try:
+        vector = await embed_text(pool, settings, source_text)
         async with httpx.AsyncClient(timeout=60) as client:
-            await _ensure_display_collection(client, base_url, headers, settings, collection)
+            await _ensure_display_collection(client, base_url, headers, collection, len(vector))
             response = await client.put(
                 f"{base_url}/collections/{collection}/points?wait=true",
                 headers=headers,
-                json={"points": [{"id": str(flow_id), "vector": await embed_text(pool, settings, source_text), "payload": stored_payload}]},
+                json={"points": [{"id": str(flow_id), "vector": vector, "payload": stored_payload}]},
             )
             response.raise_for_status()
     except (httpx.HTTPError, GenerationUnavailable) as exc:

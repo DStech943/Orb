@@ -135,6 +135,10 @@ class KnowledgePayload(RequestModel):
     payload: dict[str, Any]
 
 
+class KnowledgePublishRequest(RequestModel):
+    brand_name: str = Field(min_length=1)
+
+
 class FlowPayload(RequestModel):
     brand_name: str = Field(min_length=1)
     payload: dict[str, Any]
@@ -1436,29 +1440,37 @@ async def sync_shopify_products(brand_id: str, payload: ShopifySyncRequest, requ
 
 @router.post("/brands/{brand_id}/publish")
 async def publish_brand(brand_id: str, payload: PublishRequest, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    brand = await _brand(request.app.state.supabase_db, brand_id)
+    brand = await _remote_brand(request, brand_id)
     published: dict[str, dict[str, Any]] = {}
     for kind in payload.kinds:
         if kind == "product":
-            rows = await request.app.state.supabase_db.fetch("SELECT id,payload FROM cx_copilot.orb_products WHERE brand_id=$1::uuid AND status='active'", brand_id)
+            rows = await _supabase_rows(request, "orb_products", {
+                "select": "id,payload", "brand_id": f"eq.{brand_id}", "status": "eq.active",
+            })
         else:
-            rows = await request.app.state.supabase_db.fetch("SELECT id,payload FROM cx_copilot.orb_generated_content WHERE brand_id=$1::uuid AND kind=$2 AND status='approved'", brand_id, kind)
-        items = [{"id": row["id"], "payload": decode_jsonb(row["payload"])} for row in rows]
+            rows = await _supabase_rows(request, "orb_generated_content", {
+                "select": "id,payload", "brand_id": f"eq.{brand_id}", "kind": f"eq.{kind}", "status": "eq.approved",
+            })
+        items = [{"id": str(row["id"]), "payload": decode_jsonb(row["payload"])} for row in rows]
         if not items:
             published[kind] = {"published": 0, "collection": None}
             continue
         try:
-            collection = await publish_points(request.app.state.supabase_db, request.app.state.settings, brand["name"], kind, items)
+            collection = await publish_points(request.app.state.db, request.app.state.settings, brand["name"], kind, items)
             ids = [item["id"] for item in items]
             if kind == "product":
-                await request.app.state.supabase_db.execute("UPDATE cx_copilot.orb_products SET qdrant_published_at=now(),qdrant_error=NULL WHERE id=ANY($1::uuid[])", ids)
+                table, next_status = "orb_products", None
             else:
-                await request.app.state.supabase_db.execute("UPDATE cx_copilot.orb_generated_content SET status='published',qdrant_published_at=now(),qdrant_error=NULL WHERE id=ANY($1::uuid[])", ids)
+                table, next_status = "orb_generated_content", "published"
+            changes: dict[str, Any] = {"qdrant_published_at": datetime.now(timezone.utc).isoformat(), "qdrant_error": None}
+            if next_status:
+                changes["status"] = next_status
+            await _supabase_write(request, "PATCH", table, params={"id": f"in.({','.join(ids)})"}, payload=changes, prefer="return=minimal")
             published[kind] = {"published": len(items), "collection": collection}
         except PublishUnavailable as exc:
             ids = [item["id"] for item in items]
-            table = "cx_copilot.orb_products" if kind == "product" else "cx_copilot.orb_generated_content"
-            await request.app.state.supabase_db.execute(f"UPDATE {table} SET qdrant_error=$2 WHERE id=ANY($1::uuid[])", ids, str(exc)[:2000])
+            table = "orb_products" if kind == "product" else "orb_generated_content"
+            await _supabase_write(request, "PATCH", table, params={"id": f"in.({','.join(ids)})"}, payload={"qdrant_error": str(exc)[:2000]}, prefer="return=minimal")
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"published": published}
 
@@ -1669,13 +1681,93 @@ async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: s
         content_status = str(payload.payload.get("status") or "draft").strip().lower()
         if content_status not in {"draft", "approved", "rejected"}:
             content_status = "draft"
+
+        # Approval is the publishing action.  Keep the record as a draft until
+        # Qdrant has accepted the upsert, so the library can never report an
+        # item as approved while the agent's knowledge collection lacks it.
+        # Retrying after a transient failure is safe because Qdrant upserts by
+        # the stable Orb record UUID.
+        pending_status = "draft" if content_status == "approved" else content_status
         rows = await _supabase_write(request, "PATCH", "orb_generated_content", params={
             "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}", "select": "id,payload",
-        }, payload={"payload": payload.payload, "status": content_status})
+        }, payload={"payload": payload.payload, "status": pending_status})
     if not rows:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     row = rows[0]
-    return {"point": {"id": str(row["id"]), "payload": decode_jsonb(row["payload"])}}
+    if kind == "products" or content_status != "approved":
+        return {"point": {"id": str(row["id"]), "payload": decode_jsonb(row["payload"])}}
+
+    stored_payload = decode_jsonb(row["payload"])
+    stored_payload = dict(stored_payload) if isinstance(stored_payload, dict) else {}
+    try:
+        collection = await publish_points(
+            request.app.state.db,
+            request.app.state.settings,
+            brand["name"],
+            content_kind,
+            [{"id": str(row["id"]), "payload": stored_payload}],
+        )
+    except PublishUnavailable as exc:
+        # Preserve the draft and surface the real publishing failure.  The user
+        # can correct the Qdrant/embedding configuration and approve again.
+        await _supabase_write(request, "PATCH", "orb_generated_content", params={
+            "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}",
+        }, payload={"qdrant_error": str(exc)[:2000]})
+        raise HTTPException(status_code=503, detail=f"Approval could not publish to Qdrant: {exc}") from exc
+
+    approved_rows = await _supabase_write(request, "PATCH", "orb_generated_content", params={
+        "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}", "select": "id,payload",
+    }, payload={
+        "status": "approved",
+        "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
+        "qdrant_error": None,
+    })
+    if not approved_rows:
+        # The point is already in Qdrant, but it is safe to retry approval: it
+        # will overwrite that same point and then complete the state update.
+        raise HTTPException(status_code=503, detail="Published to Qdrant, but Orb could not finalise the approval state. Try approving again.")
+    return {
+        "point": {"id": str(approved_rows[0]["id"]), "payload": decode_jsonb(approved_rows[0]["payload"])},
+        "qdrant_collection": collection,
+    }
+
+
+@router.post("/knowledge/{kind}/publish-approved")
+async def publish_existing_approved_knowledge(kind: Literal["sops", "faqs"], payload: KnowledgePublishRequest, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    """Backfill older approved drafts that predate approval-time publishing."""
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    content_kind = "sop" if kind == "sops" else "faq"
+    # Publishing is an idempotent Qdrant upsert.  Do not trust a historic
+    # timestamp alone: a prior deployment could have recorded it before a
+    # collection/point was lost or before its write completed.
+    rows = await _supabase_rows(request, "orb_generated_content", {
+        "select": "id,payload",
+        "brand_id": f"eq.{brand['id']}",
+        "kind": f"eq.{content_kind}",
+        "status": "eq.approved",
+        "order": "created_at.asc",
+    })
+    if not rows:
+        return {"published": 0, "collection": None}
+    items = [
+        {"id": str(row["id"]), "payload": decode_jsonb(row["payload"]) or {}}
+        for row in rows
+    ]
+    try:
+        collection = await publish_points(
+            request.app.state.db, request.app.state.settings, brand["name"], content_kind, items,
+        )
+    except PublishUnavailable as exc:
+        ids = [str(row["id"]) for row in rows]
+        await _supabase_write(request, "PATCH", "orb_generated_content", params={
+            "id": f"in.({','.join(ids)})",
+        }, payload={"qdrant_error": str(exc)[:2000]}, prefer="return=minimal")
+        raise HTTPException(status_code=503, detail=f"Could not publish approved {kind} to Qdrant: {exc}") from exc
+    ids = [str(row["id"]) for row in rows]
+    await _supabase_write(request, "PATCH", "orb_generated_content", params={
+        "id": f"in.({','.join(ids)})",
+    }, payload={"qdrant_published_at": datetime.now(timezone.utc).isoformat(), "qdrant_error": None}, prefer="return=minimal")
+    return {"published": len(items), "collection": collection}
 
 
 @router.delete("/knowledge/{kind}/{item_id}", status_code=204, response_class=Response)

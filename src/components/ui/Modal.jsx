@@ -1,4 +1,12 @@
 import React, { useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import useFocusTrap from '../../hooks/useFocusTrap'
-export default function Modal({ open, onClose, title, children }) { const ref = useRef(null); useFocusTrap(ref, open, onClose); if (!open) return null; return <div className="fixed inset-0 z-[80] grid place-items-center bg-ink/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={ref} role="dialog" aria-modal="true" aria-labelledby="modal-title" className="w-full max-w-lg border-2 border-ink bg-white p-5 shadow-brutal-lg"><div className="mb-5 flex items-center justify-between"><h2 id="modal-title" className="text-xl font-extrabold">{title}</h2><button onClick={onClose} aria-label="Close dialog"><X /></button></div>{children}</section></div> }
+export default function Modal({ open, onClose, title, children }) {
+  const ref = useRef(null)
+  useFocusTrap(ref, open, onClose)
+  if (!open || typeof document === 'undefined') return null
+  // Pages use entrance transforms. A fixed element inside a transformed parent
+  // becomes page-relative, which can leave the dialog off-screen on long lists.
+  return createPortal(<div className="fixed inset-0 z-[110] grid place-items-center bg-ink/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={ref} role="dialog" aria-modal="true" aria-labelledby="modal-title" className="w-full max-w-lg border-2 border-ink bg-white p-5 shadow-brutal-lg"><div className="mb-5 flex items-center justify-between"><h2 id="modal-title" className="text-xl font-extrabold">{title}</h2><button onClick={onClose} aria-label="Close dialog"><X /></button></div>{children}</section></div>, document.body)
+}

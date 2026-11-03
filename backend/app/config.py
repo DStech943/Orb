@@ -1,6 +1,7 @@
 """Application configuration."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -64,6 +65,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_auth(self) -> "Settings":
+        # Docker Compose declares both historical variable names.  When the
+        # first alias exists but is an empty string, pydantic's AliasChoices
+        # does not continue to the populated fallback.  Prefer any non-empty
+        # environment value so REST-only/local deployments use the actual
+        # Supabase database rather than silently falling back to crawler DB.
+        if not self.supabase_database_url:
+            self.supabase_database_url = (
+                os.getenv("SUPABASE_DATABASE_URL", "").strip()
+                or os.getenv("SUPABASE_DB_URL", "").strip()
+                or None
+            )
         if self.env == "production" and self.auth_disabled:
             raise ValueError("AUTH_DISABLED=true is forbidden in production")
         if not self.auth_disabled and not self.jwt_secret:

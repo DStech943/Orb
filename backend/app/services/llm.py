@@ -126,9 +126,12 @@ async def embed_text(pool: asyncpg.Pool, settings: Settings, text: str) -> list[
         except SecretUnavailable as exc:
             raise GenerationUnavailable(str(exc)) from exc
     try:
+        embedding_endpoint = base_url.rstrip("/")
+        if not embedding_endpoint.endswith("/embeddings"):
+            embedding_endpoint = f"{embedding_endpoint}/embeddings"
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
-                f"{base_url.rstrip('/')}/embeddings",
+                embedding_endpoint,
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"model": model, "input": text[:30_000]},
             )
@@ -138,6 +141,4 @@ async def embed_text(pool: asyncpg.Pool, settings: Settings, text: str) -> list[
         raise GenerationUnavailable(f"Embedding request failed: {exc}") from exc
     if not isinstance(vector, list) or not all(isinstance(value, (int, float)) for value in vector):
         raise GenerationUnavailable("Embedding provider returned an invalid vector")
-    if len(vector) != settings.embedding_dimensions:
-        raise GenerationUnavailable(f"Embedding dimension {len(vector)} does not match EMBEDDING_DIMENSIONS={settings.embedding_dimensions}")
     return [float(value) for value in vector]

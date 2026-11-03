@@ -9,11 +9,14 @@ async function listDirectBrands() {
     const { data, error } = await supabase
       .schema('cx_copilot')
       .from('brands')
-      .select('id, name, brand_name, display_name, slug')
+      // `cx_copilot.brands` exposes its display label as `name`. Selecting
+      // legacy aliases here makes PostgREST reject the entire query when one
+      // of those columns is absent (for example `brand_name`).
+      .select('id, name')
     if (error) return []
     return (data || []).map((brand) => ({
       id: brand.id,
-      name: brand.name || brand.brand_name || brand.display_name || brand.slug || String(brand.id),
+      name: brand.name || String(brand.id),
       ai_agent_name: '',
     }))
   } catch { return [] }

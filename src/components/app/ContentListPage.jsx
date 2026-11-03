@@ -153,17 +153,29 @@ function ShopifyMetafieldSection({ product, onChange }) {
   </section>
 }
 
-function ShopifyProductWorkspace({ product, onChange }) {
+function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields }) {
   const variants = Array.isArray(product.variants) ? product.variants : []
   const savedMedia = Array.isArray(product.media) ? product.media : []
   const media = savedMedia.length ? savedMedia : product.featuredImage?.url ? [{ id: 'featured-image', image: product.featuredImage, alt: product.featuredImage.altText || '' }] : []
   const [showAllMedia, setShowAllMedia] = useState(false)
+  const [loadingVariantMetafields, setLoadingVariantMetafields] = useState(false)
+  const [variantMetafieldError, setVariantMetafieldError] = useState('')
   const visibleMedia = showAllMedia ? media : media.slice(0, 4)
   useEffect(() => { setShowAllMedia(false) }, [product.id])
   const fieldClass = 'mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-purple focus:ring-2 focus:ring-purple/15'
   const update = (key, value) => onChange({ ...product, [key]: value })
   const updateMedia = (index, patch) => update('media', media.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch, image: { ...(item.image || item.preview?.image || {}), ...(patch.image || {}) } } : item))
   const updateVariant = (index, patch) => update('variants', variants.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  const fetchVariantMetafields = async () => {
+    if (!loadVariantMetafields) return
+    setLoadingVariantMetafields(true)
+    setVariantMetafieldError('')
+    try {
+      const result = await loadVariantMetafields(product)
+      const fieldsByVariant = new Map((result?.variants || []).map((variant) => [variant.id, Array.isArray(variant.metafields) ? variant.metafields : []]))
+      update('variants', variants.map((variant) => ({ ...variant, metafields: fieldsByVariant.get(variant.id) || [] })))
+    } catch (error) { setVariantMetafieldError(error.message || 'Could not load variant metafields.') } finally { setLoadingVariantMetafields(false) }
+  }
   const state = String(product.status || 'DRAFT').toUpperCase()
   return <div className="product-workspace mx-auto max-w-[1320px] pb-4">
     <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_290px]">
@@ -171,15 +183,15 @@ function ShopifyProductWorkspace({ product, onChange }) {
         <div className="flex flex-wrap items-center gap-3"><h1 className="text-3xl font-extrabold tracking-tight text-ink">{product.name || 'Untitled product'}</h1><span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${state === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{state === 'ACTIVE' ? 'Active' : state.charAt(0) + state.slice(1).toLowerCase()}</span></div>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><label className="block text-sm font-bold text-ink">Title<input className={fieldClass} value={product.name || ''} onChange={(event) => update('name', event.target.value)} /></label><label className="mt-4 block text-sm font-bold text-ink">Description<textarea className={`${fieldClass} min-h-44 resize-y leading-6`} value={product.description || ''} onChange={(event) => update('description', event.target.value)} /></label><div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="block text-sm font-bold text-ink">Price<input className={fieldClass} value={product.price || ''} onChange={(event) => update('price', event.target.value)} /></label><label className="block text-sm font-bold text-ink">Product URL<input className={fieldClass} value={product.url || ''} onChange={(event) => update('url', event.target.value)} /></label></div></section>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-extrabold text-ink">Media</h2><p className="mt-1 text-sm text-slate-500">Product imagery imported from Shopify.</p></div><button type="button" onClick={() => update('media', [...media, { alt: '', image: { url: '', altText: '' } }])} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-ink shadow-sm hover:bg-slate-50"><Plus size={16} />Add media</button></div>{media.length ? <><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{visibleMedia.map((item, index) => { const image = item.image || item.preview?.image || {}; const source = image.url || ''; const mediaIndex = media.indexOf(item); return <div key={item.id || `${source}-${mediaIndex}`} className="group overflow-hidden rounded-xl border border-slate-200 bg-slate-50"><div className="aspect-square bg-slate-100">{source ? <img src={source} alt={item.alt || image.altText || product.name || ''} className="h-full w-full object-cover" /> : <label className="grid h-full cursor-pointer place-items-center p-3 text-center text-xs font-bold text-slate-400">Image URL<input className="sr-only" value={source} onChange={(event) => updateMedia(mediaIndex, { image: { ...image, url: event.target.value } })} /></label>}</div><div className="flex items-center gap-2 border-t border-slate-200 bg-white px-2 py-2"><input aria-label="Image alt text" className="min-w-0 flex-1 bg-transparent text-xs outline-none" value={item.alt || image.altText || ''} placeholder="Alt text" onChange={(event) => updateMedia(mediaIndex, { alt: event.target.value, image: { ...image, altText: event.target.value } })} /><button type="button" aria-label="Remove media" onClick={() => update('media', media.filter((_, itemIndex) => itemIndex !== mediaIndex))} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"><Trash2 size={14} /></button></div></div> })}</div>{media.length > 4 ? <button type="button" onClick={() => setShowAllMedia((value) => !value)} className="mt-4 text-sm font-bold text-purple hover:text-purple/75">{showAllMedia ? 'Show less' : `Show all ${media.length} media`}</button> : null}</> : <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No media is stored for this product yet. Use Sync to import it from Shopify.</p>}</section>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Variants</h2>{variants.length ? <div className="mt-4 overflow-hidden rounded-xl border border-slate-200"><div className="grid grid-cols-[1.2fr_1fr_0.8fr] gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-500"><span>Variant</span><span>SKU</span><span>Price</span></div>{variants.map((variant, index) => <div key={variant.id || index} className="grid grid-cols-[1.2fr_1fr_0.8fr] gap-3 border-b border-slate-100 px-3 py-3 last:border-0"><input className="min-w-0 bg-transparent text-sm font-semibold outline-none" value={variant.title || ''} onChange={(event) => updateVariant(index, { title: event.target.value })} /><input className="min-w-0 bg-transparent text-sm outline-none" value={variant.sku || ''} placeholder="No SKU" onChange={(event) => updateVariant(index, { sku: event.target.value })} /><input className="min-w-0 bg-transparent text-sm outline-none" value={variant.price?.amount || ''} onChange={(event) => updateVariant(index, { price: { ...(variant.price || {}), amount: event.target.value } })} /></div>)}</div> : <p className="mt-4 text-sm text-slate-500">No variants were returned by Shopify.</p>}</section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-extrabold text-ink">Variants</h2><p className="mt-1 text-sm text-slate-500">Each variant can have its own Shopify metafields.</p></div>{loadVariantMetafields ? <button type="button" onClick={fetchVariantMetafields} disabled={loadingVariantMetafields} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-ink shadow-sm hover:bg-slate-50 disabled:opacity-60">{loadingVariantMetafields ? 'Loading metafields…' : 'Load variant metafields'}</button> : null}</div>{variantMetafieldError ? <p className="mt-3 text-sm text-red-600">{variantMetafieldError}</p> : null}{variants.length ? <div className="mt-4 overflow-hidden rounded-xl border border-slate-200"><div className="grid grid-cols-[1.2fr_1fr_0.8fr] gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-extrabold uppercase tracking-wide text-slate-500"><span>Variant</span><span>SKU</span><span>Price</span></div>{variants.map((variant, index) => <div key={variant.id || index} className="border-b border-slate-100 px-3 py-3 last:border-0"><div className="grid grid-cols-[1.2fr_1fr_0.8fr] gap-3"><input className="min-w-0 bg-transparent text-sm font-semibold outline-none" value={variant.title || ''} onChange={(event) => updateVariant(index, { title: event.target.value })} /><input className="min-w-0 bg-transparent text-sm outline-none" value={variant.sku || ''} placeholder="No SKU" onChange={(event) => updateVariant(index, { sku: event.target.value })} /><input className="min-w-0 bg-transparent text-sm outline-none" value={variant.price?.amount || ''} onChange={(event) => updateVariant(index, { price: { ...(variant.price || {}), amount: event.target.value } })} /></div>{Array.isArray(variant.metafields) && variant.metafields.length ? <div className="mt-3 flex flex-wrap gap-1.5">{variant.metafields.map((field) => <span key={field.id || `${field.namespace}-${field.key}`} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">{metafieldDisplayName(field)}: {metafieldPreview(field)}</span>)}</div> : null}</div>)}</div> : <p className="mt-4 text-sm text-slate-500">No variants were returned by Shopify.</p>}</section>
         <ShopifyMetafieldSection product={product} onChange={onChange} />
       </main>
-      <aside className="space-y-5 xl:sticky xl:top-0"><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Status</h2><select className={fieldClass} value={state} onChange={(event) => update('status', event.target.value)}><option value="ACTIVE">Active</option><option value="DRAFT">Draft</option><option value="ARCHIVED">Archived</option></select><div className="mt-5 border-t border-slate-100 pt-4"><h3 className="text-sm font-extrabold text-ink">Publishing</h3><p className="mt-2 text-sm text-slate-500">Changes are saved to Orb’s support knowledge. Sync refreshes this product from Shopify.</p></div></section><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Product organization</h2><label className="mt-4 block text-sm font-bold">Type<input className={fieldClass} value={product.productType || ''} onChange={(event) => update('productType', event.target.value)} /></label><label className="mt-4 block text-sm font-bold">Vendor<input className={fieldClass} value={product.vendor || ''} onChange={(event) => update('vendor', event.target.value)} /></label><label className="mt-4 block text-sm font-bold">Collections / tags<input className={fieldClass} value={(product.tags || []).join(', ')} onChange={(event) => update('tags', event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean))} /></label></section><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Search preview</h2><label className="mt-4 block text-sm font-bold">SEO title<input className={fieldClass} value={product.seo?.title || ''} onChange={(event) => update('seo', { ...(product.seo || {}), title: event.target.value })} /></label><label className="mt-4 block text-sm font-bold">SEO description<textarea className={`${fieldClass} min-h-24 resize-y`} value={product.seo?.description || ''} onChange={(event) => update('seo', { ...(product.seo || {}), description: event.target.value })} /></label></section></aside>
+      <aside className="space-y-5 xl:sticky xl:top-0"><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Status</h2><select className={fieldClass} value={state} onChange={(event) => update('status', event.target.value)}><option value="ACTIVE">Active</option><option value="DRAFT">Draft</option><option value="ARCHIVED">Archived</option></select><div className="mt-5 border-t border-slate-100 pt-4"><h3 className="text-sm font-extrabold text-ink">Publishing</h3><p className="mt-2 text-sm text-slate-500">Changes are saved to Orb’s support knowledge. Sync refreshes this product from Shopify.</p></div></section><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Product organization</h2><label className="mt-4 block text-sm font-bold">Type<input className={fieldClass} value={product.productType || ''} onChange={(event) => update('productType', event.target.value)} /></label><label className="mt-4 block text-sm font-bold">Vendor<input className={fieldClass} value={product.vendor || ''} onChange={(event) => update('vendor', event.target.value)} /></label><label className="mt-4 block text-sm font-bold">Tags<input className={fieldClass} placeholder="Add tags, separated by commas" value={(product.tags || []).join(', ')} onChange={(event) => update('tags', event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean))} /></label><label className="mt-4 block text-sm font-bold">Theme template<select className={fieldClass} value={product.templateSuffix || ''} onChange={(event) => update('templateSuffix', event.target.value)}><option value="">Default product</option>{product.templateSuffix ? <option value={product.templateSuffix}>{product.templateSuffix}</option> : null}</select></label></section><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Search preview</h2><label className="mt-4 block text-sm font-bold">SEO title<input className={fieldClass} value={product.seo?.title || ''} onChange={(event) => update('seo', { ...(product.seo || {}), title: event.target.value })} /></label><label className="mt-4 block text-sm font-bold">SEO description<textarea className={`${fieldClass} min-h-24 resize-y`} value={product.seo?.description || ''} onChange={(event) => update('seo', { ...(product.seo || {}), description: event.target.value })} /></label></section></aside>
     </div>
   </div>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields }) {
+export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, loadVariantMetafields, publishApproved }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isProduct = kind === 'product'
@@ -194,6 +206,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const [confirmApproveAll, setConfirmApproveAll] = useState(false)
   const [approving, setApproving] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [publishingApproved, setPublishingApproved] = useState(false)
   const [savingShopify, setSavingShopify] = useState(false)
   const scrollPosition = useRef(0)
 
@@ -212,6 +225,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const draftIds = useMemo(() => data
     .filter((item) => String(item.status || '').toLowerCase() === 'draft')
     .map((item) => item.id), [data])
+  const approvedCount = useMemo(() => data.filter((item) => String(item.status || '').toLowerCase() === 'approved').length, [data])
 
   const openItem = (item) => {
     scrollPosition.current = window.scrollY
@@ -273,6 +287,20 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       showToast(`${result?.synced || 0} Shopify ${result?.synced === 1 ? 'product' : 'products'} synced.`)
     } catch (syncError) { showToast(syncError.message || 'Could not sync Shopify products.') } finally { setSyncing(false) }
   }
+  const publishExistingApproved = async () => {
+    if (!publishApproved) return
+    setPublishingApproved(true)
+    try {
+      const result = await publishApproved()
+      await reload()
+      const count = result?.published || 0
+      showToast(count ? `${count} approved ${count === 1 ? 'item has' : 'items have'} been published to Qdrant.` : 'All approved items are already in Qdrant.')
+    } catch (publishError) {
+      showToast(publishError.message || 'Could not publish the approved items to Qdrant.')
+    } finally {
+      setPublishingApproved(false)
+    }
+  }
   const saveMetafieldsToShopify = async () => {
     if (!saveProductMetafields || !selected) return
     setSavingShopify(true)
@@ -295,7 +323,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   if (error) return <KnowledgeAccessState error={error} title={title} onRetry={reload} />
 
   const selectableColumns = isProduct ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]
-  const productEditor = <ShopifyProductWorkspace product={selected || {}} onChange={setSelected} />
+  const productEditor = <ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} />
   const footer = selected && <div className="flex flex-wrap gap-2">{isProduct && saveProductMetafields && <Button variant="purple" onClick={saveMetafieldsToShopify} disabled={savingShopify}>{savingShopify ? 'Saving to Shopify…' : 'Save metafields to Shopify'}</Button>}<Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : 'Save'}</Button>{!isProduct && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}<Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button></div>
 
   return <div className="page-enter mx-auto max-w-7xl">
@@ -303,6 +331,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Knowledge library</p><h2 className="mt-1 text-3xl font-extrabold tracking-tight">{title}</h2></div>
       <div className="flex flex-wrap gap-2">
         {!isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
+        {!isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to Qdrant'}</Button>}
         {isProduct && syncProducts && <Button variant="outline" onClick={sync} disabled={syncing}><RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Sync'}</Button>}
         <Button onClick={() => navigate('/app?generate=1')}><Plus size={16} />Generate more</Button>
       </div>

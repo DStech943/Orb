@@ -300,6 +300,70 @@ async def sync_shopify_product_library(
     return {"synced": len(records), "domain": store_domain, "credential_source": source}
 
 
+@router.get("/products/{product_id}/variant-metafields")
+async def product_variant_metafields(
+    product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160), _: User = Depends(current_user),
+) -> dict:
+    """Load a selected product's variant metafields on demand.
+
+    Variant metafields are deliberately not part of the catalog-sync query:
+    nesting them below every variant of every product exceeds Shopify's 1,000
+    point GraphQL budget. This bounded request runs only when a user opens a
+    product and asks to inspect its variants.
+    """
+    brand = await _remote_brand_by_name(request, brand_name)
+    rows = await _supabase_rows(request, "orb_products", {
+        "select": "external_id,provider",
+        "id": f"eq.{product_id}",
+        "brand_id": f"eq.{brand['id']}",
+        "provider": "eq.shopify_admin",
+        "limit": "1",
+    })
+    if not rows:
+        raise HTTPException(status_code=404, detail="This Shopify product is no longer available in Orb. Sync Products and try again.")
+    domain, access_token, _source = await _resolve_credentials(request, brand_name, True)
+    if not domain or not access_token:
+        raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
+    query = """
+    query OrbVariantMetafields($id: ID!) {
+      node(id: $id) {
+        ... on Product {
+          variants(first: 50) {
+            nodes {
+              id
+              metafields(first: 10) {
+                nodes {
+                  id namespace key type value description
+                  definition { name pinnedPosition }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = await _admin_query(
+            request.app.state.settings, query, {"id": str(rows[0]["external_id"])},
+            domain=admin_domain(domain), access_token=access_token,
+        )
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    node = (data.get("node") or {}) if isinstance(data, dict) else {}
+    variants = []
+    for variant in ((node.get("variants") or {}).get("nodes") or []):
+        if not isinstance(variant, dict):
+            continue
+        fields = [
+            field for field in ((variant.get("metafields") or {}).get("nodes") or [])
+            if isinstance(field, dict) and isinstance(field.get("definition"), dict)
+            and field["definition"].get("pinnedPosition") is not None
+        ]
+        variants.append({"id": variant.get("id"), "metafields": fields})
+    return {"variants": variants}
+
+
 @router.post("/products/metafields/save")
 async def save_shopify_product_metafields(
     payload: ShopifyMetafieldSave, request: Request, _: User = Depends(current_user),

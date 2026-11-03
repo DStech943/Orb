@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import ContentListPage from '../components/app/ContentListPage'
-import { deleteProduct, listProducts, saveProduct, saveProductMetafieldsToShopify, syncProductsForActiveBrand } from '../services/generation'
+import { deleteProduct, listProducts, loadProductVariantMetafields, saveProduct, saveProductMetafieldsToShopify, syncProductsForActiveBrand } from '../services/generation'
 import { activeBrandName, getShopifyCredentialStatus, hasOrbApi } from '../services/orbApi'
 
 export default function Products() {
@@ -23,5 +23,5 @@ export default function Products() {
     return () => { active = false; window.removeEventListener('orb:brand-changed', checkConnection) }
   }, [])
 
-  return <ContentListPage kind="product" list={listProducts} update={saveProduct} remove={deleteProduct} syncProducts={shopifyConnected ? () => syncProductsForActiveBrand(brandName) : null} saveProductMetafields={shopifyConnected ? (product) => saveProductMetafieldsToShopify(product, brandName) : null} />
+  return <ContentListPage kind="product" list={listProducts} update={saveProduct} remove={deleteProduct} syncProducts={shopifyConnected ? () => syncProductsForActiveBrand(brandName) : null} saveProductMetafields={shopifyConnected ? (product) => saveProductMetafieldsToShopify(product, brandName) : null} loadVariantMetafields={shopifyConnected ? (product) => loadProductVariantMetafields(product, brandName) : null} />
 }
