@@ -1,12 +1,16 @@
 import { supabase } from '../lib/supabase'
 
 const localBrowser = import.meta.env.DEV && ['localhost', '127.0.0.1'].includes(window.location.hostname)
-const baseUrl = (import.meta.env.VITE_ORB_API_URL || (localBrowser ? 'http://127.0.0.1:8000' : '')).replace(/\/$/, '')
+const configuredApiUrl = import.meta.env.VITE_ORB_API_URL
+// In Vercel production, the API is served through the same deployment at
+// `/api`. An empty base URL is therefore valid and intentionally means
+// same-origin requests, not an unavailable backend.
+const baseUrl = (configuredApiUrl || (localBrowser ? 'http://127.0.0.1:8000' : '')).replace(/\/$/, '')
 const mockAuth = import.meta.env.VITE_AUTH_MODE === 'mock'
-export const hasOrbApi = Boolean(baseUrl)
+export const hasOrbApi = Boolean(configuredApiUrl || localBrowser || !import.meta.env.DEV)
 
 const request = async (path, options = {}) => {
-  if (!baseUrl) return null
+  if (!hasOrbApi) return null
   const { data } = await supabase?.auth.getSession()
   const token = data?.session?.access_token
   if (!token && !localBrowser && !mockAuth) throw new Error('Sign in again to access brand knowledge.')
@@ -54,4 +58,4 @@ export const cancelCrawl = (crawlJobId) => request(`/api/crawls/${encodeURICompo
 export const getShopifyCredentialStatus = (brandName) => request(`/api/shopify/credentials?brand_name=${encodeURIComponent(brandName)}`)
 export const importShopifySource = ({ domain, accessToken, brandId, brandName, useVault = true, maximum = 100, outputs = ['sops', 'faqs', 'products'] }) => request('/api/shopify/import', { method: 'POST', body: JSON.stringify({ domain: domain || null, access_token: accessToken || null, brand_id: brandId || null, brand_name: brandName || null, use_vault: useVault, maximum, outputs }) })
 export const syncShopifyProducts = ({ brandName, maximum = 250 }) => request('/api/shopify/products/sync', { method: 'POST', body: JSON.stringify({ brand_name: brandName, use_vault: true, maximum }) })
-export const saveShopifyProductMetafields = ({ brandName, productId, metafields }) => request('/api/shopify/products/metafields/save', { method: 'POST', body: JSON.stringify({ brand_name: brandName, product_id: productId, metafields, use_vault: true }) })
+export const saveShopifyProductMetafields = ({ brandName, productId, metafields, deletedMetafieldIds = [] }) => request('/api/shopify/products/metafields/save', { method: 'POST', body: JSON.stringify({ brand_name: brandName, product_id: productId, metafields, deleted_metafield_ids: deletedMetafieldIds, use_vault: true }) })

@@ -78,8 +78,9 @@ export async function saveProductMetafieldsToShopify(product, brandName) {
   if (!hasOrbApi) throw new Error('Connect the Orb API before saving to Shopify.')
   if (!brandName || !product?.id) throw new Error('Choose a Shopify product before saving.')
   const metafields = (Array.isArray(product.metafields) ? product.metafields : []).map(({ namespace, key, type, value }) => ({ namespace, key, type, value: String(value ?? '') }))
-  if (!metafields.length) throw new Error('This product has no populated Shopify metafields to save.')
-  return saveShopifyProductMetafields({ brandName, productId: product.id, metafields })
+  const deletedMetafieldIds = Array.isArray(product.deletedMetafieldIds) ? product.deletedMetafieldIds : []
+  if (!metafields.length && !deletedMetafieldIds.length) throw new Error('This product has no metafield changes to save.')
+  return saveShopifyProductMetafields({ brandName, productId: product.id, metafields, deletedMetafieldIds })
 }
 export async function saveProduct(product) { if (hasOrbApi) { if (!product.id) throw new Error('Products are read from Qdrant. Add new products in the source collection.'); await updateKnowledge('products', product.id, productPayload(product)); return product } await wait(); const data = read(); const item = product.id ? product : { ...product, id: uid('prd') }; data.products = product.id ? data.products.map((value) => value.id === product.id ? item : value) : [...data.products, item]; write(data); return item }
 export async function deleteProduct(id) { if (hasOrbApi) return deleteKnowledge('products', id); await wait(); const data = read(); data.products = data.products.filter((item) => item.id !== id); write(data) }

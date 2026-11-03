@@ -51,7 +51,8 @@ class ShopifyMetafieldValue(BaseModel):
 class ShopifyMetafieldSave(BaseModel):
     brand_name: str = Field(min_length=1, max_length=160)
     product_id: str = Field(min_length=1, max_length=160)
-    metafields: list[ShopifyMetafieldValue] = Field(min_length=1, max_length=100)
+    metafields: list[ShopifyMetafieldValue] = Field(default_factory=list, max_length=100)
+    deleted_metafield_ids: list[str] = Field(default_factory=list, max_length=100)
     use_vault: bool = True
 
 
@@ -324,19 +325,23 @@ async def save_shopify_product_metafields(
     requested: list[dict] = []
     for field in payload.metafields:
         stored = stored_by_key.get((field.namespace, field.key))
-        if not stored:
-            raise HTTPException(status_code=422, detail=f"{field.namespace}.{field.key} is not an existing Shopify metafield for this product.")
-        if str(stored.get("type") or "") != field.type:
+        if stored and str(stored.get("type") or "") != field.type:
             raise HTTPException(status_code=422, detail=f"The type for {field.namespace}.{field.key} cannot be changed from Orb.")
         requested.append({
             "ownerId": str(row["external_id"]), "namespace": field.namespace, "key": field.key,
             "type": field.type, "value": field.value,
         })
 
+    deleted_ids = {str(value) for value in payload.deleted_metafield_ids if str(value)}
+    stored_by_id = {str(field.get("id") or ""): field for field in stored_fields if isinstance(field, dict) and field.get("id")}
+    unknown_deletions = deleted_ids - set(stored_by_id)
+    if unknown_deletions:
+        raise HTTPException(status_code=422, detail="A metafield selected for deletion is no longer available. Sync Products and try again.")
+
     domain, access_token, _source = await _resolve_credentials(request, payload.brand_name, payload.use_vault)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand. Install Shopify or add its Vault credentials first.")
-    mutation = """
+    set_mutation = """
     mutation OrbSaveProductMetafields($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
         metafields { id namespace key type value }
@@ -344,11 +349,20 @@ async def save_shopify_product_metafields(
       }
     }
     """
+    delete_mutation = """
+    mutation OrbDeleteProductMetafields($metafields: [MetafieldIdentifierInput!]!) {
+      metafieldsDelete(metafields: $metafields) {
+        deletedMetafields { ownerId namespace key }
+        userErrors { field message code }
+      }
+    }
+    """
     accepted: dict[tuple[str, str], dict] = {}
+    deleted_keys: set[tuple[str, str]] = set()
     try:
         for start in range(0, len(requested), 25):
             data = await _admin_query(
-                request.app.state.settings, mutation, {"metafields": requested[start:start + 25]},
+                request.app.state.settings, set_mutation, {"metafields": requested[start:start + 25]},
                 domain=admin_domain(domain), access_token=access_token,
             )
             result = (data.get("metafieldsSet") or {}) if isinstance(data, dict) else {}
@@ -359,8 +373,26 @@ async def save_shopify_product_metafields(
             for field in result.get("metafields") or []:
                 if isinstance(field, dict):
                     accepted[(str(field.get("namespace") or ""), str(field.get("key") or ""))] = field
+        if deleted_ids:
+            delete_input = [
+                {"ownerId": str(row["external_id"]), "namespace": field.get("namespace"), "key": field.get("key")}
+                for field_id, field in stored_by_id.items() if field_id in deleted_ids
+            ]
+            for start in range(0, len(delete_input), 25):
+                data = await _admin_query(
+                    request.app.state.settings, delete_mutation, {"metafields": delete_input[start:start + 25]},
+                    domain=admin_domain(domain), access_token=access_token,
+                )
+                result = (data.get("metafieldsDelete") or {}) if isinstance(data, dict) else {}
+                errors = result.get("userErrors") or []
+                if errors:
+                    message = "; ".join(str(error.get("message") or "Shopify rejected a metafield deletion") for error in errors if isinstance(error, dict))
+                    raise HTTPException(status_code=422, detail=message or "Shopify rejected one or more metafield deletions.")
+                for field in result.get("deletedMetafields") or []:
+                    if isinstance(field, dict):
+                        deleted_keys.add((str(field.get("namespace") or ""), str(field.get("key") or "")))
     except ShopifyAdminUnavailable as exc:
-        if "ACCESS_DENIED" in str(exc) and "metafieldsSet" in str(exc):
+        if "ACCESS_DENIED" in str(exc) and ("metafieldsSet" in str(exc) or "metafieldsDelete" in str(exc)):
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -371,11 +403,14 @@ async def save_shopify_product_metafields(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     def merge_fields(fields: list) -> list:
-        return [
+        merged = [
             {**field, **accepted.get((str(field.get("namespace") or ""), str(field.get("key") or "")), {})}
-            if isinstance(field, dict) else field
             for field in fields
+            if isinstance(field, dict) and (str(field.get("namespace") or ""), str(field.get("key") or "")) not in deleted_keys
         ]
+        existing_keys = {(str(field.get("namespace") or ""), str(field.get("key") or "")) for field in merged}
+        merged.extend(field for key, field in accepted.items() if key not in existing_keys)
+        return merged
 
     product_payload = {**product_payload, "metafields": merge_fields(stored_fields)}
     shopify_payload = product_payload.get("shopify")
@@ -389,7 +424,7 @@ async def save_shopify_product_metafields(
         params={"id": f"eq.{row['id']}", "brand_id": f"eq.{brand['id']}", "select": "id"},
         payload={"payload": product_payload},
     )
-    return {"saved": len(accepted), "product_id": str(row["id"])}
+    return {"saved": len(accepted), "deleted": len(deleted_keys), "product_id": str(row["id"])}
 
 
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED)

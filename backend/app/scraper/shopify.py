@@ -131,24 +131,6 @@ async def list_admin_products(
             nodes {
               id namespace key type value description
               definition { name pinnedPosition }
-              reference {
-                __typename
-                ... on MediaImage { image { url altText width height } }
-                ... on GenericFile { url alt mimeType }
-                ... on Video { preview { image { url altText width height } } }
-                ... on Product { id title handle featuredImage { url altText } }
-                ... on Metaobject { id displayName handle type }
-              }
-              references(first: 20) {
-                nodes {
-                  __typename
-                  ... on MediaImage { image { url altText width height } }
-                  ... on GenericFile { url alt mimeType }
-                  ... on Video { preview { image { url altText width height } } }
-                  ... on Product { id title handle featuredImage { url altText } }
-                  ... on Metaobject { id displayName handle type }
-                }
-              }
             }
           }
         }
