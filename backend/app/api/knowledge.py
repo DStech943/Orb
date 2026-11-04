@@ -1617,8 +1617,30 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
     if not brand_name:
         raise HTTPException(status_code=422, detail="brand_name is required")
 
+    # A Shopify product sync stores the complete editable catalog record in
+    # Supabase: media, variants, template suffix, and pinned metafields. Qdrant
+    # product points are deliberately slimmer retrieval documents, so never let
+    # one hide the authoritative Shopify-backed product editor payload.
+    if kind == "products":
+        brand = await _remote_brand_by_name(request, brand_name)
+        product_rows = await _supabase_rows(request, "orb_products", {
+            "select": "id,payload,status,synced_at,provider",
+            "brand_id": f"eq.{brand['id']}",
+            "status": "eq.active",
+            "order": "synced_at.desc",
+        })
+        admin_rows = [row for row in product_rows if str(row.get("provider") or "") == "shopify_admin"]
+        if admin_rows:
+            points: list[dict[str, Any]] = []
+            for row in admin_rows:
+                raw_payload = decode_jsonb(row.get("payload"))
+                point_payload = dict(raw_payload) if isinstance(raw_payload, dict) else {}
+                point_payload.setdefault("status", str(row.get("status") or "Draft").title())
+                points.append({"id": str(row["id"]), "payload": point_payload})
+            return {"points": points, "source": "supabase"}
+
     # Published knowledge lives in Qdrant and is the canonical first read for
-    # the library. This also keeps existing brands available if the newer
+    # SOPs and FAQs. This also keeps existing brands available if the newer
     # Supabase draft table has a restrictive RLS policy.
     qdrant_kind = {"sops": "sop", "faqs": "faq", "products": "product"}[kind]
     qdrant_error: PublishUnavailable | None = None

@@ -41,6 +41,52 @@ class ShopifyProductSync(BaseModel):
     maximum: int = Field(default=250, ge=1, le=250)
 
 
+async def _product_theme_templates(request: Request, brand_name: str) -> list[dict[str, str]]:
+    """Return assignable product template suffixes from the live Shopify theme."""
+    domain, access_token, _source = await _resolve_credentials(request, brand_name, True)
+    if not domain or not access_token:
+        raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
+    settings = request.app.state.settings
+    try:
+        themes = await _admin_query(settings, """
+        query OrbMainTheme {
+          themes(first: 1, roles: [MAIN]) { nodes { id name } }
+        }
+        """, {}, domain=domain, access_token=access_token)
+        main_theme = ((themes.get("themes") or {}).get("nodes") or [None])[0]
+        if not isinstance(main_theme, dict) or not main_theme.get("id"):
+            raise HTTPException(status_code=404, detail="Shopify has no published theme to inspect.")
+        filenames: list[str] = []
+        cursor: str | None = None
+        for _ in range(8):
+            result = await _admin_query(settings, """
+            query OrbThemeFiles($themeId: ID!, $after: String) {
+              theme(id: $themeId) {
+                files(first: 250, after: $after) {
+                  nodes { filename }
+                  pageInfo { hasNextPage endCursor }
+                }
+              }
+            }
+            """, {"themeId": main_theme["id"], "after": cursor}, domain=domain, access_token=access_token)
+            files = ((result.get("theme") or {}).get("files") or {})
+            filenames.extend(str(node.get("filename") or "") for node in (files.get("nodes") or []) if isinstance(node, dict))
+            page = files.get("pageInfo") or {}
+            if not page.get("hasNextPage") or not page.get("endCursor"):
+                break
+            cursor = str(page["endCursor"])
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=(
+            "Orb could not load this store's theme templates. Ensure the Shopify token has read_themes, then reconnect Shopify."
+        )) from exc
+    suffixes: set[str] = set()
+    for filename in filenames:
+        match = re.fullmatch(r"templates/product\.([^.\/]+)\.(?:json|liquid)", filename)
+        if match:
+            suffixes.add(match.group(1))
+    return [{"value": suffix, "label": suffix.replace("-", " ").replace("_", " ").title()} for suffix in sorted(suffixes)]
+
+
 class ShopifyMetafieldValue(BaseModel):
     namespace: str = Field(min_length=1, max_length=255)
     key: str = Field(min_length=1, max_length=255)
@@ -64,6 +110,39 @@ def _shopify_vault_names(brand_name: str) -> tuple[str, str]:
     return f"SHOPIFY_{key}_TOKEN", f"SHOPIFY_{key}_DOMAIN"
 
 
+async def _direct_vault_credentials(request: Request, brand_name: str) -> tuple[str | None, str | None, str]:
+    """Read two explicitly named Vault secrets through the server-only DB URL.
+
+    This path never exposes secrets to the browser and never scans Vault. The
+    database role behind SUPABASE_DATABASE_URL must be permitted to read
+    vault.decrypted_secrets (normally the project's postgres/service role).
+    """
+    database_url = request.app.state.settings.supabase_database_url
+    if not database_url:
+        return None, None, "direct_database_not_configured"
+    token_name, domain_name = _shopify_vault_names(brand_name)
+    connection = None
+    try:
+        connection = await asyncpg.connect(database_url, timeout=12)
+        row = await connection.fetchrow(
+            """
+            SELECT
+              (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name=$1 LIMIT 1) AS shopify_token,
+              (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name=$2 LIMIT 1) AS shopify_domain
+            """,
+            token_name,
+            domain_name,
+        )
+        token = str(row["shopify_token"] or "").strip() if row else ""
+        domain = str(row["shopify_domain"] or "").strip() if row else ""
+        return (domain or None), (token or None), "direct_vault" if domain and token else "missing"
+    except (asyncpg.PostgresError, OSError, TimeoutError, ValueError):
+        return None, None, "direct_database_unavailable"
+    finally:
+        if connection is not None:
+            await connection.close()
+
+
 async def _vault_credentials(request: Request, brand_name: str | None) -> tuple[str | None, str | None, str]:
     """Resolve Shopify credentials via a restricted server-only Vault RPC.
 
@@ -71,8 +150,19 @@ async def _vault_credentials(request: Request, brand_name: str | None) -> tuple[
     kept in this function and passed directly to Shopify's Admin API.
     """
     settings = request.app.state.settings
-    if not brand_name or not settings.supabase_url or not settings.supabase_service_role_key:
-        return None, None, "unavailable"
+    if not brand_name:
+        return None, None, "missing"
+    direct_status = "direct_database_not_configured"
+    if settings.supabase_database_url:
+        domain, token, direct_status = await _direct_vault_credentials(request, brand_name)
+        if domain and token:
+            return domain, token, direct_status
+        # A direct database connection is authoritative when the two secret
+        # names simply do not exist. Do not hide that fact behind a REST error.
+        if direct_status == "missing":
+            return None, None, direct_status
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        return None, None, direct_status if direct_status != "direct_database_not_configured" else "server_configuration_missing"
     try:
         headers = {
             "apikey": settings.supabase_service_role_key,
@@ -87,7 +177,7 @@ async def _vault_credentials(request: Request, brand_name: str | None) -> tuple[
                 json={"p_brand_name": brand_name},
             )
         if response.is_error:
-            return None, None, "unavailable"
+            return None, None, "vault_rpc_unavailable"
         rows = response.json()
         row = rows[0] if isinstance(rows, list) and rows else {}
         domain = str(row.get("shopify_domain") or "").strip() or None
@@ -95,7 +185,7 @@ async def _vault_credentials(request: Request, brand_name: str | None) -> tuple[
         return domain, token, "vault" if domain and token else "missing"
     except (httpx.HTTPError, TypeError, ValueError):
         # An unavailable RPC must not expose transport details or secrets.
-        return None, None, "unavailable"
+        return None, None, "vault_connection_failed"
 
 
 def _is_legacy_brand(brand_name: str | None) -> bool:
@@ -298,6 +388,16 @@ async def sync_shopify_product_library(
             prefer="resolution=merge-duplicates,return=representation",
         )
     return {"synced": len(records), "domain": store_domain, "credential_source": source}
+
+
+@router.get("/products/theme-templates")
+async def product_theme_templates(
+    request: Request, brand_name: str = Query(min_length=1, max_length=160), _: User = Depends(current_user),
+) -> dict:
+    """List custom product templates from the store's published Shopify theme."""
+    await _remote_brand_by_name(request, brand_name)
+    templates = await _product_theme_templates(request, brand_name)
+    return {"templates": templates}
 
 
 @router.get("/products/{product_id}/variant-metafields")

@@ -1,5 +1,5 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { deleteKnowledge, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
+import { deleteKnowledge, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
 const KEY = 'orb_generation_data_v1'
 const wait = (ms = 350) => new Promise((resolve) => setTimeout(resolve, ms))
 const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -79,6 +79,10 @@ export async function syncProductsForActiveBrand(brandName) { if (!hasOrbApi) th
 export async function loadProductVariantMetafields(product, brandName) {
   if (!hasOrbApi || !brandName || !product?.id) throw new Error('Choose a connected Shopify product first.')
   return getShopifyVariantMetafields({ brandName, productId: product.id })
+}
+export async function loadProductThemeTemplates(brandName) {
+  if (!hasOrbApi || !brandName) throw new Error('Choose a connected Shopify brand first.')
+  return getShopifyProductTemplates({ brandName })
 }
 export async function saveProductMetafieldsToShopify(product, brandName) {
   if (!hasOrbApi) throw new Error('Connect the Orb API before saving to Shopify.')
