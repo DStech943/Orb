@@ -76,9 +76,9 @@ export async function publishApprovedFaqs() { if (!hasOrbApi) return { published
 export async function deleteFaq(id) { if (hasOrbApi) return deleteKnowledge('faqs', id); await wait(); const data = read(); data.faqs = data.faqs.filter((item) => item.id !== id); write(data) }
 export async function listProducts() { if (hasOrbApi) { const result = await listKnowledge('products'); return result ? result.points.map(mapProduct) : [] } await wait(); return read().products || [] }
 export async function syncProductsForActiveBrand(brandName) { if (!hasOrbApi) throw new Error('Connect the Orb API before syncing Shopify products.'); if (!brandName) throw new Error('Choose a brand before syncing Shopify products.'); return syncShopifyProducts({ brandName }) }
-export async function loadProductVariantMetafields(product, brandName) {
-  if (!hasOrbApi || !brandName || !product?.id) throw new Error('Choose a connected Shopify product first.')
-  return getShopifyVariantMetafields({ brandName, productId: product.id })
+export async function loadProductVariantMetafields(product, brandName, variantId) {
+  if (!hasOrbApi || !brandName || !product?.id || !variantId) throw new Error('Choose a connected Shopify variant first.')
+  return getShopifyVariantMetafields({ brandName, productId: product.id, variantId })
 }
 export async function loadProductThemeTemplates(brandName) {
   if (!hasOrbApi || !brandName) throw new Error('Choose a connected Shopify brand first.')
@@ -95,7 +95,7 @@ export async function saveProductMetafieldsToShopify(product, brandName) {
 export async function saveVariantMetafieldsToShopify(product, variant, brandName) {
   if (!hasOrbApi) throw new Error('Connect the Orb API before saving to Shopify.')
   if (!brandName || !product?.id || !variant?.id) throw new Error('Choose a Shopify variant before saving.')
-  const metafields = (Array.isArray(variant.metafields) ? variant.metafields : []).map(({ namespace, key, type, value }) => ({ namespace, key, type, value: String(value ?? '') }))
+  const metafields = (Array.isArray(variant.metafields) ? variant.metafields : []).map(({ namespace, key, type, value, is_set }) => ({ namespace, key, type, value: String(value ?? ''), is_set: Boolean(is_set) }))
   if (!metafields.length) throw new Error('This variant has no metafields to save.')
   return saveShopifyProductMetafields({ brandName, productId: product.id, ownerId: variant.id, metafields })
 }

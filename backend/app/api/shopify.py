@@ -93,6 +93,10 @@ class ShopifyMetafieldValue(BaseModel):
     key: str = Field(min_length=1, max_length=255)
     type: str = Field(min_length=1, max_length=255)
     value: str
+    # Pinned definitions that have no value appear as an "Add" row in
+    # Shopify. Keep those rows visible without writing empty metafields until
+    # a user actually edits one.
+    is_set: bool = False
 
 
 class ShopifyMetafieldSave(BaseModel):
@@ -563,15 +567,10 @@ async def product_theme_templates(
 
 @router.get("/products/{product_id}/variant-metafields")
 async def product_variant_metafields(
-    product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160), user: User = Depends(current_user),
+    product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160),
+    variant_id: str = Query(min_length=1, max_length=160), user: User = Depends(current_user),
 ) -> dict:
-    """Load a selected product's variant metafields on demand.
-
-    Variant metafields are deliberately not part of the catalog-sync query:
-    nesting them below every variant of every product exceeds Shopify's 1,000
-    point GraphQL budget. This bounded request runs only when a user opens a
-    product and asks to inspect its variants.
-    """
+    """Load one selected variant's merchant-facing metafields on demand."""
     brand = await _remote_brand_by_name(request, brand_name)
     rows = await _supabase_service_rows(request, "orb_products", {
         "select": "external_id,provider",
@@ -588,16 +587,19 @@ async def product_variant_metafields(
     query = """
     query OrbVariantMetafields($id: ID!) {
       node(id: $id) {
-        ... on Product {
-          variants(first: 50) {
+        ... on ProductVariant {
+          id
+          product { id }
+          metafields(first: 100) {
             nodes {
-              id
-              metafields(first: 100) {
-                nodes {
-                  id namespace key type value description
-                  definition { name pinnedPosition }
-                }
-              }
+              id namespace key type value description
+              definition { name pinnedPosition }
+            }
+          }
+          metafieldDefinitions(first: 100, pinnedStatus: PINNED) {
+            nodes {
+              id name namespace key description pinnedPosition
+              type { name }
             }
           }
         }
@@ -606,22 +608,38 @@ async def product_variant_metafields(
     """
     try:
         data = await _admin_query(
-            request.app.state.settings, query, {"id": str(rows[0]["external_id"])},
+            request.app.state.settings, query, {"id": variant_id},
             domain=admin_domain(domain), access_token=access_token,
         )
     except ShopifyAdminUnavailable as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    node = (data.get("node") or {}) if isinstance(data, dict) else {}
-    variants = []
-    for variant in ((node.get("variants") or {}).get("nodes") or []):
-        if not isinstance(variant, dict):
+    variant = (data.get("node") or {}) if isinstance(data, dict) else {}
+    if not isinstance(variant, dict) or str(((variant.get("product") or {}).get("id") or "")) != str(rows[0]["external_id"]):
+        raise HTTPException(status_code=404, detail="This Shopify variant does not belong to the selected product.")
+    values_by_key = {
+        (str(field.get("namespace") or ""), str(field.get("key") or "")): field
+        for field in ((variant.get("metafields") or {}).get("nodes") or [])
+        if isinstance(field, dict)
+    }
+    # Mirror Shopify Admin's variant Metafields card: its pinned definitions
+    # (including empty "Add" fields), never technical global values.
+    fields = []
+    for definition in ((variant.get("metafieldDefinitions") or {}).get("nodes") or []):
+        if not isinstance(definition, dict):
             continue
-        fields = [
-            field for field in ((variant.get("metafields") or {}).get("nodes") or [])
-            if isinstance(field, dict)
-        ]
-        variants.append({"id": variant.get("id"), "metafields": fields})
-    return {"variants": variants}
+        namespace = str(definition.get("namespace") or "")
+        key = str(definition.get("key") or "")
+        value = values_by_key.get((namespace, key), {})
+        field_type = definition.get("type") if isinstance(definition.get("type"), dict) else {}
+        fields.append({
+            "id": value.get("id"), "namespace": namespace, "key": key,
+            "type": str(value.get("type") or field_type.get("name") or "single_line_text_field"),
+            "value": str(value.get("value") or ""),
+            "description": definition.get("description") or value.get("description") or "",
+            "is_set": bool(value.get("id")),
+            "definition": {"id": definition.get("id"), "name": definition.get("name"), "pinnedPosition": definition.get("pinnedPosition")},
+        })
+    return {"variants": [{"id": variant.get("id"), "metafields": fields}]}
 
 
 @router.post("/products/metafields/save")
@@ -659,6 +677,8 @@ async def save_shopify_product_metafields(
     }
     requested: list[dict] = []
     for field in payload.metafields:
+        if is_variant_owner and not field.is_set and not field.value:
+            continue
         stored = stored_by_key.get((field.namespace, field.key))
         if stored and str(stored.get("type") or "") != field.type:
             raise HTTPException(status_code=422, detail=f"The type for {field.namespace}.{field.key} cannot be changed from Orb.")
