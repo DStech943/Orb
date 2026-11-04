@@ -2,9 +2,9 @@ import { supabase } from '../lib/supabase'
 
 const localBrowser = import.meta.env.DEV && ['localhost', '127.0.0.1'].includes(window.location.hostname)
 const configuredApiUrl = import.meta.env.VITE_ORB_API_URL
-// In Vercel production, the API is served through the same deployment at
-// `/api`. An empty base URL is therefore valid and intentionally means
-// same-origin requests, not an unavailable backend.
+// Set VITE_ORB_API_URL to the public API origin when the frontend and API are
+// deployed separately (for example, Vercel -> Railway). An empty production
+// value is only valid when `/api` is proxied through the same deployment.
 const baseUrl = (configuredApiUrl || (localBrowser ? 'http://127.0.0.1:8000' : '')).replace(/\/$/, '')
 const mockAuth = import.meta.env.VITE_AUTH_MODE === 'mock'
 export const hasOrbApi = Boolean(configuredApiUrl || localBrowser || !import.meta.env.DEV)
@@ -16,7 +16,10 @@ const request = async (path, options = {}) => {
   if (!token && !localBrowser && !mockAuth) throw new Error('Sign in again to access brand knowledge.')
   const response = await fetch(`${baseUrl}${path}`, { ...options, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json', ...(options.headers || {}) } })
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail || 'Orb API request failed.')
-  if (response.status === 204 || !response.headers.get('content-type')?.includes('application/json')) return null
+  if (response.status === 204) return null
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('Orb API returned a non-JSON response. Set VITE_ORB_API_URL to the public Railway orb-api domain and redeploy the frontend.')
+  }
   return response.json()
 }
 

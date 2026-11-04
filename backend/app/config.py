@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from typing import Literal
+from uuid import UUID
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,6 +45,10 @@ class Settings(BaseSettings):
     enable_js_render: bool = Field(False, alias="ENABLE_JS_RENDER")
     auth_disabled: bool = Field(False, alias="AUTH_DISABLED")
     jwt_secret: str = Field("", alias="JWT_SECRET")
+    # Orb currently uses a shared internal workspace. A verified Supabase user
+    # without an explicit org claim is mapped here; custom JWTs can still
+    # carry their own org_id claim.
+    default_org_id: UUID = Field(UUID("00000000-0000-0000-0000-000000000002"), alias="DEFAULT_ORG_ID")
     cors_origins: str = Field("http://localhost:5173,http://127.0.0.1:5173", validation_alias=AliasChoices("CORS_ORIGINS", "ALLOWED_ORIGINS"))
     env: Literal["dev", "production"] = Field("dev", alias="ENV")
     llm_base_url: str | None = Field(None, alias="LLM_BASE_URL")
@@ -78,8 +83,8 @@ class Settings(BaseSettings):
             )
         if self.env == "production" and self.auth_disabled:
             raise ValueError("AUTH_DISABLED=true is forbidden in production")
-        if not self.auth_disabled and not self.jwt_secret:
-            raise ValueError("JWT_SECRET is required when authentication is enabled")
+        if not self.auth_disabled and not self.jwt_secret and not (self.supabase_url and self.supabase_publishable_key):
+            raise ValueError("JWT_SECRET or Supabase authentication settings are required when authentication is enabled")
         return self
 
     @property
