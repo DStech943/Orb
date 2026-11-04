@@ -471,17 +471,29 @@ async def _enqueue_import(
     if not outputs:
         raise HTTPException(status_code=422, detail="Select at least one output")
     options = {"catalog_source": "shopify_admin", "maximum": payload.maximum, "outputs": outputs}
-    async with request.app.state.db.acquire() as connection:
-        job = await connection.fetchrow(
-            """INSERT INTO crawl_jobs (org_id,start_url,brand_id,status,options)
-               VALUES ($1::uuid,$2,$3::uuid,'running',$4::jsonb) RETURNING *""",
-            user.org_id, f"https://{store_domain}", payload.brand_id, options,
-        )
-        pipeline_id = await create_crawl_pipeline(
-            connection, org_id=str(user.org_id), brand_id=payload.brand_id, crawl_job_id=str(job["id"]),
-            options=options, source_kind="shopify",
-        )
-        await connection.execute("UPDATE crawl_jobs SET options=$2::jsonb WHERE id=$1::uuid", job["id"], {**options, "pipeline_id": pipeline_id})
+    try:
+        async with request.app.state.db.acquire() as connection:
+            async with connection.transaction():
+                job = await connection.fetchrow(
+                    """INSERT INTO crawl_jobs (org_id,start_url,brand_id,status,options)
+                       VALUES ($1::uuid,$2,$3::uuid,'running',$4::jsonb) RETURNING *""",
+                    user.org_id, f"https://{store_domain}", payload.brand_id, options,
+                )
+                if job is None:
+                    raise RuntimeError("Railway Postgres did not return the Shopify import job")
+                pipeline_id = await create_crawl_pipeline(
+                    connection, org_id=str(user.org_id), brand_id=payload.brand_id, crawl_job_id=str(job["id"]),
+                    options=options, source_kind="shopify",
+                )
+                await connection.execute("UPDATE crawl_jobs SET options=$2::jsonb WHERE id=$1::uuid", job["id"], {**options, "pipeline_id": pipeline_id})
+    except (asyncpg.PostgresError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        # Return a handled response so CORS middleware can expose it to the
+        # browser.  This does not include the submitted Shopify token or raw
+        # database error details.
+        raise HTTPException(
+            status_code=503,
+            detail=f"Orb could not start the Shopify import in Railway Postgres ({type(exc).__name__}). Check that crawl_jobs, pipeline_runs, and pipeline_stages exist.",
+        ) from exc
     # The token is kept only in this in-memory background task; it is never stored in Postgres or returned to the client.
     background_tasks.add_task(_run_import, request.app, str(job["id"]), str(user.org_id), payload.maximum, store_domain, access_token)
     return {"crawl_job_id": str(job["id"]), "pipeline_id": pipeline_id, "source": "shopify_admin", "credential_source": credential_source, "domain": store_domain}
