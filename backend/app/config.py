@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     qdrant_collection_prefix: str = Field("", alias="QDRANT_COLLECTION_PREFIX")
     shopify_the_dearist_domain: str | None = Field(None, alias="SHOPIFY_THE_DEARIST_DOMAIN")
     shopify_the_dearist_token: str | None = Field(None, alias="SHOPIFY_THE_DEARIST_TOKEN")
+    # Used only to encrypt Shopify tokens persisted by the Install Shopify
+    # flow in the Railway Postgres database. Keep this server-only and stable:
+    # changing it makes previously stored tokens unreadable.
+    shopify_credentials_encryption_key: str | None = Field(None, alias="SHOPIFY_CREDENTIALS_ENCRYPTION_KEY")
     shopify_admin_api_version: str = Field("2025-10", alias="SHOPIFY_ADMIN_API_VERSION")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)

@@ -77,6 +77,21 @@ CREATE TABLE IF NOT EXISTS worker_heartbeats (
   details jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+-- Server-side Shopify credentials saved through the authenticated install
+-- flow. Tokens are encrypted with pgcrypto using an application key that is
+-- stored only in Railway's orb-api environment variables.
+CREATE TABLE IF NOT EXISTS shopify_brand_credentials (
+  org_id uuid NOT NULL,
+  brand_key text NOT NULL,
+  brand_name text NOT NULL,
+  domain text NOT NULL,
+  token_encrypted bytea NOT NULL,
+  created_by uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (org_id, brand_key)
+);
+
 ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS brand_id uuid;
 ALTER TABLE crawl_jobs ADD COLUMN IF NOT EXISTS resume_at timestamptz;
 CREATE INDEX IF NOT EXISTS crawl_jobs_brand_created_idx ON crawl_jobs (brand_id, created_at DESC) WHERE brand_id IS NOT NULL;

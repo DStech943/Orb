@@ -42,9 +42,9 @@ class ShopifyProductSync(BaseModel):
     maximum: int = Field(default=250, ge=1, le=250)
 
 
-async def _product_theme_templates(request: Request, brand_name: str) -> list[dict[str, str]]:
+async def _product_theme_templates(request: Request, brand_name: str, user: User) -> list[dict[str, str]]:
     """Return assignable product template suffixes from the live Shopify theme."""
-    domain, access_token, _source = await _resolve_credentials(request, brand_name, True)
+    domain, access_token, _source = await _resolve_credentials(request, brand_name, True, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
     settings = request.app.state.settings
@@ -109,6 +109,84 @@ def _shopify_vault_names(brand_name: str) -> tuple[str, str]:
     if not key:
         raise ValueError("Brand name cannot be converted to a Shopify Vault key")
     return f"SHOPIFY_{key}_TOKEN", f"SHOPIFY_{key}_DOMAIN"
+
+
+def _shopify_brand_key(brand_name: str) -> str:
+    """Return the stable tenant-local key used by Railway Postgres."""
+    token_name, _domain_name = _shopify_vault_names(brand_name)
+    return token_name.removeprefix("SHOPIFY_").removesuffix("_TOKEN")
+
+
+async def _ensure_railway_credential_store(request: Request) -> None:
+    """Create the private credential table for existing Railway databases."""
+    async with request.app.state.db.acquire() as connection:
+        await connection.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+        await connection.execute("""
+            CREATE TABLE IF NOT EXISTS shopify_brand_credentials (
+              org_id uuid NOT NULL,
+              brand_key text NOT NULL,
+              brand_name text NOT NULL,
+              domain text NOT NULL,
+              token_encrypted bytea NOT NULL,
+              created_by uuid NOT NULL,
+              created_at timestamptz NOT NULL DEFAULT now(),
+              updated_at timestamptz NOT NULL DEFAULT now(),
+              PRIMARY KEY (org_id, brand_key)
+            )
+        """)
+
+
+async def _railway_postgres_credentials(
+    request: Request, brand_name: str | None, user: User | None,
+) -> tuple[str | None, str | None, str]:
+    """Decrypt credentials stored by a previous authenticated installation."""
+    key = request.app.state.settings.shopify_credentials_encryption_key
+    if not brand_name or user is None or not key:
+        return None, None, "railway_postgres_unavailable"
+    try:
+        brand_key = _shopify_brand_key(brand_name)
+        async with request.app.state.db.acquire() as connection:
+            row = await connection.fetchrow("""
+                SELECT domain, pgp_sym_decrypt(token_encrypted, $3)::text AS access_token
+                FROM shopify_brand_credentials
+                WHERE org_id=$1::uuid AND brand_key=$2
+                LIMIT 1
+            """, user.org_id, brand_key, key)
+    except asyncpg.PostgresError:
+        return None, None, "railway_postgres_unavailable"
+    domain = str(row["domain"] or "").strip() if row else ""
+    token = str(row["access_token"] or "").strip() if row else ""
+    return (domain or None), (token or None), "railway_postgres" if domain and token else "missing"
+
+
+async def _save_railway_postgres_credentials(
+    request: Request, brand_name: str, domain: str, access_token: str, user: User,
+) -> None:
+    """Encrypt and upsert a manually installed Shopify credential pair."""
+    key = request.app.state.settings.shopify_credentials_encryption_key
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail="Set SHOPIFY_CREDENTIALS_ENCRYPTION_KEY on the Railway orb-api service before saving Shopify credentials.",
+        )
+    await _ensure_railway_credential_store(request)
+    brand_key = _shopify_brand_key(brand_name)
+    try:
+        async with request.app.state.db.acquire() as connection:
+            await connection.execute("""
+                INSERT INTO shopify_brand_credentials
+                  (org_id, brand_key, brand_name, domain, token_encrypted, created_by)
+                VALUES ($1::uuid, $2, $3, $4,
+                  pgp_sym_encrypt($5, $6, 'cipher-algo=aes256, compress-algo=1'), $7::uuid)
+                ON CONFLICT (org_id, brand_key) DO UPDATE SET
+                  brand_name=EXCLUDED.brand_name,
+                  domain=EXCLUDED.domain,
+                  token_encrypted=EXCLUDED.token_encrypted,
+                  created_by=EXCLUDED.created_by,
+                  updated_at=now()
+            """, user.org_id, brand_key, brand_name, domain, access_token, key, user.id)
+    except asyncpg.PostgresError as exc:
+        raise HTTPException(status_code=503, detail="Orb could not securely save the Shopify credentials to Railway Postgres.") from exc
 
 
 def _server_environment_credentials(brand_name: str | None) -> tuple[str | None, str | None, str]:
@@ -247,12 +325,17 @@ def _is_legacy_brand(brand_name: str | None) -> bool:
     return token_name == "SHOPIFY_THE_DEARIST_TOKEN"
 
 
-async def _resolve_credentials(request: Request, brand_name: str | None, use_vault: bool) -> tuple[str | None, str | None, str]:
+async def _resolve_credentials(
+    request: Request, brand_name: str | None, use_vault: bool, user: User | None = None,
+) -> tuple[str | None, str | None, str]:
     """Resolve one brand's credentials without ever returning the token to a client."""
-    # Railway service variables are the primary credential source. This avoids
-    # a Vault/RPC dependency for normal installed stores while keeping tokens
-    # server-side.  Vault remains an opt-in fallback for existing deployments.
-    domain, access_token, source = _server_environment_credentials(brand_name)
+    # Credentials submitted through Install Shopify are tenant-scoped and
+    # encrypted in Railway Postgres. They take precedence over shared service
+    # variables so each workspace can connect its own store.
+    domain, access_token, source = await _railway_postgres_credentials(request, brand_name, user)
+    if not domain or not access_token:
+        # Railway service variables remain a useful deploy-time fallback.
+        domain, access_token, source = _server_environment_credentials(brand_name)
     if use_vault:
         if not domain or not access_token:
             domain, access_token, source = await _vault_credentials(request, brand_name)
@@ -369,8 +452,13 @@ async def _enqueue_import(
     domain, access_token, credential_source = None, None, "manual"
     if payload.domain and payload.access_token:
         domain, access_token = payload.domain, payload.access_token
+        if not payload.brand_name:
+            raise HTTPException(status_code=422, detail="Choose a brand before saving Shopify credentials.")
+        store_domain = admin_domain(domain)
+        await _save_railway_postgres_credentials(request, payload.brand_name, store_domain, access_token, user)
+        credential_source = "railway_postgres"
     else:
-        domain, access_token, credential_source = await _resolve_credentials(request, payload.brand_name, payload.use_vault)
+        domain, access_token, credential_source = await _resolve_credentials(request, payload.brand_name, payload.use_vault, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify Admin credentials are not configured on the server")
     store_domain = admin_domain(domain)
@@ -396,10 +484,10 @@ async def _enqueue_import(
 
 @router.get("/credentials")
 async def shopify_credentials(
-    request: Request, brand_name: str = Query(min_length=1, max_length=160), _: User = Depends(current_user),
+    request: Request, brand_name: str = Query(min_length=1, max_length=160), user: User = Depends(current_user),
 ) -> dict:
     """Return safe setup metadata only; the Shopify access token is never returned."""
-    domain, token, source = await _resolve_credentials(request, brand_name, True)
+    domain, token, source = await _resolve_credentials(request, brand_name, True, user)
     return {
         "brand_name": brand_name,
         "domain": domain,
@@ -411,7 +499,7 @@ async def shopify_credentials(
 
 @router.post("/products/sync")
 async def sync_shopify_product_library(
-    payload: ShopifyProductSync, request: Request, _: User = Depends(current_user),
+    payload: ShopifyProductSync, request: Request, user: User = Depends(current_user),
 ) -> dict:
     """Refresh a connected brand's editable product library from Shopify.
 
@@ -419,7 +507,7 @@ async def sync_shopify_product_library(
     knowledge copy and a later sync intentionally refreshes it from Shopify.
     """
     brand = await _remote_brand_by_name(request, payload.brand_name)
-    domain, access_token, source = await _resolve_credentials(request, payload.brand_name, payload.use_vault)
+    domain, access_token, source = await _resolve_credentials(request, payload.brand_name, payload.use_vault, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand. Install Shopify or add its Vault credentials first.")
     try:
@@ -445,17 +533,17 @@ async def sync_shopify_product_library(
 
 @router.get("/products/theme-templates")
 async def product_theme_templates(
-    request: Request, brand_name: str = Query(min_length=1, max_length=160), _: User = Depends(current_user),
+    request: Request, brand_name: str = Query(min_length=1, max_length=160), user: User = Depends(current_user),
 ) -> dict:
     """List custom product templates from the store's published Shopify theme."""
     await _remote_brand_by_name(request, brand_name)
-    templates = await _product_theme_templates(request, brand_name)
+    templates = await _product_theme_templates(request, brand_name, user)
     return {"templates": templates}
 
 
 @router.get("/products/{product_id}/variant-metafields")
 async def product_variant_metafields(
-    product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160), _: User = Depends(current_user),
+    product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160), user: User = Depends(current_user),
 ) -> dict:
     """Load a selected product's variant metafields on demand.
 
@@ -474,7 +562,7 @@ async def product_variant_metafields(
     })
     if not rows:
         raise HTTPException(status_code=404, detail="This Shopify product is no longer available in Orb. Sync Products and try again.")
-    domain, access_token, _source = await _resolve_credentials(request, brand_name, True)
+    domain, access_token, _source = await _resolve_credentials(request, brand_name, True, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
     query = """
@@ -519,7 +607,7 @@ async def product_variant_metafields(
 
 @router.post("/products/metafields/save")
 async def save_shopify_product_metafields(
-    payload: ShopifyMetafieldSave, request: Request, _: User = Depends(current_user),
+    payload: ShopifyMetafieldSave, request: Request, user: User = Depends(current_user),
 ) -> dict:
     """Write existing product metafields to Shopify, then persist the accepted values in Orb."""
     brand = await _remote_brand_by_name(request, payload.brand_name)
@@ -555,7 +643,7 @@ async def save_shopify_product_metafields(
     if unknown_deletions:
         raise HTTPException(status_code=422, detail="A metafield selected for deletion is no longer available. Sync Products and try again.")
 
-    domain, access_token, _source = await _resolve_credentials(request, payload.brand_name, payload.use_vault)
+    domain, access_token, _source = await _resolve_credentials(request, payload.brand_name, payload.use_vault, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand. Install Shopify or add its Vault credentials first.")
     set_mutation = """

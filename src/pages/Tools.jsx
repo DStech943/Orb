@@ -151,13 +151,119 @@ function ToolCard({ tool, onOpen }) {
   );
 }
 
-function ShopifySetupModal({ open, onClose, brandName, brandId, onInstalled }) {
+function LegacyShopifySetupModal({ open, onClose, brandName, brandId, onInstalled }) {
   const [domain, setDomain] = useState(''); const [accessToken, setAccessToken] = useState(''); const [credential, setCredential] = useState(null); const [manual, setManual] = useState(false); const [loading, setLoading] = useState(false); const [installing, setInstalling] = useState(false); const [error, setError] = useState('')
   useEffect(() => { if (!open) return undefined; setError(''); setManual(false); setAccessToken(''); setCredential(null); if (!hasOrbApi || !brandName) return undefined; let active = true; setLoading(true); getShopifyCredentialStatus(brandName).then((result) => { if (active) { setCredential(result); if (result?.domain) setDomain(result.domain) } }).catch(() => { if (active) setCredential({ source: 'unavailable', token_available: false }) }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [open, brandName])
   const vaultReady = Boolean(credential?.token_available && credential?.domain) && !manual
   const submit = async (event) => { event.preventDefault(); setError(''); if (!brandId || !brandName) return setError('Choose a brand from the top bar before installing Shopify.'); if (!vaultReady && (!domain.trim() || !accessToken.trim())) return setError('Enter both the Shopify domain and Admin API token.'); try { setInstalling(true); const result = await importShopifySource({ brandId, brandName, domain: vaultReady ? '' : domain.trim(), accessToken: vaultReady ? '' : accessToken.trim(), useVault: vaultReady }); onInstalled(result?.domain || domain.trim()); onClose() } catch (cause) { setError(cause.message || 'Shopify could not be installed.') } finally { setInstalling(false) } }
   const vaultMessage = loading ? 'Checking the secure Vault…' : vaultReady ? 'Credentials found in Vault. The Admin token stays on the server.' : credential?.source === 'direct_database_unavailable' ? 'Orb could not reach the configured Supabase database directly. Check SUPABASE_DATABASE_URL and that Railway can reach that database endpoint.' : credential?.source === 'server_configuration_missing' ? 'The deployed Orb API is missing its Supabase Vault configuration. Add SUPABASE_DATABASE_URL for direct Vault access, or configure the REST fallback.' : credential?.source === 'vault_rpc_unavailable' ? 'Orb reached Supabase but the Vault credentials function is unavailable. Configure SUPABASE_DATABASE_URL to use direct Vault access instead.' : credential?.source === 'vault_connection_failed' || credential?.source === 'unavailable' ? 'Vault is unavailable right now. Enter credentials once to continue.' : 'No complete Shopify credentials were found for this brand in Vault.'
   return <Modal open={open} onClose={onClose} title="Install Shopify"><form onSubmit={submit} className="space-y-4"><div className="rounded-lg border border-purple/20 bg-purple/5 p-3"><div className="flex items-center gap-2 text-sm font-extrabold text-ink"><Store size={16} className="text-purple" />{brandName || 'Choose a brand'}</div><p className="mt-1 text-xs leading-5 text-slate-600">Orb checks <code>SHOPIFY_&lt;BRAND&gt;_TOKEN</code> and <code>SHOPIFY_&lt;BRAND&gt;_DOMAIN</code> in Vault first.</p><p className="mt-2 text-xs font-semibold text-purple">{vaultMessage}</p></div><label className="grid gap-1.5 text-sm font-bold">Shopify domain<input value={domain} onChange={(event) => setDomain(event.target.value)} disabled={vaultReady} placeholder="your-store.myshopify.com" className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-purple disabled:bg-slate-100" /></label><label className="grid gap-1.5 text-sm font-bold">Admin API token<div className="relative"><input type="password" value={vaultReady ? 'vault-managed-token' : accessToken} onChange={(event) => setAccessToken(event.target.value)} disabled={vaultReady} placeholder="shpat_…" className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 pr-10 text-sm font-normal outline-none focus:border-purple disabled:bg-slate-100" />{vaultReady && <KeyRound size={16} className="absolute right-3 top-3 text-emerald-600" />}</div></label>{vaultReady ? <button type="button" onClick={() => { setManual(true); setAccessToken('') }} className="text-left text-xs font-bold text-purple hover:underline">Use different credentials instead</button> : <p className="text-xs leading-5 text-slate-500">Manual credentials are used only to start this import and are not stored in Orb.</p>}{error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}<div className="flex justify-end gap-2 pt-1"><button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold">Cancel</button><button type="submit" disabled={installing || loading} className="inline-flex items-center gap-2 rounded-md bg-purple px-3 py-2 text-sm font-extrabold text-white disabled:opacity-60">{installing && <Loader2 size={15} className="animate-spin" />}{vaultReady ? 'Install from Vault' : 'Install Shopify'}</button></div></form></Modal>
+}
+
+function ShopifySetupModal({ open, onClose, brandName, brandId, onInstalled }) {
+  const [domain, setDomain] = useState('')
+  const [accessToken, setAccessToken] = useState('')
+  const [credential, setCredential] = useState(null)
+  const [manual, setManual] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [installing, setInstalling] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return undefined
+    let active = true
+    setError('')
+    setManual(false)
+    setAccessToken('')
+    setCredential(null)
+    if (!hasOrbApi || !brandName) return undefined
+    setLoading(true)
+    getShopifyCredentialStatus(brandName)
+      .then((result) => {
+        if (!active) return
+        setCredential(result)
+        if (result?.domain) setDomain(result.domain)
+      })
+      .catch(() => {
+        if (active) setCredential({ source: 'unavailable', token_available: false })
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [open, brandName])
+
+  const credentialReady = Boolean(credential?.token_available && credential?.domain) && !manual
+  const sourceLabel = credential?.source === 'railway_postgres'
+    ? 'Railway Postgres'
+    : credential?.source === 'server_environment'
+      ? 'Railway service variables'
+      : 'Vault'
+  const statusMessage = loading
+    ? 'Checking saved Shopify credentials…'
+    : credentialReady
+      ? `Credentials found in ${sourceLabel}. The Admin token stays on the server.`
+      : 'Enter a domain and Admin API token to connect this brand. Orb encrypts the token before saving it in Railway Postgres.'
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    if (!brandId || !brandName) {
+      setError('Choose a brand from the top bar before installing Shopify.')
+      return
+    }
+    if (!credentialReady && (!domain.trim() || !accessToken.trim())) {
+      setError('Enter both the Shopify domain and Admin API token.')
+      return
+    }
+    try {
+      setInstalling(true)
+      const result = await importShopifySource({
+        brandId,
+        brandName,
+        domain: credentialReady ? '' : domain.trim(),
+        accessToken: credentialReady ? '' : accessToken.trim(),
+        useVault: credentialReady,
+      })
+      onInstalled(result?.domain || domain.trim())
+      onClose()
+    } catch (cause) {
+      setError(cause.message || 'Shopify could not be installed.')
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Install Shopify">
+      <form onSubmit={submit} className="space-y-4">
+        <div className="rounded-lg border border-purple/20 bg-purple/5 p-3">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-ink"><Store size={16} className="text-purple" />{brandName || 'Choose a brand'}</div>
+          <p className="mt-1 text-xs leading-5 text-slate-600">Saved credentials are encrypted and scoped to this workspace in Railway Postgres.</p>
+          <p className="mt-2 text-xs font-semibold text-purple">{statusMessage}</p>
+        </div>
+        <label className="grid gap-1.5 text-sm font-bold">Shopify domain
+          <input value={domain} onChange={(event) => setDomain(event.target.value)} disabled={credentialReady} placeholder="your-store.myshopify.com" className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-purple disabled:bg-slate-100" />
+        </label>
+        <label className="grid gap-1.5 text-sm font-bold">Admin API token
+          <div className="relative">
+            <input type="password" value={credentialReady ? 'server-managed-token' : accessToken} onChange={(event) => setAccessToken(event.target.value)} disabled={credentialReady} placeholder="shpat_…" className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 pr-10 text-sm font-normal outline-none focus:border-purple disabled:bg-slate-100" />
+            {credentialReady && <KeyRound size={16} className="absolute right-3 top-3 text-emerald-600" />}
+          </div>
+        </label>
+        {credentialReady ? (
+          <button type="button" onClick={() => { setManual(true); setAccessToken('') }} className="text-left text-xs font-bold text-purple hover:underline">Replace saved credentials</button>
+        ) : (
+          <p className="text-xs leading-5 text-slate-500">The token is encrypted before it is stored. It is never returned to your browser.</p>
+        )}
+        {error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold">Cancel</button>
+          <button type="submit" disabled={installing || loading} className="inline-flex items-center gap-2 rounded-md bg-purple px-3 py-2 text-sm font-extrabold text-white disabled:opacity-60">
+            {installing && <Loader2 size={15} className="animate-spin" />}{credentialReady ? `Install from ${sourceLabel}` : 'Install Shopify'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
 }
 
 export default function Tools() {
