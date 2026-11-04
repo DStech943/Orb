@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 
 import asyncpg
@@ -103,11 +104,32 @@ class ShopifyMetafieldSave(BaseModel):
 
 
 def _shopify_vault_names(brand_name: str) -> tuple[str, str]:
-    """Map a brand name to its two standard Vault secret names."""
+    """Map a brand name to its two standard server/Vault secret names."""
     key = re.sub(r"[^A-Z0-9]+", "_", brand_name.upper()).strip("_")
     if not key:
         raise ValueError("Brand name cannot be converted to a Shopify Vault key")
     return f"SHOPIFY_{key}_TOKEN", f"SHOPIFY_{key}_DOMAIN"
+
+
+def _server_environment_credentials(brand_name: str | None) -> tuple[str | None, str | None, str]:
+    """Read a complete brand-specific credential pair from server variables.
+
+    Railway injects service variables into the API process, so this is the
+    preferred path for installed brands.  The browser never receives either
+    value.  We intentionally require both values: a partial configuration must
+    not silently combine credentials from two separate sources.
+    """
+    if not brand_name:
+        return None, None, "missing"
+    try:
+        token_name, domain_name = _shopify_vault_names(brand_name)
+    except ValueError:
+        return None, None, "missing"
+    domain = os.getenv(domain_name, "").strip() or None
+    token = os.getenv(token_name, "").strip() or None
+    if domain and token:
+        return domain, token, "server_environment"
+    return None, None, "missing"
 
 
 async def _direct_vault_credentials(request: Request, brand_name: str) -> tuple[str | None, str | None, str]:
@@ -201,9 +223,13 @@ def _is_legacy_brand(brand_name: str | None) -> bool:
 
 async def _resolve_credentials(request: Request, brand_name: str | None, use_vault: bool) -> tuple[str | None, str | None, str]:
     """Resolve one brand's credentials without ever returning the token to a client."""
-    domain, access_token, source = None, None, "manual"
+    # Railway service variables are the primary credential source. This avoids
+    # a Vault/RPC dependency for normal installed stores while keeping tokens
+    # server-side.  Vault remains an opt-in fallback for existing deployments.
+    domain, access_token, source = _server_environment_credentials(brand_name)
     if use_vault:
-        domain, access_token, source = await _vault_credentials(request, brand_name)
+        if not domain or not access_token:
+            domain, access_token, source = await _vault_credentials(request, brand_name)
     # Do not accidentally use The Dearist's legacy token for another brand.
     if (not domain or not access_token) and _is_legacy_brand(brand_name):
         settings = request.app.state.settings
