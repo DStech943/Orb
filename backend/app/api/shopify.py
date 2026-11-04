@@ -586,6 +586,18 @@ async def product_variant_metafields(
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
     query = """
     query OrbVariantMetafields($id: ID!) {
+      metafieldDefinitions(first: 100, ownerType: PRODUCTVARIANT, pinnedStatus: PINNED) {
+        nodes {
+          id name namespace key description pinnedPosition
+          type { name }
+        }
+      }
+      allVariantMetafieldDefinitions: metafieldDefinitions(first: 100, ownerType: PRODUCTVARIANT) {
+        nodes {
+          id name namespace key description pinnedPosition
+          type { name }
+        }
+      }
       node(id: $id) {
         ... on ProductVariant {
           id
@@ -621,10 +633,21 @@ async def product_variant_metafields(
         for field in ((variant.get("metafields") or {}).get("nodes") or [])
         if isinstance(field, dict)
     }
+    # Prefer the definitions returned by the actual variant and fall back to
+    # the owner-type definition query. Stores differ in which connection is
+    # populated, but both model the same pinned Shopify Admin fields.
+    definitions = (variant.get("metafieldDefinitions") or {}).get("nodes") or []
+    if not definitions:
+        definitions = (data.get("metafieldDefinitions") or {}).get("nodes") or []
+    if not definitions:
+        definitions = [
+            definition for definition in ((data.get("allVariantMetafieldDefinitions") or {}).get("nodes") or [])
+            if isinstance(definition, dict) and str(definition.get("namespace") or "").lower() not in {"global", "shopify"}
+        ]
     # Mirror Shopify Admin's variant Metafields card: its pinned definitions
     # (including empty "Add" fields), never technical global values.
     fields = []
-    for definition in ((variant.get("metafieldDefinitions") or {}).get("nodes") or []):
+    for definition in definitions:
         if not isinstance(definition, dict):
             continue
         namespace = str(definition.get("namespace") or "")
