@@ -1616,9 +1616,28 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
     brand_name = brand_name.strip()
     if not brand_name:
         raise HTTPException(status_code=422, detail="brand_name is required")
-    # Review must read draft records, not Qdrant. Qdrant is deliberately only
-    # populated during the later Publish step; using it here made successfully
-    # generated review drafts appear as an empty library.
+
+    # Published knowledge lives in Qdrant and is the canonical first read for
+    # the library. This also keeps existing brands available if the newer
+    # Supabase draft table has a restrictive RLS policy.
+    qdrant_kind = {"sops": "sop", "faqs": "faq", "products": "product"}[kind]
+    qdrant_error: PublishUnavailable | None = None
+    try:
+        legacy_points = await scroll_points(request.app.state.db, request.app.state.settings, brand_name, qdrant_kind)
+    except PublishUnavailable as exc:
+        legacy_points = []
+        qdrant_error = exc
+    if legacy_points:
+        points = []
+        for point in legacy_points:
+            point_payload = dict(point["payload"])
+            point_payload.setdefault("status", "Published")
+            point_payload.setdefault("source", "Qdrant")
+            points.append({"id": str(point["id"]), "payload": point_payload})
+        return {"points": points, "source": "qdrant"}
+
+    # Supabase is the fallback for newer drafts or brands without a published
+    # Qdrant collection yet.
     brand = await _remote_brand_by_name(request, brand_name)
     if kind == "products":
         rows = await _supabase_rows(request, "orb_products", {
@@ -1643,22 +1662,8 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
             "order": "created_at.desc",
         })
 
-    # New source-to-draft runs live in Supabase until they are reviewed and
-    # published. Older brands may have content only in their existing Qdrant
-    # collection, so retain that read path as a backwards-compatible fallback.
-    if not rows:
-        qdrant_kind = {"sops": "sop", "faqs": "faq", "products": "product"}[kind]
-        try:
-            legacy_points = await scroll_points(request.app.state.db, request.app.state.settings, brand_name, qdrant_kind)
-        except PublishUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        points = []
-        for point in legacy_points:
-            point_payload = dict(point["payload"])
-            point_payload.setdefault("status", "Published")
-            point_payload.setdefault("source", "Qdrant")
-            points.append({"id": str(point["id"]), "payload": point_payload})
-        return {"points": points, "source": "qdrant"}
+    if not rows and qdrant_error:
+        raise HTTPException(status_code=503, detail=str(qdrant_error)) from qdrant_error
 
     points: list[dict[str, Any]] = []
     for row in rows:
