@@ -370,6 +370,29 @@ def _supabase_headers(request: Request, *, write: bool = False, prefer: str | No
     return headers
 
 
+def _supabase_service_headers(request: Request, *, write: bool = False, prefer: str | None = None) -> dict[str, str]:
+    """Server-only REST headers for the editable Shopify product library.
+
+    Product records are workspace data, but the browser must never receive the
+    Supabase service-role key. Authenticated API routes use this helper only
+    after their normal Orb authentication checks.
+    """
+    settings = request.app.state.settings
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase service-role configuration is missing for Shopify product data",
+        )
+    headers = {
+        "apikey": settings.supabase_service_role_key,
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        "Accept-Profile": "cx_copilot",
+    }
+    if write:
+        headers.update({"Content-Profile": "cx_copilot", "Prefer": prefer or "return=representation"})
+    return headers
+
+
 async def _supabase_rows(request: Request, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
     settings = request.app.state.settings
     headers = _supabase_headers(request)
@@ -387,6 +410,28 @@ async def _supabase_rows(request: Request, table: str, params: dict[str, str]) -
         raise HTTPException(
             status_code=503,
             detail=f"Supabase could not read {table} ({response.status_code}): {detail or 'request rejected'}",
+        )
+    data = response.json()
+    return data if isinstance(data, list) else []
+
+
+async def _supabase_service_rows(request: Request, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+    """Read a private table with the backend's service role, never the browser."""
+    settings = request.app.state.settings
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
+                params=params,
+                headers=_supabase_service_headers(request),
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Supabase service-role request failed for Shopify product data") from exc
+    if response.is_error:
+        detail = response.text.strip().replace("\n", " ")[:400]
+        raise HTTPException(
+            status_code=503,
+            detail=f"Supabase could not read {table} with the backend service role ({response.status_code}): {detail or 'request rejected'}",
         )
     data = response.json()
     return data if isinstance(data, list) else []
@@ -433,6 +478,35 @@ async def _supabase_write(
         raise HTTPException(
             status_code=503,
             detail=f"Supabase could not update {table} ({response.status_code}): {detail or 'request rejected'}",
+        )
+    if response.status_code == status.HTTP_204_NO_CONTENT or not response.content:
+        return []
+    data = response.json()
+    return data if isinstance(data, list) else []
+
+
+async def _supabase_service_write(
+    request: Request, method: str, table: str, *, params: dict[str, str] | None = None,
+    payload: dict[str, Any] | list[dict[str, Any]] | None = None, prefer: str | None = None,
+) -> list[dict[str, Any]]:
+    """Write private product records using the server-only service role."""
+    settings = request.app.state.settings
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.request(
+                method,
+                f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
+                params=params,
+                json=payload,
+                headers=_supabase_service_headers(request, write=True, prefer=prefer),
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Supabase service-role request failed for Shopify product data") from exc
+    if response.is_error:
+        detail = response.text.strip().replace("\n", " ")[:400]
+        raise HTTPException(
+            status_code=503,
+            detail=f"Supabase could not update {table} with the backend service role ({response.status_code}): {detail or 'request rejected'}",
         )
     if response.status_code == status.HTTP_204_NO_CONTENT or not response.content:
         return []
@@ -1444,7 +1518,7 @@ async def publish_brand(brand_id: str, payload: PublishRequest, request: Request
     published: dict[str, dict[str, Any]] = {}
     for kind in payload.kinds:
         if kind == "product":
-            rows = await _supabase_rows(request, "orb_products", {
+            rows = await _supabase_service_rows(request, "orb_products", {
                 "select": "id,payload", "brand_id": f"eq.{brand_id}", "status": "eq.active",
             })
         else:
@@ -1465,12 +1539,14 @@ async def publish_brand(brand_id: str, payload: PublishRequest, request: Request
             changes: dict[str, Any] = {"qdrant_published_at": datetime.now(timezone.utc).isoformat(), "qdrant_error": None}
             if next_status:
                 changes["status"] = next_status
-            await _supabase_write(request, "PATCH", table, params={"id": f"in.({','.join(ids)})"}, payload=changes, prefer="return=minimal")
+            writer = _supabase_service_write if table == "orb_products" else _supabase_write
+            await writer(request, "PATCH", table, params={"id": f"in.({','.join(ids)})"}, payload=changes, prefer="return=minimal")
             published[kind] = {"published": len(items), "collection": collection}
         except PublishUnavailable as exc:
             ids = [item["id"] for item in items]
             table = "orb_products" if kind == "product" else "orb_generated_content"
-            await _supabase_write(request, "PATCH", table, params={"id": f"in.({','.join(ids)})"}, payload={"qdrant_error": str(exc)[:2000]}, prefer="return=minimal")
+            writer = _supabase_service_write if table == "orb_products" else _supabase_write
+            await writer(request, "PATCH", table, params={"id": f"in.({','.join(ids)})"}, payload={"qdrant_error": str(exc)[:2000]}, prefer="return=minimal")
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"published": published}
 
@@ -1623,7 +1699,7 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
     # one hide the authoritative Shopify-backed product editor payload.
     if kind == "products":
         brand = await _remote_brand_by_name(request, brand_name)
-        product_rows = await _supabase_rows(request, "orb_products", {
+        product_rows = await _supabase_service_rows(request, "orb_products", {
             "select": "id,payload,status,synced_at,provider",
             "brand_id": f"eq.{brand['id']}",
             "status": "eq.active",
@@ -1662,7 +1738,7 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
     # Qdrant collection yet.
     brand = await _remote_brand_by_name(request, brand_name)
     if kind == "products":
-        rows = await _supabase_rows(request, "orb_products", {
+        rows = await _supabase_service_rows(request, "orb_products", {
             "select": "id,payload,status,synced_at,provider",
             "brand_id": f"eq.{brand['id']}",
             "status": "eq.active",
@@ -1700,7 +1776,7 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
 async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
     brand = await _remote_brand_by_name(request, payload.brand_name)
     if kind == "products":
-        rows = await _supabase_write(request, "PATCH", "orb_products", params={
+        rows = await _supabase_service_write(request, "PATCH", "orb_products", params={
             "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "select": "id,payload",
         }, payload={"payload": payload.payload})
     else:
@@ -1799,9 +1875,14 @@ async def publish_existing_approved_knowledge(kind: Literal["sops", "faqs"], pay
 
 @router.delete("/knowledge/{kind}/{item_id}", status_code=204, response_class=Response)
 async def delete_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, brand_name: str, request: Request, _: User = Depends(_admin)) -> Response:
-    brand = await _brand_by_name(request.app.state.supabase_db, brand_name)
+    brand = await _remote_brand_by_name(request, brand_name)
     if kind == "products":
-        result = await request.app.state.supabase_db.execute("DELETE FROM cx_copilot.orb_products WHERE id=$1::uuid AND brand_id=$2::uuid", item_id, brand["id"])
+        rows = await _supabase_service_write(request, "DELETE", "orb_products", params={
+            "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "select": "id",
+        })
+        if not rows:
+            raise HTTPException(status_code=404, detail="Knowledge item not found")
+        return Response(status_code=204)
     else:
         content_kind = "sop" if kind == "sops" else "faq"
         result = await request.app.state.supabase_db.execute("DELETE FROM cx_copilot.orb_generated_content WHERE id=$1::uuid AND brand_id=$2::uuid AND kind=$3", item_id, brand["id"], content_kind)

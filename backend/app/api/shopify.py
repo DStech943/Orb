@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, model_validator
 
-from app.api.knowledge import _remote_brand_by_name, _supabase_rows, _supabase_write
+from app.api.knowledge import _remote_brand_by_name, _supabase_service_rows, _supabase_service_write
 from app.auth import User, current_user
 from app.pipeline import advance_completed_crawl, create_crawl_pipeline
 from app.scraper.shopify import ShopifyAdminUnavailable, _admin_query, _plain_html, admin_domain, list_admin_products, list_admin_resources
@@ -541,7 +541,7 @@ async def sync_shopify_product_library(
         for product in products
     ]
     if records:
-        await _supabase_write(
+        await _supabase_service_write(
             request, "POST", "orb_products", params={"on_conflict": "brand_id,provider,external_id", "select": "id"}, payload=records,
             prefer="resolution=merge-duplicates,return=representation",
         )
@@ -570,7 +570,7 @@ async def product_variant_metafields(
     product and asks to inspect its variants.
     """
     brand = await _remote_brand_by_name(request, brand_name)
-    rows = await _supabase_rows(request, "orb_products", {
+    rows = await _supabase_service_rows(request, "orb_products", {
         "select": "external_id,provider",
         "id": f"eq.{product_id}",
         "brand_id": f"eq.{brand['id']}",
@@ -628,7 +628,7 @@ async def save_shopify_product_metafields(
 ) -> dict:
     """Write existing product metafields to Shopify, then persist the accepted values in Orb."""
     brand = await _remote_brand_by_name(request, payload.brand_name)
-    rows = await _supabase_rows(request, "orb_products", {
+    rows = await _supabase_service_rows(request, "orb_products", {
         "select": "id,external_id,payload,provider",
         "id": f"eq.{payload.product_id}",
         "brand_id": f"eq.{brand['id']}",
@@ -741,7 +741,7 @@ async def save_shopify_product_metafields(
             **shopify_payload,
             "metafields": {**shopify_payload["metafields"], "nodes": merge_fields(shopify_payload["metafields"].get("nodes") or [])},
         }
-    await _supabase_write(
+    await _supabase_service_write(
         request, "PATCH", "orb_products",
         params={"id": f"eq.{row['id']}", "brand_id": f"eq.{brand['id']}", "select": "id"},
         payload={"payload": product_payload},
