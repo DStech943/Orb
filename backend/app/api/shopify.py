@@ -698,11 +698,19 @@ async def save_shopify_product_metafields(
         (str(field.get("namespace") or ""), str(field.get("key") or "")): field
         for field in stored_fields if isinstance(field, dict)
     }
+    # Empty inputs are an explicit request to clear an existing Shopify
+    # metafield. Shopify handles this reliably through metafieldsDelete rather
+    # than metafieldsSet with an empty value (which several field types reject).
+    deleted_ids = {str(value) for value in payload.deleted_metafield_ids if str(value)}
     requested: list[dict] = []
     for field in payload.metafields:
-        if is_variant_owner and not field.is_set and not field.value:
-            continue
         stored = stored_by_key.get((field.namespace, field.key))
+        if not field.value.strip():
+            if stored and stored.get("id"):
+                deleted_ids.add(str(stored["id"]))
+            continue
+        if is_variant_owner and not field.is_set:
+            continue
         if stored and str(stored.get("type") or "") != field.type:
             raise HTTPException(status_code=422, detail=f"The type for {field.namespace}.{field.key} cannot be changed from Orb.")
         requested.append({
@@ -710,7 +718,6 @@ async def save_shopify_product_metafields(
             "type": field.type, "value": field.value,
         })
 
-    deleted_ids = {str(value) for value in payload.deleted_metafield_ids if str(value)}
     stored_by_id = {str(field.get("id") or ""): field for field in stored_fields if isinstance(field, dict) and field.get("id")}
     unknown_deletions = deleted_ids - set(stored_by_id)
     if unknown_deletions:
