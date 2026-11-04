@@ -169,9 +169,9 @@ async def _save_railway_postgres_credentials(
             status_code=503,
             detail="Set SHOPIFY_CREDENTIALS_ENCRYPTION_KEY on the Railway orb-api service before saving Shopify credentials.",
         )
-    await _ensure_railway_credential_store(request)
-    brand_key = _shopify_brand_key(brand_name)
     try:
+        await _ensure_railway_credential_store(request)
+        brand_key = _shopify_brand_key(brand_name)
         async with request.app.state.db.acquire() as connection:
             await connection.execute("""
                 INSERT INTO shopify_brand_credentials
@@ -185,8 +185,13 @@ async def _save_railway_postgres_credentials(
                   created_by=EXCLUDED.created_by,
                   updated_at=now()
             """, user.org_id, brand_key, brand_name, domain, access_token, key, user.id)
-    except asyncpg.PostgresError as exc:
-        raise HTTPException(status_code=503, detail="Orb could not securely save the Shopify credentials to Railway Postgres.") from exc
+    except (asyncpg.PostgresError, OSError) as exc:
+        # Never leak database/crypto details or the submitted token. Returning
+        # a handled response also preserves CORS headers for the browser.
+        raise HTTPException(
+            status_code=503,
+            detail="Orb could not prepare secure Shopify credential storage in Railway Postgres. Ensure the Railway database is reachable and pgcrypto is enabled.",
+        ) from exc
 
 
 def _server_environment_credentials(brand_name: str | None) -> tuple[str | None, str | None, str]:
