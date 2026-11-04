@@ -132,6 +132,32 @@ def _server_environment_credentials(brand_name: str | None) -> tuple[str | None,
     return None, None, "missing"
 
 
+def _server_environment_status(brand_name: str | None) -> dict[str, str | bool | None]:
+    """Return non-secret configuration diagnostics for an authenticated UI."""
+    if not brand_name:
+        return {
+            "server_token_name": None,
+            "server_domain_name": None,
+            "server_token_configured": False,
+            "server_domain_configured": False,
+        }
+    try:
+        token_name, domain_name = _shopify_vault_names(brand_name)
+    except ValueError:
+        return {
+            "server_token_name": None,
+            "server_domain_name": None,
+            "server_token_configured": False,
+            "server_domain_configured": False,
+        }
+    return {
+        "server_token_name": token_name,
+        "server_domain_name": domain_name,
+        "server_token_configured": bool(os.getenv(token_name, "").strip()),
+        "server_domain_configured": bool(os.getenv(domain_name, "").strip()),
+    }
+
+
 async def _direct_vault_credentials(request: Request, brand_name: str) -> tuple[str | None, str | None, str]:
     """Read two explicitly named Vault secrets through the server-only DB URL.
 
@@ -379,6 +405,7 @@ async def shopify_credentials(
         "domain": domain,
         "token_available": bool(token),
         "source": source,
+        **_server_environment_status(brand_name),
     }
 
 
