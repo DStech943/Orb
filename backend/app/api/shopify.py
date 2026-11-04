@@ -98,6 +98,9 @@ class ShopifyMetafieldValue(BaseModel):
 class ShopifyMetafieldSave(BaseModel):
     brand_name: str = Field(min_length=1, max_length=160)
     product_id: str = Field(min_length=1, max_length=160)
+    # When supplied, the Shopify GID of a variant belonging to product_id.
+    # Omitting it preserves the existing product-metafield behaviour.
+    owner_id: str | None = Field(default=None, min_length=1, max_length=160)
     metafields: list[ShopifyMetafieldValue] = Field(default_factory=list, max_length=100)
     deleted_metafield_ids: list[str] = Field(default_factory=list, max_length=100)
     use_vault: bool = True
@@ -589,7 +592,7 @@ async def product_variant_metafields(
           variants(first: 50) {
             nodes {
               id
-              metafields(first: 10) {
+              metafields(first: 100) {
                 nodes {
                   id namespace key type value description
                   definition { name pinnedPosition }
@@ -615,8 +618,7 @@ async def product_variant_metafields(
             continue
         fields = [
             field for field in ((variant.get("metafields") or {}).get("nodes") or [])
-            if isinstance(field, dict) and isinstance(field.get("definition"), dict)
-            and field["definition"].get("pinnedPosition") is not None
+            if isinstance(field, dict)
         ]
         variants.append({"id": variant.get("id"), "metafields": fields})
     return {"variants": variants}
@@ -639,7 +641,18 @@ async def save_shopify_product_metafields(
         raise HTTPException(status_code=404, detail="This Shopify product is no longer available in Orb. Sync Products and try again.")
     row = rows[0]
     product_payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    stored_fields = product_payload.get("metafields") if isinstance(product_payload.get("metafields"), list) else []
+    owner_id = str(payload.owner_id or row["external_id"])
+    is_variant_owner = bool(payload.owner_id)
+    stored_variant: dict | None = None
+    if is_variant_owner:
+        product_variants = product_payload.get("variants") if isinstance(product_payload.get("variants"), list) else []
+        stored_variant = next((variant for variant in product_variants if isinstance(variant, dict) and str(variant.get("id") or "") == owner_id), None)
+        # Variant metafields are loaded on demand to avoid an expensive nested
+        # catalog query. It is therefore valid for an older stored product to
+        # have no variant-metafield list yet.
+        stored_fields = stored_variant.get("metafields") if isinstance(stored_variant, dict) and isinstance(stored_variant.get("metafields"), list) else []
+    else:
+        stored_fields = product_payload.get("metafields") if isinstance(product_payload.get("metafields"), list) else []
     stored_by_key = {
         (str(field.get("namespace") or ""), str(field.get("key") or "")): field
         for field in stored_fields if isinstance(field, dict)
@@ -650,7 +663,7 @@ async def save_shopify_product_metafields(
         if stored and str(stored.get("type") or "") != field.type:
             raise HTTPException(status_code=422, detail=f"The type for {field.namespace}.{field.key} cannot be changed from Orb.")
         requested.append({
-            "ownerId": str(row["external_id"]), "namespace": field.namespace, "key": field.key,
+            "ownerId": owner_id, "namespace": field.namespace, "key": field.key,
             "type": field.type, "value": field.value,
         })
 
@@ -663,6 +676,23 @@ async def save_shopify_product_metafields(
     domain, access_token, _source = await _resolve_credentials(request, payload.brand_name, payload.use_vault, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand. Install Shopify or add its Vault credentials first.")
+    if is_variant_owner:
+        try:
+            owner_data = await _admin_query(
+                request.app.state.settings,
+                """
+                query OrbVariantOwner($id: ID!) {
+                  node(id: $id) { ... on ProductVariant { product { id } } }
+                }
+                """,
+                {"id": owner_id},
+                domain=admin_domain(domain), access_token=access_token,
+            )
+        except ShopifyAdminUnavailable as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        parent_id = str(((owner_data.get("node") or {}).get("product") or {}).get("id") or "") if isinstance(owner_data, dict) else ""
+        if parent_id != str(row["external_id"]):
+            raise HTTPException(status_code=422, detail="This variant does not belong to the selected Shopify product.")
     set_mutation = """
     mutation OrbSaveProductMetafields($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
@@ -697,7 +727,7 @@ async def save_shopify_product_metafields(
                     accepted[(str(field.get("namespace") or ""), str(field.get("key") or ""))] = field
         if deleted_ids:
             delete_input = [
-                {"ownerId": str(row["external_id"]), "namespace": field.get("namespace"), "key": field.get("key")}
+                {"ownerId": owner_id, "namespace": field.get("namespace"), "key": field.get("key")}
                 for field_id, field in stored_by_id.items() if field_id in deleted_ids
             ]
             for start in range(0, len(delete_input), 25):
@@ -734,19 +764,38 @@ async def save_shopify_product_metafields(
         merged.extend(field for key, field in accepted.items() if key not in existing_keys)
         return merged
 
-    product_payload = {**product_payload, "metafields": merge_fields(stored_fields)}
+    merged_fields = merge_fields(stored_fields)
+    if is_variant_owner:
+        def update_variant_list(values: object) -> object:
+            if not isinstance(values, list):
+                return values
+            return [
+                {**variant, "metafields": merged_fields} if isinstance(variant, dict) and str(variant.get("id") or "") == owner_id else variant
+                for variant in values
+            ]
+
+        product_payload = {**product_payload, "variants": update_variant_list(product_payload.get("variants"))}
+    else:
+        product_payload = {**product_payload, "metafields": merged_fields}
     shopify_payload = product_payload.get("shopify")
-    if isinstance(shopify_payload, dict) and isinstance(shopify_payload.get("metafields"), dict):
-        product_payload["shopify"] = {
-            **shopify_payload,
-            "metafields": {**shopify_payload["metafields"], "nodes": merge_fields(shopify_payload["metafields"].get("nodes") or [])},
-        }
+    if isinstance(shopify_payload, dict):
+        if is_variant_owner and isinstance(shopify_payload.get("variants"), dict):
+            variants = shopify_payload["variants"]
+            product_payload["shopify"] = {
+                **shopify_payload,
+                "variants": {**variants, "nodes": update_variant_list(variants.get("nodes"))},
+            }
+        elif not is_variant_owner and isinstance(shopify_payload.get("metafields"), dict):
+            product_payload["shopify"] = {
+                **shopify_payload,
+                "metafields": {**shopify_payload["metafields"], "nodes": merged_fields},
+            }
     await _supabase_service_write(
         request, "PATCH", "orb_products",
         params={"id": f"eq.{row['id']}", "brand_id": f"eq.{brand['id']}", "select": "id"},
         payload={"payload": product_payload},
     )
-    return {"saved": len(accepted), "deleted": len(deleted_keys), "product_id": str(row["id"])}
+    return {"saved": len(accepted), "deleted": len(deleted_keys), "product_id": str(row["id"]), "owner_id": owner_id}
 
 
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED)
