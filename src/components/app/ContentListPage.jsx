@@ -224,7 +224,14 @@ function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loa
   const saveSelectedVariant = async (variant) => {
     if (!saveVariantMetafields) return
     setSavingVariant(true)
-    try { await saveVariantMetafields(product, variant) } finally { setSavingVariant(false) }
+    setVariantMetafieldError('')
+    try {
+      await saveVariantMetafields(product, variant)
+    } catch (error) {
+      setVariantMetafieldError(error.message || 'Could not save variant metafields to Shopify.')
+    } finally {
+      setSavingVariant(false)
+    }
   }
   const state = String(product.status || 'DRAFT').toUpperCase()
   const templateOptions = [...themeTemplates]
