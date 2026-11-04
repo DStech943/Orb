@@ -177,7 +177,7 @@ async def _vault_credentials(request: Request, brand_name: str | None) -> tuple[
                 json={"p_brand_name": brand_name},
             )
         if response.is_error:
-            return None, None, "vault_rpc_unavailable"
+            return None, None, direct_status if direct_status != "direct_database_not_configured" else "vault_rpc_unavailable"
         rows = response.json()
         row = rows[0] if isinstance(rows, list) and rows else {}
         domain = str(row.get("shopify_domain") or "").strip() or None
@@ -185,7 +185,7 @@ async def _vault_credentials(request: Request, brand_name: str | None) -> tuple[
         return domain, token, "vault" if domain and token else "missing"
     except (httpx.HTTPError, TypeError, ValueError):
         # An unavailable RPC must not expose transport details or secrets.
-        return None, None, "vault_connection_failed"
+        return None, None, direct_status if direct_status != "direct_database_not_configured" else "vault_connection_failed"
 
 
 def _is_legacy_brand(brand_name: str | None) -> bool:
