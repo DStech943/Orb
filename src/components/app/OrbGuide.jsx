@@ -23,7 +23,9 @@ const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 // Speech recognition frequently transcribes “Orb” as “or” / “orbe”. Keeping
 // those common variants here makes the wake phrase more forgiving without
 // matching ordinary conversation that does not begin with a greeting.
-const WAKE_PHRASE = /\b(?:hey|hi|okay|ok)[\s,.-]+(?:orb|orbe|or)\b[\s,!?-]*/i
+const WAKE_PHRASE = /\b(?:hey|hi|okay|ok)\s+(?:orb|orbe|or)\b/i
+const normalizeSpeech = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+const isWakePhraseOnly = (value) => /^(?:hey|hi|okay|ok)\s+(?:orb|orbe|or)$/.test(normalizeSpeech(value))
 const isNavigationCommand = (value) => /(?:^\s*(?:please\s+)?(?:go|open|navigate|switch|show)\b)|(?:\b(?:take|bring)\s+me\s+to\b)|(?:\b(?:can|could|would)\s+you\s+(?:open|navigate|take)\b)/i.test(value)
 
 export default function OrbGuide() {
@@ -233,12 +235,13 @@ export default function OrbGuide() {
         const result = event.results[index]
         // Waiting for the final transcript prevents an interim “Hey Orb” from
         // cutting off the rest of a spoken question.
-        if (!result.isFinal) continue
         const transcript = result[0]?.transcript?.trim() || ''
-        const match = transcript.match(WAKE_PHRASE)
+        if (!result.isFinal && !isWakePhraseOnly(transcript)) continue
+        const normalizedTranscript = normalizeSpeech(transcript)
+        const match = normalizedTranscript.match(WAKE_PHRASE)
         if (!match || Date.now() - lastWakeRef.current < 2000) continue
         lastWakeRef.current = Date.now()
-        pendingQuestion = transcript.slice((match.index || 0) + match[0].length).trim()
+        pendingQuestion = normalizedTranscript.slice((match.index || 0) + match[0].length).trim()
         stopForWake()
         break
       }
