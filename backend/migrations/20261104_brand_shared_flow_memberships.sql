@@ -82,11 +82,6 @@ CREATE POLICY "orb_flows_insert_admin"
   WITH CHECK (
     created_by = auth.uid()
     AND EXISTS (
-      SELECT 1 FROM cx_copilot.orb_brand_memberships membership
-      WHERE membership.brand_id = orb_flows.brand_id
-        AND membership.user_id = auth.uid()
-    )
-    AND EXISTS (
       SELECT 1 FROM cx_copilot.orb_profiles profile
       WHERE profile.id = auth.uid() AND profile.role = 'admin'
     )
@@ -96,22 +91,12 @@ CREATE POLICY "orb_flows_update_admin"
   ON cx_copilot.orb_flows FOR UPDATE TO authenticated
   USING (
     EXISTS (
-      SELECT 1 FROM cx_copilot.orb_brand_memberships membership
-      WHERE membership.brand_id = orb_flows.brand_id
-        AND membership.user_id = auth.uid()
-    )
-    AND EXISTS (
       SELECT 1 FROM cx_copilot.orb_profiles profile
       WHERE profile.id = auth.uid() AND profile.role = 'admin'
     )
   )
   WITH CHECK (
     EXISTS (
-      SELECT 1 FROM cx_copilot.orb_brand_memberships membership
-      WHERE membership.brand_id = orb_flows.brand_id
-        AND membership.user_id = auth.uid()
-    )
-    AND EXISTS (
       SELECT 1 FROM cx_copilot.orb_profiles profile
       WHERE profile.id = auth.uid() AND profile.role = 'admin'
     )
@@ -121,11 +106,6 @@ CREATE POLICY "orb_flows_delete_admin"
   ON cx_copilot.orb_flows FOR DELETE TO authenticated
   USING (
     EXISTS (
-      SELECT 1 FROM cx_copilot.orb_brand_memberships membership
-      WHERE membership.brand_id = orb_flows.brand_id
-        AND membership.user_id = auth.uid()
-    )
-    AND EXISTS (
       SELECT 1 FROM cx_copilot.orb_profiles profile
       WHERE profile.id = auth.uid() AND profile.role = 'admin'
     )
