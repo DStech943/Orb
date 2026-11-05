@@ -23,10 +23,8 @@ export default function OrbLoader({ label = 'Orb is getting things ready', compa
   }, [])
 
   return <div className={`orb-loader ${compact ? 'orb-loader--compact' : ''} ${className}`} role="status" aria-live="polite">
-    <div className="orb-loader__track" aria-hidden="true">
-      <span className="orb-loader__point orb-loader__point--start" />
-      <span className="orb-loader__point orb-loader__point--end" />
-      <div className="orb-loader__traveller"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={0.88} glow={1} hoverIntensity={0} trail={0} intro /></div>
+    <div className="orb-loader__stage" aria-hidden="true">
+      <div className="orb-loader__traveller"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="transparent" size={0.88} glow={1} hoverIntensity={0} trail={0} intro /></div>
     </div>
     <p className="orb-loader__label">{label}</p>
     {!compact && <p key={factIndex} className="orb-loader__fact">{facts[factIndex]}</p>}
