@@ -244,7 +244,7 @@ async def _flow_assist_context(request: Request, brand: dict[str, Any], prompt: 
             "kind": "in.(sop,faq)",
             "status": "in.(approved,published)",
             "order": "created_at.desc",
-            "limit": "80",
+            "limit": "500",
         })
     except HTTPException:
         content_rows = []
@@ -1688,7 +1688,13 @@ async def delete_flow(flow_id: str, brand_name: str, request: Request, _: User =
 
 
 @router.get("/knowledge/{kind}")
-async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: str, request: Request, _: User = Depends(current_user)) -> dict[str, Any]:
+async def list_knowledge(
+    kind: Literal["sops", "faqs", "products"],
+    brand_name: str,
+    request: Request,
+    limit: int = Query(default=500, ge=1, le=500),
+    _: User = Depends(current_user),
+) -> dict[str, Any]:
     brand_name = brand_name.strip()
     if not brand_name:
         raise HTTPException(status_code=422, detail="brand_name is required")
@@ -1721,7 +1727,7 @@ async def list_knowledge(kind: Literal["sops", "faqs", "products"], brand_name: 
     qdrant_kind = {"sops": "sop", "faqs": "faq", "products": "product"}[kind]
     qdrant_error: PublishUnavailable | None = None
     try:
-        legacy_points = await scroll_points(request.app.state.db, request.app.state.settings, brand_name, qdrant_kind)
+        legacy_points = await scroll_points(request.app.state.db, request.app.state.settings, brand_name, qdrant_kind, limit=limit)
     except PublishUnavailable as exc:
         legacy_points = []
         qdrant_error = exc

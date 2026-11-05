@@ -62,7 +62,7 @@ export const deleteBrandVoiceSource = (brandId, sourceId) => request(`/api/brand
 export const generateBrandVoice = (brandId) => request(`/api/brands/${encodeURIComponent(brandId)}/voice/generate`, { method: 'POST' })
 export const createManualBrandVoiceProfile = (brandId, profile) => request(`/api/brands/${encodeURIComponent(brandId)}/voice/profiles/manual`, { method: 'POST', body: JSON.stringify(profile) })
 export const approveBrandVoice = (brandId, profileId, profile) => request(`/api/brands/${encodeURIComponent(brandId)}/voice/profiles/${encodeURIComponent(profileId)}/approve`, { method: 'PATCH', body: JSON.stringify(profile) })
-export const listKnowledge = (kind, brandName = activeBrandName()) => brandName ? request(`/api/knowledge/${kind}?brand_name=${encodeURIComponent(brandName)}`) : Promise.resolve(null)
+export const listKnowledge = (kind, brandName = activeBrandName(), limit = 500) => brandName ? request(`/api/knowledge/${kind}?brand_name=${encodeURIComponent(brandName)}&limit=${Math.min(500, Math.max(1, Number(limit) || 500))}`) : Promise.resolve(null)
 export const updateKnowledge = (kind, id, payload, brandName = activeBrandName()) => request(`/api/knowledge/${kind}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ brand_name: brandName, payload }) })
 export const publishApprovedKnowledge = (kind, brandName = activeBrandName()) => request(`/api/knowledge/${kind}/publish-approved`, { method: 'POST', body: JSON.stringify({ brand_name: brandName }) })
 export const deleteKnowledge = (kind, id, brandName = activeBrandName()) => request(`/api/knowledge/${kind}/${encodeURIComponent(id)}?brand_name=${encodeURIComponent(brandName)}`, { method: 'DELETE' })

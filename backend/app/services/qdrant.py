@@ -96,7 +96,7 @@ async def scroll_points(
     settings: Settings,
     brand_name: str,
     kind: str,
-    limit: int = 200,
+    limit: int = 500,
 ) -> list[dict[str, Any]]:
     """Return payload-only points from one brand and knowledge-type collection."""
     base_url, headers = await _client(pool)

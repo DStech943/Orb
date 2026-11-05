@@ -438,7 +438,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
 
   return <div className="page-enter mx-auto max-w-7xl">
     <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Knowledge library</p><h2 className="mt-1 text-3xl font-extrabold tracking-tight">{title}</h2></div>
+      <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Knowledge library</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-3xl font-extrabold tracking-tight">{title}</h2>{!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-1 text-xs font-extrabold text-primary">{data.length} {title.toLowerCase()}</span>}</div></div>
       <div className="flex flex-wrap gap-2">
         {!isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
         {!isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to Qdrant'}</Button>}
