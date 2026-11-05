@@ -30,10 +30,14 @@ const productInventory = (product = {}) => {
   return quantities.length ? `${quantities.reduce((total, quantity) => total + quantity, 0)} in stock` : '—'
 }
 const productPrice = (product = {}) => {
-  const value = String(product.price || '').trim()
+  const value = String(product.price ?? '').trim()
   if (!value || value === '—') return '—'
   const currency = String(product.currency || '').trim()
   return currency && !value.toUpperCase().includes(currency) && !/[^\d.,\s-]/.test(value) ? `${value} ${currency}` : value
+}
+const productPriceAmount = (product = {}) => {
+  const amount = Number(String(product.price ?? '').replace(/[^\d.-]/g, ''))
+  return Number.isFinite(amount) ? amount : null
 }
 
 function ProductEditor({ product, onChange }) {
@@ -291,6 +295,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const [brandVersion, setBrandVersion] = useState(0)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('All')
+  const [productSort, setProductSort] = useState('name-asc')
   const [selected, setSelected] = useState(null)
   const [checked, setChecked] = useState([])
   const [confirm, setConfirm] = useState(false)
@@ -309,10 +314,24 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
 
   const { data: fetchedData, loading, error, reload } = useAsync(list, [list, brandVersion])
   const data = Array.isArray(fetchedData) ? fetchedData : []
-  const rows = useMemo(() => data.filter((item) => {
-    const text = [item.title, item.question, item.name, item.description, item.category].filter(Boolean).join(' ').toLowerCase()
-    return (isProduct || status === 'All' || item.status === status) && text.includes(query.toLowerCase())
-  }), [data, isProduct, query, status])
+  const rows = useMemo(() => {
+    const filtered = data.filter((item) => {
+      const text = [item.title, item.question, item.name, item.description, item.category].filter(Boolean).join(' ').toLowerCase()
+      const statusMatches = status === 'All' || String(item.status || '').toLowerCase() === status.toLowerCase()
+      return statusMatches && text.includes(query.toLowerCase())
+    })
+    if (!isProduct) return filtered
+    return [...filtered].sort((left, right) => {
+      if (productSort === 'name-desc') return String(right.name || '').localeCompare(String(left.name || ''), undefined, { sensitivity: 'base' })
+      if (productSort === 'price-asc' || productSort === 'price-desc') {
+        const leftPrice = productPriceAmount(left), rightPrice = productPriceAmount(right)
+        if (leftPrice === null) return 1
+        if (rightPrice === null) return -1
+        return productSort === 'price-desc' ? rightPrice - leftPrice : leftPrice - rightPrice
+      }
+      return String(left.name || '').localeCompare(String(right.name || ''), undefined, { sensitivity: 'base' })
+    })
+  }, [data, isProduct, productSort, query, status])
   const draftIds = useMemo(() => data
     .filter((item) => String(item.status || '').toLowerCase() === 'draft')
     .map((item) => item.id), [data])
@@ -428,10 +447,10 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       </div>
     </div>
     <section className="mt-6 rounded-lg border-2 border-ink bg-white p-4 shadow-brutal">
-      <div className={`grid gap-3 ${isProduct ? 'md:grid-cols-[1fr_150px]' : 'md:grid-cols-[1fr_150px_150px]'}`}>
+      <div className={`grid gap-3 ${isProduct ? 'md:grid-cols-[1fr_150px_190px]' : 'md:grid-cols-[1fr_150px_150px]'}`}>
         <label className="flex items-center gap-2 rounded-md border-2 border-ink px-3 py-2"><Search size={16} /><input className="min-w-0 flex-1 outline-none" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>
-        {!isProduct && <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}><option>All</option><option>Draft</option><option>Approved</option></Select>}
-        <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>
+        <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}>{isProduct ? <><option>All</option><option>Active</option><option>Draft</option></> : <><option>All</option><option>Draft</option><option>Approved</option></>}</Select>
+        {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
       </div>
       {!isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
       <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action="Generate content" onAction={() => navigate('/app?generate=1')} />}</div>
