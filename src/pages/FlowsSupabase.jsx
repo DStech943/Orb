@@ -3201,6 +3201,7 @@ function OrbFlowLibrary({
 function TemplateManager({
   templates,
   categories,
+  defaultCategoryCode,
   loading,
   onNew,
   onEdit,
@@ -3208,9 +3209,19 @@ function TemplateManager({
 }) {
   const [categoryCode, setCategoryCode] = useState("");
   const [templateToAdd, setTemplateToAdd] = useState(null);
+  const appliedBrandCategoryRef = useRef(null);
   useEffect(() => {
+    if (
+      defaultCategoryCode &&
+      defaultCategoryCode !== appliedBrandCategoryRef.current &&
+      categories.some((category) => category.code === defaultCategoryCode)
+    ) {
+      setCategoryCode(defaultCategoryCode);
+      appliedBrandCategoryRef.current = defaultCategoryCode;
+      return;
+    }
     if (!categoryCode && categories[0]) setCategoryCode(categories[0].code);
-  }, [categories, categoryCode]);
+  }, [categories, categoryCode, defaultCategoryCode]);
   return (
     <section className="page-enter mx-auto max-w-6xl">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -3400,9 +3411,11 @@ export default function FlowsSupabase() {
   const templates = Array.isArray(templateData?.templates)
     ? templateData.templates.map(normalise)
     : [];
-  const categories = Array.isArray(templateData?.categories)
-    ? templateData.categories
-    : [];
+  const categories =
+    Array.isArray(templateData?.categories) && templateData.categories.length
+      ? templateData.categories
+      : FLOW_TEMPLATE_CATEGORIES;
+  const brandCategoryCode = String(data?.category_code || "").trim();
   const hasBrand = () => {
     if (!activeBrandName()) {
       showToast("Choose a brand before creating a visual flow.");
@@ -3541,6 +3554,7 @@ export default function FlowsSupabase() {
             <TemplateManager
               templates={templates}
               categories={categories}
+              defaultCategoryCode={brandCategoryCode}
               loading={templatesLoading}
               onNew={startTemplate}
               onEdit={editTemplate}
