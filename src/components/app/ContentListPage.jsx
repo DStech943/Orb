@@ -14,6 +14,7 @@ import StatusChip from '../ui/StatusChip'
 import Textarea from '../ui/Textarea'
 import SopFlow from './SopFlow'
 import useAsync from '../../hooks/useAsync'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 
 const titles = { sop: 'SOPs', faq: 'FAQs', product: 'Products' }
@@ -39,6 +40,18 @@ const productPriceAmount = (product = {}) => {
   const amount = Number(String(product.price ?? '').replace(/[^\d.-]/g, ''))
   return Number.isFinite(amount) ? amount : null
 }
+
+const formatUpdatedAt = (value) => {
+  if (!value || value === '—') return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(date).reduce((values, part) => ({ ...values, [part.type]: part.value }), {})
+  return `${parts.day}-${parts.month}-${parts.year} ${parts.hour}:${parts.minute}`
+}
+
+const updatedByLabel = (item = {}) => item.updatedBy || item.updated_by || (String(item.source || '').toLowerCase().includes('orb') || String(item.source || '').toLowerCase().includes('qdrant') ? 'Orb' : 'Unknown')
 
 function ProductEditor({ product, onChange }) {
   const metafields = Array.isArray(product.metafields) ? product.metafields : []
@@ -291,6 +304,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const isSop = kind === 'sop'
   const isProduct = kind === 'product'
   const navigate = useNavigate()
+  const { user } = useAuth()
   const { showToast } = useToast()
   const [brandVersion, setBrandVersion] = useState(0)
   const [query, setQuery] = useState('')
@@ -355,7 +369,8 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const toggle = (id) => setChecked((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id])
   const save = async () => {
     try {
-      await update(selected)
+      const editorName = user?.name || user?.email?.split('@')[0] || 'Orb user'
+      await update(isSop ? { ...selected, updatedBy: editorName } : selected)
       showToast('Saved.')
       setSelected(null)
       reload()
@@ -424,7 +439,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   }
 
   const columns = isSop
-    ? [{ key: 'title', label: 'Title / situation', render: (item) => <div><strong>{item.title}</strong><p className="text-xs text-muted">{item.situation}</p></div> }, { key: 'category', label: 'Category' }, { key: 'lifecycle', label: 'Lifecycle stage' }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated' }]
+    ? [{ key: 'title', label: 'Title / situation', render: (item) => <div><strong>{item.title}</strong><p className="text-xs text-muted">{item.situation}</p></div> }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated', render: (item) => <div className="whitespace-nowrap"><p className="text-sm font-medium text-ink">{formatUpdatedAt(item.updated)}</p><p className="mt-0.5 text-xs text-muted">by {updatedByLabel(item)}</p></div> }]
     : isProduct
       ? [{ key: 'name', label: 'Product', render: (item) => { const image = productThumbnail(item); return <div className="flex min-w-[220px] items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">{image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <span className="h-4 w-4 rounded bg-slate-200" />}</span><strong className="line-clamp-2 text-sm text-ink">{item.name || 'Untitled product'}</strong></div> } }, { key: 'status', label: 'Status', render: (item) => { const active = String(item.status || '').toLowerCase() === 'active'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{item.status ? String(item.status).charAt(0).toUpperCase() + String(item.status).slice(1).toLowerCase() : '—'}</span> } }, { key: 'inventory', label: 'Inventory', render: (item) => <span className="whitespace-nowrap text-sm text-slate-700">{productInventory(item)}</span> }, { key: 'price', label: 'Price', render: (item) => <span className="whitespace-nowrap text-sm font-semibold text-ink">{productPrice(item)}</span> }]
       : [{ key: 'question', label: 'Question' }, { key: 'category', label: 'Category' }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated' }]

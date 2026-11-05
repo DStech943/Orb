@@ -1894,7 +1894,7 @@ async def list_knowledge(
     else:
         content_kind = "sop" if kind == "sops" else "faq"
         rows = await _supabase_rows(request, "orb_generated_content", {
-            "select": "id,payload,status,created_at",
+            "select": "id,payload,status,created_at,updated_at",
             "brand_id": f"eq.{brand['id']}",
             "kind": f"eq.{content_kind}",
             "order": "created_at.desc",
@@ -1908,6 +1908,9 @@ async def list_knowledge(
         raw_payload = decode_jsonb(row.get("payload"))
         point_payload = dict(raw_payload) if isinstance(raw_payload, dict) else {}
         point_payload.setdefault("status", str(row.get("status") or "Draft").title())
+        updated_at = row.get("updated_at") or row.get("created_at")
+        if updated_at:
+            point_payload.setdefault("updated_at", updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at))
         points.append({"id": str(row["id"]), "payload": point_payload})
     return {"points": points, "source": "supabase"}
 
@@ -1915,13 +1918,15 @@ async def list_knowledge(
 @router.patch("/knowledge/{kind}/{item_id}")
 async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
     brand = await _remote_brand_by_name(request, payload.brand_name)
+    stored_payload = dict(payload.payload)
+    stored_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     if kind == "products":
         rows = await _supabase_service_write(request, "PATCH", "orb_products", params={
             "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "select": "id,payload",
-        }, payload={"payload": payload.payload})
+        }, payload={"payload": stored_payload})
     else:
         content_kind = "sop" if kind == "sops" else "faq"
-        content_status = str(payload.payload.get("status") or "draft").strip().lower()
+        content_status = str(stored_payload.get("status") or "draft").strip().lower()
         if content_status not in {"draft", "approved", "rejected"}:
             content_status = "draft"
 
@@ -1933,7 +1938,7 @@ async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: s
         pending_status = "draft" if content_status == "approved" else content_status
         rows = await _supabase_write(request, "PATCH", "orb_generated_content", params={
             "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}", "select": "id,payload",
-        }, payload={"payload": payload.payload, "status": pending_status})
+        }, payload={"payload": stored_payload, "status": pending_status})
     if not rows:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     row = rows[0]
