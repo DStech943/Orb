@@ -19,7 +19,7 @@ export default function OrbLoader({ label = 'Orb is getting things ready', compa
   const [factIndex, setFactIndex] = useState(0)
   const orbBackground = compact ? '#ffffff' : '#FDEFE8'
   useEffect(() => {
-    const interval = window.setInterval(() => setFactIndex((index) => (index + 1) % facts.length), 4200)
+    const interval = window.setInterval(() => setFactIndex((index) => (index + 1) % facts.length), 2800)
     return () => window.clearInterval(interval)
   }, [])
 
@@ -28,6 +28,6 @@ export default function OrbLoader({ label = 'Orb is getting things ready', compa
       <div className="orb-loader__traveller"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor={orbBackground} size={0.85} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></div>
     </div>
     <p className="orb-loader__label">{label}</p>
-    {!compact && <p key={factIndex} className="orb-loader__fact">{facts[factIndex]}</p>}
+    {!compact && <p key={factIndex} className="orb-loader__fact" aria-live="off"><span>Did you know?</span>{facts[factIndex]}</p>}
   </div>
 }

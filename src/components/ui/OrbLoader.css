@@ -2,7 +2,8 @@
 .orb-loader__stage { position: relative; width: 6.5rem; height: 3.5rem; overflow: visible; }
 .orb-loader__traveller { position: absolute; top: 0; left: 1.5rem; width: 3.5rem; height: 3.5rem; will-change: transform; animation: orb-loader-drift 2.6s cubic-bezier(.55, 0, .45, 1) infinite; }
 .orb-loader__label { margin: 0; color: #172033; font-size: .875rem; font-weight: 800; }
-.orb-loader__fact { max-width: 31rem; margin: 0; color: #64748b; font-size: .75rem; line-height: 1.5; animation: orb-loader-fact-in 360ms ease-out both; }
+.orb-loader__fact { display: grid; min-height: 2.4rem; max-width: 31rem; margin: 0; color: #64748b; font-size: .75rem; line-height: 1.5; animation: orb-loader-fact-in 420ms ease-out both; }
+.orb-loader__fact span { margin-bottom: .15rem; color: #374AF6; font-size: .625rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .orb-loader--compact { min-height: 11rem; gap: .7rem; padding: 1.25rem; }
 .orb-loader--compact .orb-loader__stage { transform: scale(.78); transform-origin: center; }
 .orb-loader--compact .orb-loader__traveller { animation-name: orb-loader-travel-compact; }
