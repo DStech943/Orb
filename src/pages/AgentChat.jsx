@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Bot, Check, Eraser, Loader2, MessageCircleMore, Pencil, SendHorizontal, Sparkles, X } from 'lucide-react'
 import { listBrands } from '../services/brands'
-import { chatWithDeployedAgent, hasOrbApi, setRemoteBrandProfile } from '../services/orbApi'
+import { chatWithBrandAgent, clearBrandChatHistory, getBrandChatHistory, getBrandVoice, hasBrandAgentApi, hasOrbApi, setRemoteBrandProfile } from '../services/orbApi'
 import useAsync from '../hooks/useAsync'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 
 const prompts = [
   'What is your return policy?',
@@ -16,10 +17,27 @@ const newSessionId = () => {
   return `orb-chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+const sessionForBrand = (brandId, userId) => `orb-${userId || 'web-tester'}-${brandId || newSessionId()}`
+
+const historyText = (message) => typeof message === 'string'
+  ? message.trim()
+  : String(message?.content || message?.message || message?.text || message?.response || message?.reply || '').trim()
+
+const historyRole = (message) => {
+  const role = String(message?.role || message?.sender || '').toLowerCase()
+  return role === 'user' || role === 'customer' || role === 'human' ? 'user' : 'agent'
+}
+
+const historyDate = (message) => {
+  const parsed = new Date(message?.created_at || message?.createdAt || message?.timestamp || Date.now())
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
 const timeLabel = (createdAt) => new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(createdAt)
 
 export default function AgentChat({ embedded = false }) {
   const { data: brandData, loading: brandsLoading } = useAsync(listBrands, [])
+  const { user } = useAuth()
   const { showToast } = useToast()
   const brands = Array.isArray(brandData) ? brandData : []
   const [brandId, setBrandId] = useState(() => localStorage.getItem('orb_selected_brand') || '')
@@ -32,6 +50,7 @@ export default function AgentChat({ embedded = false }) {
   const [editingAgentName, setEditingAgentName] = useState(false)
   const [agentNameDraft, setAgentNameDraft] = useState('')
   const [savingAgentName, setSavingAgentName] = useState(false)
+  const [agentContext, setAgentContext] = useState({ sources: [], profiles: [] })
   const messagesRef = useRef(null)
   const activeBrand = brands.find((brand) => brand.id === brandId) || brands[0]
   const configuredAgentName = String(activeBrand?.ai_agent_name || '').trim()
@@ -49,12 +68,45 @@ export default function AgentChat({ embedded = false }) {
   }, [activeBrand?.id])
 
   useEffect(() => {
+    if (!activeBrand?.id) return
+    setSessionId(sessionForBrand(activeBrand.id, user?.id))
+  }, [activeBrand?.id, user?.id])
+
+  useEffect(() => {
+    let live = true
+    if (!activeBrand?.id || !hasOrbApi) {
+      setAgentContext({ sources: [], profiles: [] })
+      return undefined
+    }
+    getBrandVoice(activeBrand.id)
+      .then((result) => { if (live) setAgentContext({ sources: result?.sources || [], profiles: result?.profiles || [] }) })
+      .catch(() => { if (live) setAgentContext({ sources: [], profiles: [] }) })
+    return () => { live = false }
+  }, [activeBrand?.id])
+
+  useEffect(() => {
+    let live = true
+    if (!activeBrand?.id || !sessionId || !hasBrandAgentApi) return undefined
+    getBrandChatHistory(activeBrand.id, sessionId)
+      .then((result) => {
+        if (!live) return
+        const history = Array.isArray(result?.messages) ? result.messages : Array.isArray(result?.history) ? result.history : []
+        const restored = history
+          .map((message, index) => ({ id: message?.id || `history-${index}`, role: historyRole(message), text: historyText(message), createdAt: historyDate(message) }))
+          .filter((message) => message.text)
+        setMessages(restored)
+      })
+      .catch(() => { if (live) setMessages([]) })
+    return () => { live = false }
+  }, [activeBrand?.id, sessionId])
+
+  useEffect(() => {
     const onBrandChange = (event) => {
       if (event.detail?.id) {
         setBrandId(event.detail.id)
         setMessages([])
         setError('')
-        setSessionId(newSessionId())
+        setSessionId(sessionForBrand(event.detail.id, user?.id))
       }
     }
     window.addEventListener('orb:brand-changed', onBrandChange)
@@ -65,11 +117,19 @@ export default function AgentChat({ embedded = false }) {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, sending])
 
-  const clearChat = () => {
+  const clearChat = async () => {
+    if (activeBrand?.id && sessionId && hasBrandAgentApi) {
+      try {
+        await clearBrandChatHistory(activeBrand.id, sessionId)
+      } catch (cause) {
+        setError(cause?.message || 'Could not clear the deployed agent conversation.')
+        return
+      }
+    }
     setMessages([])
     setDraft('')
     setError('')
-    setSessionId(newSessionId())
+    if (!hasBrandAgentApi) setSessionId(newSessionId())
   }
 
   const beginAgentNameEdit = () => {
@@ -115,8 +175,26 @@ export default function AgentChat({ embedded = false }) {
     setError('')
     setSending(true)
     try {
-      const result = await chatWithDeployedAgent(activeBrand.id, { message, session_id: sessionId })
-      setMessages((items) => [...items, { id: `agent-${Date.now()}`, role: 'agent', text: result.reply, createdAt: new Date() }])
+      const approvedVoice = agentContext.profiles.find((profile) => profile?.status === 'approved') || agentContext.profiles[0]
+      const brandVoice = String(approvedVoice?.drafting_prompt || approvedVoice?.profile?.summary || '').trim()
+      const knowledgeBase = agentContext.sources
+        .map((source) => String(source?.content || '').trim())
+        .filter(Boolean)
+        .join('\n\n')
+      const result = await chatWithBrandAgent(activeBrand.id, {
+        message,
+        session_id: sessionId,
+        user_name: user?.name || 'Web customer',
+        brand_name: activeBrand.name,
+        brand_voice: brandVoice,
+        brand_category: activeBrand.industry_category_label || activeBrand.industry_category || '',
+        brand_description: activeBrand.description || '',
+        knowledge_base: knowledgeBase,
+        tone_system_prompt: brandVoice || undefined,
+      })
+      const reply = String(result?.response || result?.reply || '').trim()
+      if (!reply) throw new Error('The deployed AI agent returned no reply.')
+      setMessages((items) => [...items, { id: `agent-${Date.now()}`, role: 'agent', text: reply, createdAt: new Date() }])
     } catch (cause) {
       setError(cause.message || 'The deployed agent could not respond. Try again in a moment.')
     } finally {

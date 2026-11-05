@@ -2,10 +2,12 @@ import { supabase } from '../lib/supabase'
 
 const localBrowser = import.meta.env.DEV && ['localhost', '127.0.0.1'].includes(window.location.hostname)
 const configuredApiUrl = import.meta.env.VITE_ORB_API_URL
+const configuredAgentApiUrl = import.meta.env.VITE_AGENT_API_URL
 // Set VITE_ORB_API_URL to the public API origin when the frontend and API are
 // deployed separately (for example, Vercel -> Railway). An empty production
 // value is only valid when `/api` is proxied through the same deployment.
 const baseUrl = (configuredApiUrl || (localBrowser ? 'http://127.0.0.1:8000' : '')).replace(/\/$/, '')
+const agentBaseUrl = (configuredAgentApiUrl || '').replace(/\/$/, '')
 const mockAuth = import.meta.env.VITE_AUTH_MODE === 'mock'
 export const hasOrbApi = Boolean(configuredApiUrl || localBrowser || !import.meta.env.DEV)
 
@@ -23,6 +25,20 @@ const request = async (path, options = {}) => {
   return response.json()
 }
 
+// The deployed support-agent API is intentionally separate from Orb's admin
+// API. It owns per-brand conversation memory and does not receive Supabase
+// credentials from the browser.
+const agentRequest = async (path, options = {}) => {
+  if (!agentBaseUrl) return null
+  const response = await fetch(`${agentBaseUrl}${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(payload?.detail || payload?.message || `Support agent request failed (${response.status}).`)
+  return payload
+}
+
 export const activeBrandName = () => window.localStorage.getItem('orb_selected_brand_name') || ''
 export const listRemoteBrands = () => request('/api/brands')
 export const listBrandCategories = () => request('/api/categories')
@@ -30,6 +46,16 @@ export const setRemoteBrandCategory = (brandId, industryCategory) => request(`/a
 export const setRemoteBrandProfile = (brandId, profile) => request(`/api/brands/${encodeURIComponent(brandId)}/profile`, { method: 'PATCH', body: JSON.stringify(profile) })
 export const askOrbGuide = (payload) => request('/api/orb-guide', { method: 'POST', body: JSON.stringify(payload) })
 export const chatWithDeployedAgent = (brandId, payload) => request(`/api/brands/${encodeURIComponent(brandId)}/agent/chat`, { method: 'POST', body: JSON.stringify(payload) })
+export const hasBrandAgentApi = Boolean(agentBaseUrl)
+export const chatWithBrandAgent = async (brandId, payload) => {
+  const safeBrandId = encodeURIComponent(brandId)
+  if (agentBaseUrl) return agentRequest(`/api/v1/brands/${safeBrandId}/chat`, { method: 'POST', body: JSON.stringify(payload) })
+  const result = await chatWithDeployedAgent(brandId, payload)
+  return { ...result, response: result?.response || result?.reply || '' }
+}
+export const getBrandChatHistory = (brandId, sessionId) => agentRequest(`/api/v1/brands/${encodeURIComponent(brandId)}/history?session_id=${encodeURIComponent(sessionId)}`)
+export const clearBrandChatHistory = (brandId, sessionId) => agentRequest(`/api/v1/brands/${encodeURIComponent(brandId)}/history?session_id=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+export const syncBrandAgentSettings = (brandId, payload) => agentRequest(`/api/v1/brands/${encodeURIComponent(brandId)}/agent`, { method: 'PUT', body: JSON.stringify(payload) })
 export const getBrandVoice = (brandId) => request(`/api/brands/${encodeURIComponent(brandId)}/voice`)
 export const importBrandVoiceSource = (brandId, source) => request(`/api/brands/${encodeURIComponent(brandId)}/voice/sources`, { method: 'POST', body: JSON.stringify(source) })
 export const deleteBrandVoiceSource = (brandId, sourceId) => request(`/api/brands/${encodeURIComponent(brandId)}/voice/sources/${encodeURIComponent(sourceId)}`, { method: 'DELETE' })
