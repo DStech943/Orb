@@ -25,6 +25,8 @@ export default function OrbLoader({ label = 'Orb is getting things ready', compa
 
   return <div className={`orb-loader ${compact ? 'orb-loader--compact' : ''} ${className}`} role="status" aria-live="polite">
     <div className="orb-loader__stage" aria-hidden="true">
+      <span className="orb-loader__endpoint orb-loader__endpoint--start" />
+      <span className="orb-loader__endpoint orb-loader__endpoint--end" />
       <div className="orb-loader__traveller"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor={orbBackground} size={0.85} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></div>
     </div>
     <p className="orb-loader__label">{label}</p>

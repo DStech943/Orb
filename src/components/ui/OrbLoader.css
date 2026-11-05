@@ -1,6 +1,9 @@
 .orb-loader { display: grid; min-height: min(48vh, 400px); place-content: center; justify-items: center; gap: 1rem; padding: 2rem; text-align: center; }
-.orb-loader__stage { position: relative; width: 6.5rem; height: 3.5rem; overflow: visible; }
-.orb-loader__traveller { position: absolute; top: 0; left: 1.5rem; width: 3.5rem; height: 3.5rem; will-change: transform; animation: orb-loader-drift 2.6s cubic-bezier(.55, 0, .45, 1) infinite; }
+.orb-loader__stage { position: relative; width: 6.25rem; height: 3.1rem; overflow: visible; }
+.orb-loader__endpoint { position: absolute; top: 50%; z-index: 0; width: .9rem; height: .9rem; border: 2px solid #d9d3fa; border-radius: 999px; background: #fff; box-shadow: 0 0 0 4px rgb(255 255 255 / 34%); transform: translateY(-50%); }
+.orb-loader__endpoint--start { left: .7rem; }
+.orb-loader__endpoint--end { right: .7rem; }
+.orb-loader__traveller { position: absolute; z-index: 1; top: 0; left: 1.575rem; width: 3.1rem; height: 3.1rem; will-change: transform; animation: orb-loader-drift 2.6s cubic-bezier(.55, 0, .45, 1) infinite; }
 .orb-loader__traveller .orb-container { border-radius: 50%; isolation: isolate; }
 .orb-loader__label { margin: 0; color: #172033; font-size: .875rem; font-weight: 800; }
 .orb-loader__fact { display: grid; min-height: 2.4rem; max-width: 31rem; margin: 0; color: #64748b; font-size: .75rem; line-height: 1.5; animation: orb-loader-fact-in 420ms ease-out both; }
@@ -8,7 +11,7 @@
 .orb-loader--compact { min-height: 11rem; gap: .7rem; padding: 1.25rem; }
 .orb-loader--compact .orb-loader__stage { transform: scale(.78); transform-origin: center; }
 .orb-loader--compact .orb-loader__traveller { animation-name: orb-loader-travel-compact; }
-@keyframes orb-loader-drift { 0%, 100% { transform: translateX(-.55rem) scaleX(1) scaleY(1); } 35% { transform: translateX(.55rem) scaleX(.82) scaleY(1.12); } 55% { transform: translateX(.65rem) scaleX(1.03) scaleY(.98); } 75% { transform: translateX(-.35rem) scaleX(.9) scaleY(1.07); } }
-@keyframes orb-loader-travel-compact { 0%, 100% { transform: translateX(-.4rem) scale(.78); } 35% { transform: translateX(.4rem) scale(.78) scaleX(.82) scaleY(1.12); } 55% { transform: translateX(.5rem) scale(.78) scaleX(1.03) scaleY(.98); } 75% { transform: translateX(-.25rem) scale(.78) scaleX(.9) scaleY(1.07); } }
+@keyframes orb-loader-drift { 0%, 100% { transform: translateX(-1.95rem) scaleX(1) scaleY(1); } 35% { transform: translateX(1.95rem) scaleX(.78) scaleY(1.13); } 55% { transform: translateX(1.88rem) scaleX(1.02) scaleY(.98); } 75% { transform: translateX(-1.55rem) scaleX(.9) scaleY(1.07); } }
+@keyframes orb-loader-travel-compact { 0%, 100% { transform: translateX(-1.55rem) scale(.78); } 35% { transform: translateX(1.55rem) scale(.78) scaleX(.78) scaleY(1.13); } 55% { transform: translateX(1.5rem) scale(.78) scaleX(1.02) scaleY(.98); } 75% { transform: translateX(-1.25rem) scale(.78) scaleX(.9) scaleY(1.07); } }
 @keyframes orb-loader-fact-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .orb-loader__traveller, .orb-loader__fact { animation: none; } }
