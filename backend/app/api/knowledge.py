@@ -144,6 +144,11 @@ class FlowPayload(RequestModel):
     payload: dict[str, Any]
 
 
+class FlowTemplatePayload(RequestModel):
+    category_code: str
+    payload: dict[str, Any]
+
+
 class FlowAssistRequest(RequestModel):
     brand_name: str = Field(min_length=1)
     prompt: str = Field(min_length=8, max_length=5_000)
@@ -1579,7 +1584,48 @@ def _flow_out(record: Any) -> dict[str, Any]:
     import_source = decode_jsonb(value.get("import_source"))
     if isinstance(import_source, dict):
         payload["import_source"] = import_source
-    return {"id": str(value["id"]), "payload": payload}
+    output = {"id": str(value["id"]), "payload": payload}
+    if value.get("template_id"):
+        output["template_id"] = str(value["template_id"])
+        output["template_version"] = value.get("template_version")
+    return output
+
+
+def _flow_template_out(record: Any) -> dict[str, Any]:
+    """Return a global template in the same document shape as a visual flow.
+
+    The browser intentionally receives this as a virtual flow (rather than an
+    orb_flows row). The first save from a brand creates its own linked copy.
+    """
+    value = dict(record)
+    created_at = value["created_at"]
+    updated_at = value["updated_at"]
+    payload = {
+        "title": value["title"],
+        "lifecycle_stage": value.get("lifecycle_stage") or "",
+        "status": value["status"],
+        "nodes": decode_jsonb(value["nodes"]) or [],
+        "edges": decode_jsonb(value["edges"]) or [],
+        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+        "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at),
+    }
+    import_source = decode_jsonb(value.get("import_source"))
+    if isinstance(import_source, dict):
+        payload["import_source"] = import_source
+    return {
+        "id": str(value["id"]),
+        "template_id": str(value["id"]),
+        "template_version": value.get("version") or 1,
+        "category_code": value["category_code"],
+        "is_template": True,
+        "payload": payload,
+    }
+
+
+def _template_link(payload: dict[str, Any]) -> tuple[str | None, int | None]:
+    template_id = str(payload.get("template_id") or "").strip() or None
+    version = payload.get("template_version")
+    return template_id, int(version) if isinstance(version, int) and version > 0 else None
 
 
 @router.post("/flows/assist")
@@ -1630,30 +1676,118 @@ Keep fields concise and practical."""
 
 @router.get("/flows")
 async def list_flows(brand_name: str, request: Request, _: User = Depends(current_user)) -> dict[str, Any]:
-    """List visual workflows stored as structured Supabase records."""
+    """List a brand's saved flows plus its category's untouched templates."""
     brand_name = brand_name.strip()
     if not brand_name:
         raise HTTPException(status_code=422, detail="brand_name is required")
     brand = await _remote_brand_by_name(request, brand_name)
     rows = await _supabase_rows(request, "orb_flows", {
-        "select": "id,title,lifecycle_stage,status,nodes,edges,import_source,created_at,updated_at",
+        "select": "id,title,lifecycle_stage,status,nodes,edges,import_source,template_id,template_version,created_at,updated_at",
         "brand_id": f"eq.{brand['id']}",
         "order": "updated_at.desc",
     })
-    return {"points": [_flow_out(row) for row in rows], "source": "supabase"}
+    saved_template_ids = {str(row["template_id"]) for row in rows if row.get("template_id")}
+    category_code = str(brand.get("industry_category") or "").strip()
+    template_rows: list[dict[str, Any]] = []
+    if category_code in CATEGORIES:
+        template_rows = await _supabase_rows(request, "orb_flow_templates", {
+            "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
+            "category_code": f"eq.{category_code}",
+            "status": "eq.published",
+            "order": "updated_at.desc",
+        })
+    untouched_templates = [
+        _flow_template_out(row) for row in template_rows if str(row["id"]) not in saved_template_ids
+    ]
+    return {
+        "points": untouched_templates + [_flow_out(row) for row in rows],
+        "source": "supabase",
+        "category_code": category_code or None,
+        "category_label": CATEGORIES.get(category_code),
+    }
+
+
+@router.get("/flows/templates")
+async def list_flow_templates(
+    request: Request,
+    category_code: str | None = Query(default=None),
+    include_all: bool = Query(default=False),
+    _: User = Depends(current_user),
+) -> dict[str, Any]:
+    """List global visual-flow templates; drafts are reserved for admins."""
+    if category_code and category_code not in CATEGORIES:
+        raise HTTPException(status_code=422, detail="Unknown category_code")
+    if include_all:
+        await _admin(request)
+    params = {
+        "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
+        "order": "category_code.asc,updated_at.desc",
+    }
+    if category_code:
+        params["category_code"] = f"eq.{category_code}"
+    if not include_all:
+        params["status"] = "eq.published"
+    rows = await _supabase_rows(request, "orb_flow_templates", params)
+    return {"templates": [_flow_template_out(row) for row in rows], "categories": [{"code": code, "label": label} for code, label in CATEGORIES.items()]}
+
+
+@router.post("/flows/templates", status_code=status.HTTP_201_CREATED)
+async def create_flow_template(payload: FlowTemplatePayload, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
+    if payload.category_code not in CATEGORIES:
+        raise HTTPException(status_code=422, detail="Unknown category_code")
+    values = _flow_values(payload.payload)
+    rows = await _supabase_write(request, "POST", "orb_flow_templates", params={
+        "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
+    }, payload={
+        "category_code": payload.category_code, "created_by": str(user.id), "title": values[0],
+        "lifecycle_stage": values[1], "status": values[2], "nodes": values[3], "edges": values[4],
+        "import_source": values[5], "version": 1,
+    })
+    if not rows:
+        raise HTTPException(status_code=503, detail="Supabase did not return the saved flow template")
+    return {"point": _flow_template_out(rows[0]), "source": "supabase"}
+
+
+@router.put("/flows/templates/{template_id}")
+async def update_flow_template(template_id: str, payload: FlowTemplatePayload, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    if payload.category_code not in CATEGORIES:
+        raise HTTPException(status_code=422, detail="Unknown category_code")
+    values = _flow_values(payload.payload)
+    rows = await _supabase_write(request, "PATCH", "orb_flow_templates", params={
+        "id": f"eq.{template_id}",
+        "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
+    }, payload={
+        "category_code": payload.category_code, "title": values[0], "lifecycle_stage": values[1],
+        "status": values[2], "nodes": values[3], "edges": values[4], "import_source": values[5],
+        "version": int(payload.payload.get("template_version") or 0) + 1,
+    })
+    if not rows:
+        raise HTTPException(status_code=404, detail="Flow template not found")
+    return {"point": _flow_template_out(rows[0]), "source": "supabase"}
 
 
 @router.post("/flows", status_code=status.HTTP_201_CREATED)
 async def create_flow(payload: FlowPayload, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     brand = await _remote_brand_by_name(request, payload.brand_name)
     values = _flow_values(payload.payload)
+    template_id, template_version = _template_link(payload.payload)
+    if template_id:
+        templates = await _supabase_rows(request, "orb_flow_templates", {
+            "select": "id,category_code,version", "id": f"eq.{template_id}", "status": "eq.published", "limit": "1",
+        })
+        if not templates:
+            raise HTTPException(status_code=422, detail="The selected flow template is unavailable")
+        if templates[0]["category_code"] != brand.get("industry_category"):
+            raise HTTPException(status_code=422, detail="This template does not belong to the selected brand category")
+        template_version = template_version or int(templates[0].get("version") or 1)
     rows = await _supabase_write(request, "POST", "orb_flows", params={
-        "select": "id,title,lifecycle_stage,status,nodes,edges,import_source,created_at,updated_at",
+        "select": "id,title,lifecycle_stage,status,nodes,edges,import_source,template_id,template_version,created_at,updated_at",
     }, payload={
         # Supplying the owner explicitly keeps the ownership invariant intact
         # when the local REST-only path uses the synthetic development user.
         "brand_id": brand["id"], "created_by": str(user.id), "title": values[0], "lifecycle_stage": values[1], "status": values[2],
         "nodes": values[3], "edges": values[4], "import_source": values[5],
+        "template_id": template_id, "template_version": template_version,
     })
     if not rows:
         raise HTTPException(status_code=503, detail="Supabase did not return the saved flow")
@@ -1666,7 +1800,7 @@ async def update_flow(flow_id: str, payload: FlowPayload, request: Request, _: U
     values = _flow_values(payload.payload)
     rows = await _supabase_write(request, "PATCH", "orb_flows", params={
         "id": f"eq.{flow_id}", "brand_id": f"eq.{brand['id']}",
-        "select": "id,title,lifecycle_stage,status,nodes,edges,import_source,created_at,updated_at",
+        "select": "id,title,lifecycle_stage,status,nodes,edges,import_source,template_id,template_version,created_at,updated_at",
     }, payload={
         "title": values[0], "lifecycle_stage": values[1], "status": values[2],
         "nodes": values[3], "edges": values[4], "import_source": values[5],
