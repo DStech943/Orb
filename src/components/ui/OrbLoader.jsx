@@ -17,6 +17,7 @@ const facts = [
 
 export default function OrbLoader({ label = 'Orb is getting things ready', compact = false, className = '' }) {
   const [factIndex, setFactIndex] = useState(0)
+  const orbBackground = compact ? '#ffffff' : '#FDEFE8'
   useEffect(() => {
     const interval = window.setInterval(() => setFactIndex((index) => (index + 1) % facts.length), 4200)
     return () => window.clearInterval(interval)
@@ -24,7 +25,7 @@ export default function OrbLoader({ label = 'Orb is getting things ready', compa
 
   return <div className={`orb-loader ${compact ? 'orb-loader--compact' : ''} ${className}`} role="status" aria-live="polite">
     <div className="orb-loader__stage" aria-hidden="true">
-      <div className="orb-loader__traveller"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={0.85} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></div>
+      <div className="orb-loader__traveller"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor={orbBackground} size={0.85} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></div>
     </div>
     <p className="orb-loader__label">{label}</p>
     {!compact && <p key={factIndex} className="orb-loader__fact">{facts[factIndex]}</p>}
