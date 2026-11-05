@@ -3198,8 +3198,16 @@ function OrbFlowLibrary({
   );
 }
 
-function TemplateManager({ templates, categories, loading, onNew, onEdit }) {
+function TemplateManager({
+  templates,
+  categories,
+  loading,
+  onNew,
+  onEdit,
+  onAddToFlows,
+}) {
   const [categoryCode, setCategoryCode] = useState("");
+  const [templateToAdd, setTemplateToAdd] = useState(null);
   useEffect(() => {
     if (!categoryCode && categories[0]) setCategoryCode(categories[0].code);
   }, [categories, categoryCode]);
@@ -3249,11 +3257,9 @@ function TemplateManager({ templates, categories, loading, onNew, onEdit }) {
         ) : templates.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {templates.map((template) => (
-              <button
-                type="button"
+              <div
                 key={template.templateId}
-                onClick={() => onEdit(template)}
-                className="flex min-h-36 flex-col items-start justify-between rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-sm"
+                className="flex min-h-36 flex-col items-start justify-between rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-primary/40 hover:shadow-sm"
               >
                 <span className="w-full">
                   <span className="flex items-start justify-between gap-3">
@@ -3276,10 +3282,31 @@ function TemplateManager({ templates, categories, loading, onNew, onEdit }) {
                     · v{template.templateVersion}
                   </span>
                 </span>
-                <span className="mt-3 flex w-full items-center justify-between text-xs font-semibold text-primary">
-                  Edit template <ChevronRight size={15} />
+                <span className="mt-3 flex w-full items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onEdit(template)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                  >
+                    Edit template <ChevronRight size={15} />
+                  </button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="purple"
+                    onClick={() => setTemplateToAdd(template)}
+                    disabled={template.status !== "published"}
+                    title={
+                      template.status !== "published"
+                        ? "Publish this template before adding it to a brand flow."
+                        : undefined
+                    }
+                  >
+                    <Plus size={14} />
+                    Add to flows
+                  </Button>
                 </span>
-              </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -3290,6 +3317,42 @@ function TemplateManager({ templates, categories, loading, onNew, onEdit }) {
           />
         )}
       </div>
+      <Modal
+        open={Boolean(templateToAdd)}
+        onClose={() => setTemplateToAdd(null)}
+        title="Add template to this brand’s flows"
+      >
+        <div className="space-y-5">
+          <p className="text-sm leading-6 text-slate-600">
+            This creates an editable brand-specific flow from{" "}
+            <strong>{templateToAdd?.title}</strong>. Your later changes and
+            saves affect this brand’s flow only; the global template remains
+            unchanged.
+          </p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setTemplateToAdd(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="purple"
+              onClick={() => {
+                onAddToFlows(templateToAdd);
+                setTemplateToAdd(null);
+              }}
+            >
+              <Plus size={15} />
+              Add to flows
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }
@@ -3328,11 +3391,12 @@ export default function FlowsSupabase() {
     templateLoader,
     [isAdmin, templateVersion],
   );
-  const flows = Array.isArray(data?.points)
+  const allFlows = Array.isArray(data?.points)
     ? data.points
         .map(normalise)
         .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
     : [];
+  const flows = allFlows.filter((flow) => !flow.isTemplate);
   const templates = Array.isArray(templateData?.templates)
     ? templateData.templates.map(normalise)
     : [];
@@ -3385,7 +3449,7 @@ export default function FlowsSupabase() {
       isTemplate: true,
       templateCategory: categoryCode,
       templateVersion: 1,
-      status: "draft",
+      status: "published",
     });
   };
   const editTemplate = (template) => {
@@ -3397,6 +3461,23 @@ export default function FlowsSupabase() {
       version: template.templateVersion,
     });
     setActive(template);
+  };
+  const addTemplateToFlows = (template) => {
+    setTemplateManagerOpen(false);
+    setWithOrb(false);
+    setTemplateEditor(null);
+    setActive({
+      ...template,
+      id: null,
+      isTemplate: false,
+      status: "draft",
+      import_source: {
+        ...(template.import_source || {}),
+        kind: "global_flow_template",
+        template_id: template.templateId,
+        template_version: template.templateVersion,
+      },
+    });
   };
   const openFlow = (flow) => {
     setTemplateEditor(null);
@@ -3463,6 +3544,7 @@ export default function FlowsSupabase() {
               loading={templatesLoading}
               onNew={startTemplate}
               onEdit={editTemplate}
+              onAddToFlows={addTemplateToFlows}
             />
           ) : (
             <OrbFlowLibrary

@@ -1727,7 +1727,10 @@ async def list_flow_templates(
         params["category_code"] = f"eq.{category_code}"
     if not include_all:
         params["status"] = "eq.published"
-    rows = await _supabase_rows(request, "orb_flow_templates", params)
+    # The route already authenticates the caller and enforces admin access for
+    # include_all. Use the backend service role for that admin view so a
+    # template is not hidden or rejected by a stale browser-session RLS claim.
+    rows = await (_supabase_service_rows(request, "orb_flow_templates", params) if include_all else _supabase_rows(request, "orb_flow_templates", params))
     return {"templates": [_flow_template_out(row) for row in rows], "categories": [{"code": code, "label": label} for code, label in CATEGORIES.items()]}
 
 
@@ -1736,7 +1739,9 @@ async def create_flow_template(payload: FlowTemplatePayload, request: Request, u
     if payload.category_code not in CATEGORIES:
         raise HTTPException(status_code=422, detail="Unknown category_code")
     values = _flow_values(payload.payload)
-    rows = await _supabase_write(request, "POST", "orb_flow_templates", params={
+    # This endpoint is admin-only. Writing through the service role keeps the
+    # global template library independent of client-side RLS configuration.
+    rows = await _supabase_service_write(request, "POST", "orb_flow_templates", params={
         "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
     }, payload={
         "category_code": payload.category_code, "created_by": str(user.id), "title": values[0],
@@ -1753,7 +1758,7 @@ async def update_flow_template(template_id: str, payload: FlowTemplatePayload, r
     if payload.category_code not in CATEGORIES:
         raise HTTPException(status_code=422, detail="Unknown category_code")
     values = _flow_values(payload.payload)
-    rows = await _supabase_write(request, "PATCH", "orb_flow_templates", params={
+    rows = await _supabase_service_write(request, "PATCH", "orb_flow_templates", params={
         "id": f"eq.{template_id}",
         "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
     }, payload={
