@@ -18,6 +18,24 @@ import { useToast } from '../../context/ToastContext'
 
 const titles = { sop: 'SOPs', faq: 'FAQs', product: 'Products' }
 
+const productThumbnail = (product = {}) => product.featuredImage?.url
+  || (Array.isArray(product.media) ? product.media.map((asset) => asset?.image?.url || asset?.preview?.image?.url).find(Boolean) : '')
+  || ''
+const productInventory = (product = {}) => {
+  const quantities = (Array.isArray(product.variants) ? product.variants : [])
+    .map((variant) => variant?.inventoryQuantity)
+    .filter((quantity) => quantity !== null && quantity !== undefined && quantity !== '')
+    .map(Number)
+    .filter(Number.isFinite)
+  return quantities.length ? `${quantities.reduce((total, quantity) => total + quantity, 0)} in stock` : '—'
+}
+const productPrice = (product = {}) => {
+  const value = String(product.price || '').trim()
+  if (!value || value === '—') return '—'
+  const currency = String(product.currency || '').trim()
+  return currency && !value.toUpperCase().includes(currency) && !/[^\d.,\s-]/.test(value) ? `${value} ${currency}` : value
+}
+
 function ProductEditor({ product, onChange }) {
   const metafields = Array.isArray(product.metafields) ? product.metafields : []
   const variants = Array.isArray(product.variants) ? product.variants : []
@@ -389,7 +407,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const columns = isSop
     ? [{ key: 'title', label: 'Title / situation', render: (item) => <div><strong>{item.title}</strong><p className="text-xs text-muted">{item.situation}</p></div> }, { key: 'category', label: 'Category' }, { key: 'lifecycle', label: 'Lifecycle stage' }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated' }]
     : isProduct
-      ? [{ key: 'name', label: 'Product' }, { key: 'description', label: 'Description', render: (item) => <span className="line-clamp-2 text-muted">{item.description || '—'}</span> }, { key: 'price', label: 'Price', render: (item) => item.price || '—' }, { key: 'url', label: 'Product URL', render: (item) => item.url ? <span className="line-clamp-1 text-purple">{item.url}</span> : '—' }]
+      ? [{ key: 'name', label: 'Product', render: (item) => { const image = productThumbnail(item); return <div className="flex min-w-[220px] items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">{image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <span className="h-4 w-4 rounded bg-slate-200" />}</span><strong className="line-clamp-2 text-sm text-ink">{item.name || 'Untitled product'}</strong></div> } }, { key: 'status', label: 'Status', render: (item) => { const active = String(item.status || '').toLowerCase() === 'active'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{item.status ? String(item.status).charAt(0).toUpperCase() + String(item.status).slice(1).toLowerCase() : '—'}</span> } }, { key: 'inventory', label: 'Inventory', render: (item) => <span className="whitespace-nowrap text-sm text-slate-700">{productInventory(item)}</span> }, { key: 'price', label: 'Price', render: (item) => <span className="whitespace-nowrap text-sm font-semibold text-ink">{productPrice(item)}</span> }]
       : [{ key: 'question', label: 'Question' }, { key: 'category', label: 'Category' }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated' }]
 
   if (loading) return <div className="grid gap-3">{[1, 2, 3].map((item) => <Skeleton key={item} className="h-16" />)}</div>
