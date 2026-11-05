@@ -1,8 +1,5 @@
 .orb-loader { display: grid; min-height: min(48vh, 400px); place-content: center; justify-items: center; gap: 1rem; padding: 2rem; text-align: center; }
 .orb-loader__stage { position: relative; width: 6.25rem; height: 3.1rem; overflow: visible; }
-.orb-loader__endpoint { position: absolute; top: 50%; z-index: 0; width: .9rem; height: .9rem; border: 2px solid #d9d3fa; border-radius: 999px; background: #fff; box-shadow: 0 0 0 4px rgb(255 255 255 / 34%); transform: translateY(-50%); }
-.orb-loader__endpoint--start { left: .7rem; }
-.orb-loader__endpoint--end { right: .7rem; }
 .orb-loader__traveller { position: absolute; z-index: 1; top: 0; left: 1.575rem; width: 3.1rem; height: 3.1rem; will-change: transform; animation: orb-loader-drift 2.6s cubic-bezier(.55, 0, .45, 1) infinite; }
 .orb-loader__traveller .orb-container { border-radius: 50%; isolation: isolate; }
 .orb-loader__label { margin: 0; color: #172033; font-size: .875rem; font-weight: 800; }
