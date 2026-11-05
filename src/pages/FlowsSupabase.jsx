@@ -280,6 +280,70 @@ function spaceConnectedBranches(flow, sourceId) {
   }
 }
 
+// Orb-generated flows are a tree in practice, but the model may emit checks
+// in an order that leaves an entire branch far below its siblings. Rebuild the
+// initial canvas from graph structure, not from the order of generated rows:
+// each terminal path gets one evenly-spaced lane and every parent is centred
+// over the lanes beneath it. Manual drag positions are left alone afterwards.
+const GENERATED_LAYOUT_VERSION = 4
+const GENERATED_COLUMN_GAP = 340
+function layoutGeneratedFlow(flow) {
+  if (flow?.import_source?.kind !== 'orb' || Number(flow.import_source.layout_version || 0) >= GENERATED_LAYOUT_VERSION) return flow
+  const nodes = Array.isArray(flow.nodes) ? flow.nodes : []
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const validEdges = (Array.isArray(flow.edges) ? flow.edges : []).filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
+  if (!nodes.length || !validEdges.length) return { ...flow, import_source: { ...(flow.import_source || {}), layout_version: GENERATED_LAYOUT_VERSION } }
+
+  const primaryParent = new Map()
+  const orderedEdges = [...validEdges].sort((left, right) => {
+    const leftNode = nodeById.get(left.source), rightNode = nodeById.get(right.source)
+    const leftPort = outputs(leftNode).indexOf(left.sourcePort)
+    const rightPort = outputs(rightNode).indexOf(right.sourcePort)
+    return left.source.localeCompare(right.source) || (leftPort < 0 ? 999 : leftPort) - (rightPort < 0 ? 999 : rightPort) || left.target.localeCompare(right.target)
+  })
+  orderedEdges.forEach((edge) => { if (!primaryParent.has(edge.target)) primaryParent.set(edge.target, edge.source) })
+
+  const children = new Map(nodes.map((node) => [node.id, []]))
+  orderedEdges.forEach((edge) => {
+    if (primaryParent.get(edge.target) === edge.source) children.get(edge.source).push(edge.target)
+  })
+  children.forEach((childIds, sourceId) => childIds.sort((left, right) => {
+    const node = nodeById.get(sourceId)
+    const leftEdge = orderedEdges.find((edge) => edge.source === sourceId && edge.target === left)
+    const rightEdge = orderedEdges.find((edge) => edge.source === sourceId && edge.target === right)
+    return (outputs(node).indexOf(leftEdge?.sourcePort) < 0 ? 999 : outputs(node).indexOf(leftEdge?.sourcePort)) - (outputs(node).indexOf(rightEdge?.sourcePort) < 0 ? 999 : outputs(node).indexOf(rightEdge?.sourcePort)) || left.localeCompare(right)
+  }))
+
+  const roots = [
+    ...nodes.filter((node) => node.type === 'trigger'),
+    ...nodes.filter((node) => !primaryParent.has(node.id) && node.type !== 'trigger')
+  ].filter((node, index, all) => all.findIndex((candidate) => candidate.id === node.id) === index)
+  const positions = new Map()
+  const visited = new Set()
+  let lane = 0
+  const positionTree = (nodeId, depth) => {
+    if (visited.has(nodeId)) return positions.get(nodeId)?.lane ?? lane
+    visited.add(nodeId)
+    const childIds = children.get(nodeId) || []
+    const childLanes = childIds.map((childId) => positionTree(childId, depth + 1))
+    const nodeLane = childLanes.length ? (childLanes[0] + childLanes[childLanes.length - 1]) / 2 : lane++
+    positions.set(nodeId, { x: 120 + depth * GENERATED_COLUMN_GAP, y: 96 + nodeLane * BRANCH_VERTICAL_GAP, lane: nodeLane })
+    return nodeLane
+  }
+  roots.forEach((node) => {
+    if (visited.has(node.id)) return
+    if (lane > 0) lane += 1
+    positionTree(node.id, 0)
+  })
+  nodes.forEach((node) => { if (!visited.has(node.id)) positionTree(node.id, 0) })
+
+  return {
+    ...flow,
+    nodes: nodes.map((node) => positions.has(node.id) ? { ...node, x: positions.get(node.id).x, y: positions.get(node.id).y } : node),
+    import_source: { ...(flow.import_source || {}), layout_version: GENERATED_LAYOUT_VERSION }
+  }
+}
+
 function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
   const navigate = useNavigate()
   const [orbPanelOpen, setOrbPanelOpen] = useState(withOrb)
@@ -289,7 +353,7 @@ function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
   const setDraft = (change) => setDraftState((current) => { const next = typeof change === 'function' ? change(current) : change; if (JSON.stringify(next) === JSON.stringify(current)) return current; draftRef.current = next; publishHistory({ past: [...historyRef.current.past, current].slice(-60), future: [] }); return next })
   const undo = () => { const { past, future } = historyRef.current; if (!past.length) return; const current = draftRef.current, previous = past[past.length - 1]; draftRef.current = previous; publishHistory({ past: past.slice(0, -1), future: [current, ...future] }); setDraftState(previous); setFrom(null) }
   const redo = () => { const { past, future } = historyRef.current; if (!future.length) return; const next = future[0]; const current = draftRef.current; draftRef.current = next; publishHistory({ past: [...past, current].slice(-60), future: future.slice(1) }); setDraftState(next); setFrom(null) }
-  useEffect(() => { setDraft((current) => { const next = arrangeImportedFlow(current); savedSnapshotRef.current = flowSnapshot(next); return next }) }, [])
+  useEffect(() => { setDraft((current) => { const next = layoutGeneratedFlow(arrangeImportedFlow(current)); savedSnapshotRef.current = flowSnapshot(next); return next }) }, [])
   useEffect(() => () => flowRevealTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
   const revealGeneratedFlow = (next) => {
     flowRevealTimersRef.current.forEach((timer) => window.clearTimeout(timer))
@@ -304,7 +368,7 @@ function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
     fittedFlowRef.current = null
     const frame = requestAnimationFrame(() => {
       const viewport = stageRef.current?.parentElement?.parentElement
-      const layout = arrangeImportedFlow(flow)
+      const layout = layoutGeneratedFlow(arrangeImportedFlow(flow))
       if (!viewport || !layout.nodes.length || fittedFlowRef.current === flow.id) return
       const right = Math.max(...layout.nodes.map((node) => Number(node.x || 0) + 224)) + 64
       const bottom = Math.max(...layout.nodes.map((node) => Number(node.y || 0) + 176)) + 64
@@ -328,7 +392,7 @@ function Builder({ flow, onBack, onSaved, onDeleted, withOrb = false }) {
       const result = await assistFlow(requestPrompt)
       const [generated] = makeImportedFlows(result.csv, 'Created with Orb')
       if (!generated) throw new Error('Orb did not return a usable flow table.')
-      const next = { ...generated, title: result.title || generated.title, import_source: { ...generated.import_source, kind: 'orb', prompt, attached_sops: attachedSops.map(({ id: sopId, title }) => ({ id: sopId, title })), references_used: result.references_used || {} } }
+      const next = layoutGeneratedFlow({ ...generated, title: result.title || generated.title, import_source: { ...generated.import_source, kind: 'orb', prompt, attached_sops: attachedSops.map(({ id: sopId, title }) => ({ id: sopId, title })), references_used: result.references_used || {} } })
       setDraft(next); setSelectedId(next.nodes[0]?.id || null); setSelectedIds(new Set(next.nodes[0]?.id ? [next.nodes[0].id] : [])); setFrom(null); revealGeneratedFlow(next)
       requestAnimationFrame(() => { const viewport = stageRef.current?.parentElement?.parentElement; if (!viewport || !next.nodes.length) return; const right = Math.max(...next.nodes.map((node) => Number(node.x || 0) + CARD.width)) + 64; const bottom = Math.max(...next.nodes.map((node) => Number(node.y || 0) + CARD.height)) + 64; setZoom(zoomLimit(Math.min(DEFAULT_ZOOM, (viewport.clientWidth - 48) / right, (viewport.clientHeight - 48) / bottom))) })
       const usedReferences = Object.entries(result.references_used || {}).filter(([, count]) => Number(count) > 0).map(([kind, count]) => `${count} ${kind === 'faqs' ? 'FAQ' : kind === 'sops' ? 'SOP' : 'template'}${Number(count) === 1 ? '' : 's'}`).join(', ')
