@@ -3203,6 +3203,8 @@ function TemplateManager({
   categories,
   defaultCategoryCode,
   loading,
+  error,
+  onRetry,
   onNew,
   onEdit,
   onAddToFlows,
@@ -3265,6 +3267,20 @@ function TemplateManager({
       <div className="mt-7 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         {loading ? (
           <OrbLoader compact label="Loading templates" />
+        ) : error ? (
+          <div className="grid min-h-48 place-items-center p-6 text-center">
+            <div>
+              <p className="font-bold text-red-700">
+                Could not load flow templates.
+              </p>
+              <p className="mt-1 max-w-lg text-sm text-slate-600">
+                {error.message}
+              </p>
+              <Button className="mt-4" size="sm" onClick={onRetry}>
+                Try again
+              </Button>
+            </div>
+          </div>
         ) : templates.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {templates.map((template) => (
@@ -3394,14 +3410,18 @@ export default function FlowsSupabase() {
       ? listFlows()
       : Promise.reject(new Error("Connect the Orb API to load shared flows."));
   const templateLoader = () =>
-    isAdmin && hasOrbApi
-      ? listFlowTemplates({ includeAll: true })
-      : Promise.resolve({ templates: [], categories: [] });
+    hasOrbApi
+      ? listFlowTemplates({ includeAll: Boolean(isAdmin) })
+      : Promise.reject(
+          new Error("Connect the Orb API to load flow templates."),
+        );
   const { data, loading, error, reload } = useAsync(loader, [brandVersion]);
-  const { data: templateData, loading: templatesLoading } = useAsync(
-    templateLoader,
-    [isAdmin, templateVersion],
-  );
+  const {
+    data: templateData,
+    loading: templatesLoading,
+    error: templatesError,
+    reload: reloadTemplates,
+  } = useAsync(templateLoader, [isAdmin, templateVersion, templateManagerOpen]);
   const allFlows = Array.isArray(data?.points)
     ? data.points
         .map(normalise)
@@ -3556,6 +3576,8 @@ export default function FlowsSupabase() {
               categories={categories}
               defaultCategoryCode={brandCategoryCode}
               loading={templatesLoading}
+              error={templatesError}
+              onRetry={reloadTemplates}
               onNew={startTemplate}
               onEdit={editTemplate}
               onAddToFlows={addTemplateToFlows}
