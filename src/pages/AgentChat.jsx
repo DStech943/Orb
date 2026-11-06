@@ -1,15 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Bot,
   Check,
   Eraser,
   Loader2,
   MessageCircleMore,
   Pencil,
   SendHorizontal,
-  Sparkles,
   X,
 } from "lucide-react";
+import Orb from "../components/Orb";
 import { listBrands } from "../services/brands";
 import {
   chatWithBrandAgent,
@@ -74,6 +73,27 @@ const timeLabel = (createdAt) =>
     hour: "numeric",
     minute: "2-digit",
   }).format(createdAt);
+
+function AgentOrb({ className = "" }) {
+  return (
+    <span
+      className={`block shrink-0 overflow-hidden rounded-full ${className}`}
+      aria-hidden="true"
+    >
+      <Orb
+        colors={["#9c43fe", "#4cc2e9", "#101499"]}
+        backgroundColor="#ffffff"
+        size={0.92}
+        glow={1}
+        hoverIntensity={1}
+        trail={1}
+        rotateOnHover
+        followCursor
+        intro
+      />
+    </span>
+  );
+}
 
 export default function AgentChat({ embedded = false }) {
   const { data: brandData, loading: brandsLoading } = useAsync(listBrands, []);
@@ -338,28 +358,10 @@ export default function AgentChat({ embedded = false }) {
         </form>
       )}
 
-      <section className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <aside className="hidden w-52 shrink-0 border-r border-slate-200 bg-slate-50 p-5 lg:block">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary-tint text-primary">
-            <Bot size={22} />
-          </div>
-          <p className="mt-5 text-xs font-extrabold uppercase tracking-wider text-slate-400">
-            Testing as
-          </p>
-          <p className="mt-1 text-sm font-extrabold text-slate-900">
-            Web customer
-          </p>
-          <div className="mt-6 rounded-lg border border-primary/15 bg-primary-tint/40 p-3 text-xs leading-5 text-slate-600">
-            <span className="font-bold text-slate-800">New session</span>
-            <br />
-            Clear chat to start a fresh agent session.
-          </div>
-        </aside>
+      <section className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
-            <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-cyan-200 via-primary-tint to-purple/30 text-primary shadow-sm">
-              <Sparkles size={18} />
-            </div>
+          <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+            <AgentOrb className="h-10 w-10 shadow-sm" />
             <div className="min-w-0">
               <h3 className="truncate text-sm font-extrabold text-slate-900">
                 {agentName}
@@ -374,7 +376,7 @@ export default function AgentChat({ embedded = false }) {
 
           <div
             ref={messagesRef}
-            className="min-h-0 flex-1 overflow-y-auto bg-slate-50/45 p-5 sm:p-6"
+            className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fa] p-5 sm:p-6"
           >
             {!messages.length && !sending && (
               <div className="grid min-h-full place-items-center">
@@ -404,23 +406,18 @@ export default function AgentChat({ embedded = false }) {
                 </div>
               </div>
             )}
-            <div className="mx-auto max-w-2xl space-y-4">
+            <div className="mx-auto max-w-2xl space-y-3">
               {messages.map((message) => (
                 <div
                   key={message.id}
                   className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}
                 >
-                  {message.role === "agent" && (
-                    <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-tint text-primary">
-                      <Bot size={15} />
-                    </span>
-                  )}
                   <div
-                    className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.role === "user" ? "rounded-br-md bg-primary text-white" : "rounded-bl-md border border-slate-200 bg-white text-slate-700"}`}
+                    className={`max-w-[82%] px-4 py-3 text-sm leading-6 shadow-sm ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-[#d9fdd3] text-slate-800" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
                   >
                     <p className="whitespace-pre-wrap">{message.text}</p>
                     <p
-                      className={`mt-1 text-[10px] ${message.role === "user" ? "text-white/65" : "text-slate-400"}`}
+                      className={`mt-1 text-[10px] ${message.role === "user" ? "text-emerald-900/50" : "text-slate-400"}`}
                     >
                       {timeLabel(message.createdAt)}
                     </p>
@@ -428,11 +425,8 @@ export default function AgentChat({ embedded = false }) {
                 </div>
               ))}
               {sending && (
-                <div className="flex gap-3">
-                  <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-tint text-primary">
-                    <Bot size={15} />
-                  </span>
-                  <div className="rounded-2xl rounded-bl-md border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm">
+                <div className="flex">
+                  <div className="rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm">
                     <span className="inline-flex items-center gap-2">
                       <Loader2
                         size={14}
