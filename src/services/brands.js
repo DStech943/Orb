@@ -1,6 +1,11 @@
 import { supabase } from '../lib/supabase'
 import { hasOrbApi, listRemoteBrands } from './orbApi'
 
+const BRAND_CACHE_MS = 30_000
+let cachedBrands = null
+let cachedAt = 0
+let brandRequest = null
+
 async function listDirectBrands() {
   if (!supabase) return []
   try {
@@ -23,13 +28,31 @@ async function listDirectBrands() {
 }
 
 export async function listBrands() {
-  if (hasOrbApi) {
-    try {
-      const result = await listRemoteBrands()
-      if (Array.isArray(result?.brands) && result.brands.length) return result.brands
-    } catch {
-      // Local development can continue when the Python API is offline.
+  if (cachedBrands && Date.now() - cachedAt < BRAND_CACHE_MS) return cachedBrands
+  if (brandRequest) return brandRequest
+  brandRequest = (async () => {
+    let brands = []
+    if (hasOrbApi) {
+      try {
+        const result = await listRemoteBrands()
+        if (Array.isArray(result?.brands) && result.brands.length) brands = result.brands
+      } catch {
+        // Local development can continue when the Python API is offline.
+      }
     }
+    if (!brands.length) brands = await listDirectBrands()
+    cachedBrands = brands
+    cachedAt = Date.now()
+    return brands
+  })()
+  try {
+    return await brandRequest
+  } finally {
+    brandRequest = null
   }
-  return listDirectBrands()
+}
+
+export function invalidateBrandCache() {
+  cachedBrands = null
+  cachedAt = 0
 }

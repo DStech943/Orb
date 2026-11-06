@@ -3445,6 +3445,7 @@ function TemplateManager({
 export default function FlowsSupabase() {
   const { showToast } = useToast();
   const { isAdmin } = useAuth();
+  const canManageTemplates = isAdmin === true;
   const [brandVersion, setBrandVersion] = useState(0),
     [templateVersion, setTemplateVersion] = useState(0),
     [active, setActive] = useState(null),
@@ -3463,23 +3464,24 @@ export default function FlowsSupabase() {
     window.addEventListener("orb:brand-changed", listener);
     return () => window.removeEventListener("orb:brand-changed", listener);
   }, []);
+  useEffect(() => {
+    if (!canManageTemplates) setTemplateManagerOpen(false);
+  }, [canManageTemplates]);
   const loader = () =>
     hasOrbApi
       ? listFlows()
       : Promise.reject(new Error("Connect the Orb API to load shared flows."));
   const templateLoader = () =>
-    hasOrbApi
-      ? listFlowTemplates({ includeAll: Boolean(isAdmin) })
-      : Promise.reject(
-          new Error("Connect the Orb API to load flow templates."),
-        );
+    hasOrbApi && canManageTemplates && templateManagerOpen
+      ? listFlowTemplates({ includeAll: true })
+      : Promise.resolve({ templates: [], categories: FLOW_TEMPLATE_CATEGORIES });
   const { data, loading, error, reload } = useAsync(loader, [brandVersion]);
   const {
     data: templateData,
     loading: templatesLoading,
     error: templatesError,
     reload: reloadTemplates,
-  } = useAsync(templateLoader, [isAdmin, templateVersion, templateManagerOpen]);
+  } = useAsync(templateLoader, [canManageTemplates, templateVersion, templateManagerOpen]);
   const allFlows = Array.isArray(data?.points)
     ? data.points
         .map(normalise)
@@ -3622,7 +3624,7 @@ export default function FlowsSupabase() {
         />
       ) : (
         <div>
-          {isAdmin && (
+          {canManageTemplates && (
             <div className="mx-auto mb-2 flex max-w-6xl justify-end">
               <Button
                 variant="outline"
@@ -3638,7 +3640,7 @@ export default function FlowsSupabase() {
               </Button>
             </div>
           )}
-          {templateManagerOpen ? (
+          {canManageTemplates && templateManagerOpen ? (
             <TemplateManager
               templates={templates}
               categories={categories}

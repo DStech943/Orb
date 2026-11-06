@@ -304,8 +304,8 @@ function ReviewReadyPanel({ pipeline }) {
   const counts = draft?.counts || pipeline?.counts || {};
   const generated = counts.generated || {};
   const destinations = [
-    { key: "sops", label: "Review SOPs", to: "/app/sops" },
-    { key: "faqs", label: "Review FAQs", to: "/app/faqs" },
+    { key: "sops", label: "Review SOPs", to: "/app/brain?tab=sops" },
+    { key: "faqs", label: "Review FAQs", to: "/app/brain?tab=faqs" },
     { key: "products", label: "Review products", to: "/app/products" },
   ].filter((item) => Number(generated[item.key] || 0) > 0 || (pipeline?.options?.outputs || []).includes(item.key));
 

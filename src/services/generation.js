@@ -1,6 +1,23 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { deleteKnowledge, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
+import { activeBrandName, deleteKnowledge, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
 const KEY = 'orb_generation_data_v1'
+const KNOWLEDGE_CACHE_MS = 20_000
+const knowledgeCache = new Map()
+const knowledgeRequests = new Map()
+const knowledgeKey = (kind) => `${activeBrandName() || 'no-brand'}:${kind}`
+const cachedKnowledge = async (kind) => {
+  const key = knowledgeKey(kind)
+  const cached = knowledgeCache.get(key)
+  if (cached && Date.now() - cached.savedAt < KNOWLEDGE_CACHE_MS) return cached.result
+  if (knowledgeRequests.has(key)) return knowledgeRequests.get(key)
+  const request = listKnowledge(kind).then((result) => {
+    knowledgeCache.set(key, { result, savedAt: Date.now() })
+    return result
+  }).finally(() => knowledgeRequests.delete(key))
+  knowledgeRequests.set(key, request)
+  return request
+}
+const invalidateKnowledgeCache = (kind) => knowledgeCache.delete(knowledgeKey(kind))
 const wait = (ms = 350) => new Promise((resolve) => setTimeout(resolve, ms))
 const clone = (value) => JSON.parse(JSON.stringify(value))
 const read = () => { try { const saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; return { sources: Array.isArray(saved.sources) ? saved.sources : [], sops: Array.isArray(saved.sops) ? saved.sops : [], faqs: Array.isArray(saved.faqs) ? saved.faqs : [], products: Array.isArray(saved.products) ? saved.products : [], jobs: Array.isArray(saved.jobs) ? saved.jobs : [], generations: Array.isArray(saved.generations) ? saved.generations : [] } } catch { return clone(emptyOrbData) } }
@@ -66,16 +83,16 @@ const productPayload = (product) => {
     metafields: Array.isArray(product.metafields) ? product.metafields : [], shopify,
   }
 }
-export async function listSops() { if (hasOrbApi) { const result = await listKnowledge('sops'); return result ? result.points.map((record) => mapSopWithPayload(record, result.source === 'qdrant' ? 'Qdrant' : undefined)) : [] } await wait(); return read().sops || [] }
-export async function updateSop(sop) { if (hasOrbApi) { await updateKnowledge('sops', sop.id, sopPayload(sop)); return sop } await wait(); const data = read(); data.sops = data.sops.map((item) => item.id === sop.id ? { ...item, ...sop, updated: 'Just now' } : item); write(data); return sop }
-export async function publishApprovedSops() { if (!hasOrbApi) return { published: 0 }; return publishApprovedKnowledge('sops') }
-export async function deleteSop(id) { if (hasOrbApi) return deleteKnowledge('sops', id); await wait(); const data = read(); data.sops = data.sops.filter((item) => item.id !== id); write(data) }
-export async function listFaqs() { if (hasOrbApi) { const result = await listKnowledge('faqs'); return result ? result.points.map((record) => mapFaq({ ...record, source: result.source === 'qdrant' ? 'Qdrant' : undefined })) : [] } await wait(); return read().faqs || [] }
-export async function updateFaq(faq) { if (hasOrbApi) { await updateKnowledge('faqs', faq.id, faqPayload(faq)); return faq } await wait(); const data = read(); data.faqs = data.faqs.map((item) => item.id === faq.id ? { ...item, ...faq, updated: 'Just now' } : item); write(data); return faq }
-export async function publishApprovedFaqs() { if (!hasOrbApi) return { published: 0 }; return publishApprovedKnowledge('faqs') }
-export async function deleteFaq(id) { if (hasOrbApi) return deleteKnowledge('faqs', id); await wait(); const data = read(); data.faqs = data.faqs.filter((item) => item.id !== id); write(data) }
-export async function listProducts() { if (hasOrbApi) { const result = await listKnowledge('products'); return result ? result.points.map(mapProduct) : [] } await wait(); return read().products || [] }
-export async function syncProductsForActiveBrand(brandName) { if (!hasOrbApi) throw new Error('Connect the Orb API before syncing Shopify products.'); if (!brandName) throw new Error('Choose a brand before syncing Shopify products.'); return syncShopifyProducts({ brandName }) }
+export async function listSops() { if (hasOrbApi) { const result = await cachedKnowledge('sops'); return result ? result.points.map((record) => mapSopWithPayload(record, result.source === 'qdrant' ? 'Qdrant' : undefined)) : [] } await wait(); return read().sops || [] }
+export async function updateSop(sop) { if (hasOrbApi) { await updateKnowledge('sops', sop.id, sopPayload(sop)); invalidateKnowledgeCache('sops'); return sop } await wait(); const data = read(); data.sops = data.sops.map((item) => item.id === sop.id ? { ...item, ...sop, updated: 'Just now' } : item); write(data); return sop }
+export async function publishApprovedSops() { if (!hasOrbApi) return { published: 0 }; const result = await publishApprovedKnowledge('sops'); invalidateKnowledgeCache('sops'); return result }
+export async function deleteSop(id) { if (hasOrbApi) { const result = await deleteKnowledge('sops', id); invalidateKnowledgeCache('sops'); return result } await wait(); const data = read(); data.sops = data.sops.filter((item) => item.id !== id); write(data) }
+export async function listFaqs() { if (hasOrbApi) { const result = await cachedKnowledge('faqs'); return result ? result.points.map((record) => mapFaq({ ...record, source: result.source === 'qdrant' ? 'Qdrant' : undefined })) : [] } await wait(); return read().faqs || [] }
+export async function updateFaq(faq) { if (hasOrbApi) { await updateKnowledge('faqs', faq.id, faqPayload(faq)); invalidateKnowledgeCache('faqs'); return faq } await wait(); const data = read(); data.faqs = data.faqs.map((item) => item.id === faq.id ? { ...item, ...faq, updated: 'Just now' } : item); write(data); return faq }
+export async function publishApprovedFaqs() { if (!hasOrbApi) return { published: 0 }; const result = await publishApprovedKnowledge('faqs'); invalidateKnowledgeCache('faqs'); return result }
+export async function deleteFaq(id) { if (hasOrbApi) { const result = await deleteKnowledge('faqs', id); invalidateKnowledgeCache('faqs'); return result } await wait(); const data = read(); data.faqs = data.faqs.filter((item) => item.id !== id); write(data) }
+export async function listProducts() { if (hasOrbApi) { const result = await cachedKnowledge('products'); return result ? result.points.map(mapProduct) : [] } await wait(); return read().products || [] }
+export async function syncProductsForActiveBrand(brandName) { if (!hasOrbApi) throw new Error('Connect the Orb API before syncing Shopify products.'); if (!brandName) throw new Error('Choose a brand before syncing Shopify products.'); const result = await syncShopifyProducts({ brandName }); invalidateKnowledgeCache('products'); return result }
 export async function loadProductVariantMetafields(product, brandName, variantId) {
   if (!hasOrbApi || !brandName || !product?.id || !variantId) throw new Error('Choose a connected Shopify variant first.')
   return getShopifyVariantMetafields({ brandName, productId: product.id, variantId })

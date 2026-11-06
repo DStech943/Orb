@@ -24,7 +24,7 @@ export default function OrbLoader({ label = 'Orb is getting things ready', compa
       let next = index
       while (next === index) next = Math.floor(Math.random() * facts.length)
       return next
-    }), 2800)
+    }), 6500)
     return () => window.clearInterval(interval)
   }, [])
 

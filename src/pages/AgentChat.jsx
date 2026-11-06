@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  ArrowUp,
   Check,
   Eraser,
   Loader2,
   MessageCircleMore,
   Pencil,
-  SendHorizontal,
   X,
 } from "lucide-react";
 import Orb from "../components/Orb";
@@ -376,7 +376,7 @@ export default function AgentChat({ embedded = false }) {
 
           <div
             ref={messagesRef}
-            className="min-h-0 flex-1 overflow-y-auto bg-[#f7f8fa] p-5 sm:p-6"
+            className="min-h-0 flex-1 overflow-y-auto bg-[#f8f9fb] p-5 sm:p-6"
           >
             {!messages.length && !sending && (
               <div className="grid min-h-full place-items-center">
@@ -413,11 +413,11 @@ export default function AgentChat({ embedded = false }) {
                   className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}
                 >
                   <div
-                    className={`max-w-[82%] px-4 py-3 text-sm leading-6 shadow-sm ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-[#d9fdd3] text-slate-800" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
+                    className={`max-w-[82%] px-4 py-3 text-sm leading-6 shadow-sm ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
                   >
                     <p className="whitespace-pre-wrap">{message.text}</p>
                     <p
-                      className={`mt-1 text-[10px] ${message.role === "user" ? "text-emerald-900/50" : "text-slate-400"}`}
+                      className={`mt-1 text-[10px] ${message.role === "user" ? "text-white/65" : "text-slate-400"}`}
                     >
                       {timeLabel(message.createdAt)}
                     </p>
@@ -442,9 +442,9 @@ export default function AgentChat({ embedded = false }) {
 
           <form
             onSubmit={sendMessage}
-            className="border-t border-slate-200 bg-white p-4 sm:p-5"
+            className="orb-guide-prompt border-t border-slate-200 bg-white p-4 sm:p-5"
           >
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 transition focus-within:border-primary/45 focus-within:bg-white focus-within:ring-4 focus-within:ring-primary/10">
+            <div className="orb-prompt-field rounded-xl border p-3 transition focus-within:ring-4 focus-within:ring-primary/10">
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -463,7 +463,7 @@ export default function AgentChat({ embedded = false }) {
                       ? `Message ${agentName}…`
                       : "Choose a brand to start testing"
                 }
-                className="block min-h-12 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+                className="block min-h-12 w-full resize-none bg-transparent px-0 py-0 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
                 <p className="text-[10px] text-slate-400">
@@ -473,12 +473,12 @@ export default function AgentChat({ embedded = false }) {
                   type="submit"
                   disabled={!draft.trim() || sending || !activeBrand?.id}
                   aria-label="Send test message"
-                  className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-primary/35"
+                  className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg transition disabled:cursor-not-allowed"
                 >
                   {sending ? (
                     <Loader2 size={15} className="animate-spin" />
                   ) : (
-                    <SendHorizontal size={15} />
+                    <ArrowUp size={17} strokeWidth={2.5} />
                   )}
                 </button>
               </div>
