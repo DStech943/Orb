@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowUp,
@@ -3270,7 +3270,7 @@ function TemplateManager({
       </div>
       <div className="mt-7 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         {loading ? (
-          <OrbLoader compact label="Loading templates" />
+          <OrbLoader label="Loading flow templates" className="min-h-[260px]" />
         ) : error ? (
           <div className="grid min-h-48 place-items-center p-6 text-center">
             <div>
@@ -3445,7 +3445,9 @@ function TemplateManager({
 export default function FlowsSupabase() {
   const { showToast } = useToast();
   const { isAdmin } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canManageTemplates = isAdmin === true;
+  const orbCreateIntentHandled = useRef(false);
   const [brandVersion, setBrandVersion] = useState(0),
     [templateVersion, setTemplateVersion] = useState(0),
     [active, setActive] = useState(null),
@@ -3474,7 +3476,7 @@ export default function FlowsSupabase() {
   const templateLoader = () =>
     hasOrbApi && canManageTemplates && templateManagerOpen
       ? listFlowTemplates({ includeAll: true })
-      : Promise.resolve({ templates: [], categories: FLOW_TEMPLATE_CATEGORIES });
+      : Promise.resolve(null);
   const { data, loading, error, reload } = useAsync(loader, [brandVersion]);
   const {
     data: templateData,
@@ -3509,6 +3511,20 @@ export default function FlowsSupabase() {
     }
     return true;
   };
+  useEffect(() => {
+    if (
+      searchParams.get("create") !== "orb" ||
+      orbCreateIntentHandled.current ||
+      active ||
+      templateManagerOpen
+    ) return;
+    if (!activeBrandName() || !hasOrbApi) return;
+    orbCreateIntentHandled.current = true;
+    setTemplateEditor(null);
+    setWithOrb(true);
+    setActive(blankFlow({ empty: true }));
+    setSearchParams({}, { replace: true });
+  }, [active, searchParams, setSearchParams, templateManagerOpen]);
   const importFlows = async (text, label) => {
     if (!hasBrand()) return;
     try {

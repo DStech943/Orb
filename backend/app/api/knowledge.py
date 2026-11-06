@@ -184,6 +184,7 @@ ORB_GUIDE_PAGES = {
     "/app": {"name": "Overview", "purpose": "Check the selected brand's high-level activity, including crawling and content progress."},
     "/app/workspace": {"name": "Brand workspace", "purpose": "Set the brand context and the information Orb uses while creating support content."},
     "/app/operations": {"name": "Operations", "purpose": "Record customer-support and product updates for the selected brand, then route them to the appropriate operational follow-up."},
+    "/app/brain": {"name": "AI's Brain", "purpose": "Review the SOPs and FAQs that guide the brand's support agent."},
     "/app/chat": {"name": "Agent chat", "purpose": "Test conversations with the selected brand's deployed support agent."},
     "/app/sops": {"name": "SOPs", "purpose": "Review and manage support operating procedures."},
     "/app/flows": {"name": "Flows", "purpose": "Build visual support flows manually or ask Orb to draft one."},
@@ -193,11 +194,17 @@ ORB_GUIDE_PAGES = {
     "/app/settings": {"name": "Settings", "purpose": "Manage your profile, team access, and application preferences."},
 }
 
+GUIDE_ACTIONS = frozenset({
+    "open_agent_chat", "open_sops", "open_faqs", "open_create_with_orb", "focus_operational_update",
+})
+
 ORB_GUIDE_SYSTEM = """You are Orb, the concise in-product guide for a customer-support workspace.
 Answer the user's question about the product or where to perform a task. Explain the current page accurately
 and recommend only a route from the approved map. Do not claim to see live data, take actions, or expose
-credentials. Set navigate_to only when the user explicitly asks to go, open, switch, or be taken to a page;
-otherwise leave it empty. Return JSON exactly in this shape: {\"answer\": \"...\", \"navigate_to\": \"/app/... or empty string\"}.
+credentials. Set navigate_to or action only when the user explicitly asks to go, open, switch, or perform a
+safe interface action; otherwise leave both empty. Valid actions are open_agent_chat, open_sops, open_faqs,
+open_create_with_orb, and focus_operational_update. Return JSON exactly in this shape:
+{\"answer\": \"...\", \"navigate_to\": \"/app/... or empty string\", \"action\": \"valid action or empty string\"}.
 Keep the answer under 90 words."""
 
 
@@ -1316,7 +1323,10 @@ async def ask_orb_guide(payload: OrbGuideRequest, request: Request, _: User = De
     destination = str(generated.get("navigate_to") or "").strip()
     if destination not in ORB_GUIDE_PAGES or destination == payload.page_path:
         destination = ""
-    return {"answer": answer, "navigate_to": destination}
+    action = str(generated.get("action") or "").strip()
+    if action not in GUIDE_ACTIONS:
+        action = ""
+    return {"answer": answer, "navigate_to": destination, "action": action}
 
 
 @router.post("/brands/{brand_id}/agent/chat")
