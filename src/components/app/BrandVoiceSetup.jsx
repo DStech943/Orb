@@ -97,6 +97,7 @@ export default function BrandVoiceSetup({ isAdmin }) {
   const [approving, setApproving] = useState(false)
   const [addingTone, setAddingTone] = useState(false)
   const [draft, setDraft] = useState(emptyProfile)
+  const [agentTone, setAgentTone] = useState({ status: 'loading', tone_system_prompt: '' })
   const [loadError, setLoadError] = useState('')
   const [selectedToneId, setSelectedToneId] = useState(VOICE_TONES[0].id)
   const [tonePrompt, setTonePrompt] = useState(() => detailedTonePrompt(VOICE_TONES[0]))
@@ -113,7 +114,20 @@ export default function BrandVoiceSetup({ isAdmin }) {
       const nextProfiles = result?.profiles || []
       setProfiles(nextProfiles)
       const preferred = nextProfiles.find((item) => item.status === 'draft') || nextProfiles.find((item) => item.status === 'approved') || emptyProfile
-      setDraft(preferred)
+      const liveTone = result?.agent_tone || { status: 'not_connected', tone_system_prompt: '' }
+      const livePrompt = String(liveTone.tone_system_prompt || '').trim()
+      setAgentTone(liveTone)
+      // The deployed Support Agent is the runtime source of truth. When it
+      // already has a prompt, show that exact prompt instead of an older
+      // local profile stored by Orb.
+      if (liveTone.status === 'connected' && livePrompt) {
+        setSelectedToneId('custom')
+        setTonePrompt(livePrompt)
+        setCustomGuidance('')
+        setDraft(preferred.id ? { ...preferred, drafting_prompt: livePrompt } : emptyProfile)
+      } else {
+        setDraft(preferred)
+      }
     } catch (error) {
       // This runs automatically (and React development mode may mount twice),
       // so use one calm inline notice rather than stacking duplicate toasts.
@@ -131,6 +145,7 @@ export default function BrandVoiceSetup({ isAdmin }) {
       setSources([])
       setProfiles([])
       setDraft(emptyProfile)
+      setAgentTone({ status: 'loading', tone_system_prompt: '' })
       if (next.id) load(next.id)
     }
     window.addEventListener('orb:brand-changed', onBrandChange)
@@ -248,7 +263,10 @@ export default function BrandVoiceSetup({ isAdmin }) {
     {loadError && <div role="alert" className="animate-page-in rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{loadError}</div>}
 
     <section className="rounded-xl border border-ink/15 bg-slate-50 p-4 sm:p-5">
-      <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand tonality</p><h4 className="mt-1 text-lg font-extrabold">Choose how your brand should sound</h4><p className="mt-1 text-sm text-muted">Start with one of five editable tonal directions, or create a custom one. The prompt you save becomes the active drafting instruction for this brand.</p></div>
+      <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand tonality</p><h4 className="mt-1 text-lg font-extrabold">Choose how your brand should sound</h4><p className="mt-1 text-sm text-muted">Start with one of five editable tonal directions, or create a custom one. The prompt you save becomes the live instruction used by this brand’s Support Agent.</p></div>
+      {agentTone.status === 'connected' && <p className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">Connected to the live Support Agent — showing its current tone prompt.</p>}
+      {agentTone.status === 'not_connected' && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">The Support Agent is not connected yet. Add its control-token connection before saving a live tonality change.</p>}
+      {agentTone.status === 'unavailable' && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">Orb could not read the live Support Agent prompt. The saved Orb profile is shown until the connection is available again.</p>}
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {VOICE_TONES.map((tone) => <button type="button" key={tone.id} onClick={() => chooseTone(tone)} aria-pressed={selectedToneId === tone.id} className={`rounded-xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/45 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${selectedToneId === tone.id ? 'border-primary ring-2 ring-primary/15' : 'border-slate-200'}`}>
           <div className="flex items-start justify-between gap-3"><div><h5 className="font-extrabold text-ink">{tone.title}</h5><p className="mt-1 text-xs leading-5 text-muted">{tone.description}</p></div><span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${selectedToneId === tone.id ? 'bg-primary' : 'bg-slate-200'}`} /></div>

@@ -696,6 +696,72 @@ async def _sync_cs_operational_update(
     ]
 
 
+def _agent_control_connection(brand: dict[str, Any]) -> tuple[str, str]:
+    platform_config = decode_jsonb(brand.get("platform_config"))
+    platform_config = platform_config if isinstance(platform_config, dict) else {}
+    agent_url = str(platform_config.get("ai_support_agent_url") or "").strip().rstrip("/")
+    control_token = str(platform_config.get("ai_support_agent_control_token") or "").strip()
+    parsed = urlparse(agent_url)
+    if not agent_url or not control_token or parsed.scheme != "https" or not parsed.netloc:
+        return "", ""
+    return agent_url, control_token
+
+
+async def _read_agent_tone(brand: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort read of the live Support Agent prompt for the Voice UI."""
+    agent_url, control_token = _agent_control_connection(brand)
+    if not agent_url:
+        return {"status": "not_connected", "tone_system_prompt": ""}
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
+            response = await client.get(
+                f"{agent_url}/api/agent/tone",
+                params={"brand_id": str(brand["id"])},
+                headers={"Accept": "application/json", "X-Agent-Token": control_token},
+            )
+    except httpx.HTTPError:
+        return {"status": "unavailable", "tone_system_prompt": ""}
+    if response.is_error:
+        return {"status": "unavailable", "tone_system_prompt": ""}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {"status": "unavailable", "tone_system_prompt": ""}
+    return {
+        "status": "connected",
+        "tone_system_prompt": str(payload.get("tone_system_prompt") or ""),
+    }
+
+
+async def _sync_agent_tone(brand: dict[str, Any], drafting_prompt: str) -> dict[str, Any]:
+    """Make the prompt Orb edits the exact prompt the deployed Agent uses."""
+    agent_url, control_token = _agent_control_connection(brand)
+    if not agent_url:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Connect this brand's Support Agent with its control token before saving live tonality.",
+        )
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            response = await client.put(
+                f"{agent_url}/api/agent/tone",
+                headers={"Accept": "application/json", "X-Agent-Token": control_token},
+                json={"brand_id": str(brand["id"]), "tone_system_prompt": drafting_prompt.strip()},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Could not reach the deployed Support Agent to save its tonality.") from exc
+    if response.is_error:
+        raise HTTPException(status_code=503, detail="The deployed Support Agent rejected the tonality update.")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="The deployed Support Agent returned an invalid tonality response.") from exc
+    return {
+        "status": "connected",
+        "tone_system_prompt": str(payload.get("tone_system_prompt") or drafting_prompt.strip()),
+    }
+
+
 async def _remote_brand(request: Request, brand_id: str) -> dict[str, Any]:
     rows = await _supabase_rows(
         request,
@@ -1503,12 +1569,13 @@ async def set_brand_profile(brand_id: str, payload: BrandProfilePatch, request: 
 
 @router.get("/brands/{brand_id}/voice")
 async def get_brand_voice(brand_id: str, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    await _remote_brand(request, brand_id)
+    brand = await _remote_brand(request, brand_id)
     sources = await _supabase_private_rows(request, "orb_brand_voice_sources", {"select": "*", "brand_id": f"eq.{brand_id}", "order": "created_at.desc"})
     profiles = await _supabase_private_rows(request, "orb_brand_voice_profiles", {"select": "*", "brand_id": f"eq.{brand_id}", "order": "created_at.desc"})
     return {
         "sources": [_voice_source_out(row) for row in sources],
         "profiles": [_voice_profile_out(row) for row in profiles],
+        "agent_tone": await _read_agent_tone(brand),
     }
 
 
@@ -1569,7 +1636,8 @@ async def generate_brand_voice(brand_id: str, request: Request, user: User = Dep
 @router.post("/brands/{brand_id}/voice/profiles/manual", status_code=201)
 async def create_manual_brand_voice_profile(brand_id: str, payload: BrandVoiceProfileManualCreate, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     """Apply an explicitly authored preset/custom voice without an LLM generation step."""
-    await _remote_brand(request, brand_id)
+    brand = await _remote_brand(request, brand_id)
+    agent_tone = await _sync_agent_tone(brand, payload.drafting_prompt)
     updated_at = datetime.now(timezone.utc).isoformat()
     await _supabase_private_write(
         request,
@@ -1587,20 +1655,22 @@ async def create_manual_brand_voice_profile(brand_id: str, payload: BrandVoicePr
         "status": "approved",
         "updated_at": updated_at,
     })
-    return {"profile": _voice_profile_out(rows[0])}
+    return {"profile": _voice_profile_out(rows[0]), "agent_tone": agent_tone}
 
 
 @router.patch("/brands/{brand_id}/voice/profiles/{profile_id}/approve")
 async def approve_brand_voice(profile_id: str, brand_id: str, payload: BrandVoiceProfileApprove, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    brand = await _remote_brand(request, brand_id)
     existing = await _supabase_private_rows(request, "orb_brand_voice_profiles", {"select": "id", "id": f"eq.{profile_id}", "brand_id": f"eq.{brand_id}", "limit": "1"})
     if not existing:
         raise HTTPException(status_code=404, detail="Voice profile not found")
+    agent_tone = await _sync_agent_tone(brand, payload.drafting_prompt)
     updated_at = datetime.now(timezone.utc).isoformat()
     await _supabase_private_write(request, "PATCH", "orb_brand_voice_profiles", params={"brand_id": f"eq.{brand_id}", "status": "eq.approved"}, payload={"status": "archived", "updated_at": updated_at})
     rows = await _supabase_private_write(request, "PATCH", "orb_brand_voice_profiles", params={"id": f"eq.{profile_id}", "brand_id": f"eq.{brand_id}", "select": "*"}, payload={
         "profile": payload.profile, "drafting_prompt": payload.drafting_prompt.strip(), "status": "approved", "updated_at": updated_at,
     })
-    return {"profile": _voice_profile_out(rows[0])}
+    return {"profile": _voice_profile_out(rows[0]), "agent_tone": agent_tone}
 
 
 @router.get("/sop-templates")

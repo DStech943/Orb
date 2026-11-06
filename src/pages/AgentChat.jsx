@@ -281,7 +281,7 @@ export default function AgentChat({ embedded = false }) {
 
   return (
     <div
-      className={`mx-auto flex max-w-5xl flex-col ${embedded ? "min-h-[calc(100vh-15rem)]" : "min-h-[calc(100vh-8rem)]"}`}
+      className={`mx-auto flex max-w-5xl flex-col ${embedded ? "h-[calc(100dvh-15rem)] min-h-[38rem]" : "h-[calc(100dvh-8rem)] min-h-[38rem]"}`}
     >
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -406,14 +406,14 @@ export default function AgentChat({ embedded = false }) {
                 </div>
               </div>
             )}
-            <div className="mx-auto max-w-2xl space-y-3">
+            <div className="w-full space-y-3">
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex gap-3 ${message.role === "user" ? "justify-end" : ""}`}
+                  className={`chat-message-enter flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[82%] px-4 py-3 text-sm leading-6 shadow-sm ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
+                    className={`max-w-[72%] px-4 py-3 text-sm leading-6 shadow-sm sm:max-w-[64%] ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
                   >
                     <p className="whitespace-pre-wrap">{message.text}</p>
                     <p
@@ -425,7 +425,7 @@ export default function AgentChat({ embedded = false }) {
                 </div>
               ))}
               {sending && (
-                <div className="flex">
+                <div className="chat-message-enter flex justify-start">
                   <div className="rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm">
                     <span className="inline-flex items-center gap-2">
                       <Loader2

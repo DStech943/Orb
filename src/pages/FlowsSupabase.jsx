@@ -1455,6 +1455,7 @@ function Builder({
   onSaved,
   onDeleted,
   withOrb = false,
+  initialOrbPrompt = "",
   templateMode = null,
   templateCategories = FLOW_TEMPLATE_CATEGORIES,
   onTemplateExported,
@@ -1475,7 +1476,7 @@ function Builder({
     [selectionBox, setSelectionBox] = useState(null),
     [from, setFrom] = useState(null),
     [zoom, setZoom] = useState(DEFAULT_ZOOM),
-    [orbPrompt, setOrbPrompt] = useState(""),
+    [orbPrompt, setOrbPrompt] = useState(initialOrbPrompt),
     [orbMessages, setOrbMessages] = useState([]),
     [orbWorking, setOrbWorking] = useState(false),
     [orbComplete, setOrbComplete] = useState(false),
@@ -1489,6 +1490,9 @@ function Builder({
     [templateExportOpen, setTemplateExportOpen] = useState(false),
     [templateCategory, setTemplateCategory] = useState(""),
     [exportingTemplate, setExportingTemplate] = useState(false);
+  useEffect(() => {
+    if (initialOrbPrompt) setOrbPrompt(initialOrbPrompt);
+  }, [initialOrbPrompt]);
   const stageRef = useRef(null),
     zoomControlsRef = useRef(null),
     dragRef = useRef(null),
@@ -3453,6 +3457,7 @@ export default function FlowsSupabase() {
     [active, setActive] = useState(null),
     [importOpen, setImportOpen] = useState(false),
     [withOrb, setWithOrb] = useState(false),
+    [initialOrbPrompt, setInitialOrbPrompt] = useState(""),
     [templateManagerOpen, setTemplateManagerOpen] = useState(false),
     [templateEditor, setTemplateEditor] = useState(null);
   useEffect(() => {
@@ -3512,16 +3517,16 @@ export default function FlowsSupabase() {
     return true;
   };
   useEffect(() => {
-    if (
-      searchParams.get("create") !== "orb" ||
-      orbCreateIntentHandled.current ||
-      active ||
-      templateManagerOpen
-    ) return;
+    if (searchParams.get("create") !== "orb") {
+      orbCreateIntentHandled.current = false;
+      return;
+    }
+    if (orbCreateIntentHandled.current || active || templateManagerOpen) return;
     if (!activeBrandName() || !hasOrbApi) return;
     orbCreateIntentHandled.current = true;
     setTemplateEditor(null);
     setWithOrb(true);
+    setInitialOrbPrompt(String(searchParams.get("prompt") || "").trim());
     setActive(blankFlow({ empty: true }));
     setSearchParams({}, { replace: true });
   }, [active, searchParams, setSearchParams, templateManagerOpen]);
@@ -3627,6 +3632,7 @@ export default function FlowsSupabase() {
         <Builder
           flow={active}
           withOrb={withOrb}
+          initialOrbPrompt={initialOrbPrompt}
           templateMode={templateEditor}
           onBack={back}
           onSaved={saved}

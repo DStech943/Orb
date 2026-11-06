@@ -11,16 +11,23 @@ import { useToast } from '../context/ToastContext'
 import { listBrands } from '../services/brands'
 import { hasOrbApi, setRemoteBrandProfile } from '../services/orbApi'
 import AgentChat from './AgentChat'
+import PipelineWorkspace from '../components/app/PipelineWorkspace'
 
 export default function Workspace() {
   const location = useLocation()
   const { user } = useAuth()
   const { showToast } = useToast()
-  const [active, setActive] = useState(() => new URLSearchParams(location.search).get('tab') === 'chat' ? 'chat' : 'business')
+  const [active, setActive] = useState(() => {
+    const tab = new URLSearchParams(location.search).get('tab')
+    return ['business', 'source', 'voice', 'chat'].includes(tab) ? tab : 'business'
+  })
   const [business, setBusiness] = useState({ id: '', name: '', website_url: '', support_email: '', description: '', ai_agent_name: '' })
   const [businessLoading, setBusinessLoading] = useState(true)
   const [savingBusiness, setSavingBusiness] = useState(false)
-  useEffect(() => { if (new URLSearchParams(location.search).get('tab') === 'chat') setActive('chat') }, [location.search])
+  useEffect(() => {
+    const tab = new URLSearchParams(location.search).get('tab')
+    if (['business', 'source', 'voice', 'chat'].includes(tab)) setActive(tab)
+  }, [location.search])
 
   useEffect(() => {
     let live = true
@@ -65,6 +72,7 @@ export default function Workspace() {
   }
   const tabs = [
     { id: 'business', label: 'Business' },
+    { id: 'source', label: 'Knowledge source' },
     { id: 'voice', label: 'Brand voice' },
     { id: 'chat', label: `Chat with ${business.ai_agent_name || 'AI'}` },
   ]
@@ -90,6 +98,7 @@ export default function Workspace() {
             <Button variant="purple" onClick={saveBusiness} disabled={businessLoading || savingBusiness || !business.id}>{savingBusiness ? 'Saving…' : 'Save brand profile'}</Button>
           </div>
         </>}
+        {active === 'source' && <PipelineWorkspace />}
         {active === 'voice' && <BrandVoiceSetup isAdmin={user?.role === 'admin'} />}
         {active === 'chat' && <AgentChat embedded />}
       </div>
