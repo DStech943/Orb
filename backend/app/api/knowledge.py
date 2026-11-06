@@ -638,6 +638,7 @@ def _operational_update_out(record: dict[str, Any]) -> dict[str, Any]:
         "classification": str(value.get("classification") or "cs_update"),
         "status": str(value.get("status") or "recorded"),
         "action_plan": decode_jsonb(value.get("action_plan")) or [],
+        "submitted_by_name": str(value.get("submitted_by_name") or "Workspace member"),
         "created_at": value.get("created_at"),
     }
 
@@ -1238,7 +1239,7 @@ async def list_operational_updates(
         request,
         "orb_operational_updates",
         {
-            "select": "id,brand_id,submitted_by,message,classification,status,action_plan,created_at",
+            "select": "id,brand_id,submitted_by,submitted_by_name,message,classification,status,action_plan,created_at",
             "brand_id": f"eq.{brand['id']}",
             "order": "created_at.desc",
             "limit": str(limit),
@@ -1255,6 +1256,17 @@ async def create_operational_update(
 ) -> dict[str, Any]:
     brand = await _remote_brand_by_name(request, payload.brand_name)
     classification, action_plan = _classify_operational_update(payload.message)
+    try:
+        profile_rows = await _supabase_rows(
+            request,
+            "orb_profiles",
+            {"select": "full_name", "id": f"eq.{user.id}", "limit": "1"},
+        )
+    except HTTPException:
+        # The operational record remains useful even if an older workspace has
+        # not enabled profile reads for its own member yet.
+        profile_rows = []
+    submitted_by_name = str((profile_rows[0].get("full_name") if profile_rows else "") or "Workspace member").strip()
     rows = await _supabase_write(
         request,
         "POST",
@@ -1262,6 +1274,7 @@ async def create_operational_update(
         payload={
             "brand_id": brand["id"],
             "submitted_by": user.id,
+            "submitted_by_name": submitted_by_name,
             "message": payload.message.strip(),
             "classification": classification,
             "status": "recorded",

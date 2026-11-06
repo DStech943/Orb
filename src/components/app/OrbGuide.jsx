@@ -28,7 +28,8 @@ const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const WAKE_PHRASE = /\b(?:hey|hi|okay|ok)\s+(?:orb|orbe|or)\b/i
 const normalizeSpeech = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 const isWakePhraseOnly = (value) => /^(?:hey|hi|okay|ok)\s+(?:orb|orbe|or)$/.test(normalizeSpeech(value))
-const isNavigationCommand = (value) => /(?:^\s*(?:please\s+)?(?:go|open|navigate|switch|show)\b)|(?:\b(?:take|bring)\s+me\s+to\b)|(?:\b(?:can|could|would)\s+you\s+(?:open|navigate|take)\b)/i.test(value)
+const isNavigationCommand = (value) => /(?:^\s*(?:please\s+)?(?:go|open|navigate|switch|show|take|bring)\b)|(?:\b(?:go|take|bring)\s+(?:me\s+)?(?:to|on|into)\b)|(?:\b(?:can|could|would)\s+you\s+(?:go|open|navigate|switch|show|take|bring)\b)/i.test(value)
+const VOICE_SEND_CUE = /\b(?:orb|orbe)\s*[.!?]*$/i
 const actionDestinations = {
   open_agent_chat: '/app/workspace?tab=chat',
   open_sops: '/app/brain?tab=sops',
@@ -50,14 +51,15 @@ const directGuideCommand = (value) => {
   if (!isNavigationCommand(value) && !asksToCreateFlow && !asksToWriteUpdate) return null
   if (asksToCreateFlow) return { action: 'open_create_with_orb', answer: 'Opening Create with Orb so you can start a flow.' }
   if (asksToWriteUpdate) return { action: 'focus_operational_update', answer: 'Opening Operations and focusing a new update.' }
-  if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b/.test(text)) return { action: 'open_agent_chat', answer: 'Opening the agent test chat.' }
+  if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: 'Opening the agent test chat.' }
   if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: 'Opening FAQs.' }
   if (/\b(?:sop|sops)\b/.test(text)) return { action: 'open_sops', answer: 'Opening SOPs.' }
+  if (/\b(?:brain|knowledge|knowledge base)\b/.test(text)) return { destination: '/app/brain', answer: "Opening AI's Brain." }
   if (/\boperations?\b/.test(text)) return { destination: '/app/operations', answer: 'Opening Operations.' }
   if (/\b(?:brand workspace|workspace|brand voice)\b/.test(text)) return { destination: '/app/workspace', answer: 'Opening Brand Workspace.' }
   if (/\bflow/.test(text)) return { destination: '/app/flows', answer: 'Opening Flows.' }
   if (/\bproduct/.test(text)) return { destination: '/app/products', answer: 'Opening Products.' }
-  if (/\b(?:overview|dashboard)\b/.test(text)) return { destination: '/app', answer: 'Opening Overview.' }
+  if (/\b(?:overview|dashboard|home)\b/.test(text)) return { destination: '/app', answer: 'Opening Overview.' }
   if (/\b(?:setting|settings)\b/.test(text)) return { destination: '/app/settings', answer: 'Opening Settings.' }
   if (/\btool/.test(text)) return { destination: '/app/tools', answer: 'Opening Tools.' }
   return null
@@ -85,6 +87,7 @@ export default function OrbGuide() {
   const resumeWakeAfterDictationRef = useRef(false)
   const closeTimerRef = useRef(null)
   const draftRef = useRef('')
+  const askRef = useRef(null)
   const flowPage = location.pathname === '/app/flows'
   const rotatingPrompts = [`What's happening on ${current.title}?`, 'Where do I create a support flow?', 'Where can I test my AI agent?']
 
@@ -100,7 +103,17 @@ export default function OrbGuide() {
     setDictationError('')
     setDictating(true)
     const session = startBrowserDictation({
-      onTranscript: (transcript) => setDraft([base, transcript].filter(Boolean).join(base && transcript ? ' ' : '')),
+      onTranscript: (transcript, isFinal) => {
+        const spokenDraft = [base, transcript].filter(Boolean).join(base && transcript ? ' ' : '')
+        const shouldSend = Boolean(isFinal && VOICE_SEND_CUE.test(transcript))
+        const nextDraft = shouldSend ? spokenDraft.replace(VOICE_SEND_CUE, '').trim() : spokenDraft
+        draftRef.current = nextDraft
+        setDraft(nextDraft)
+        if (shouldSend && nextDraft) {
+          dictationRef.current?.stop()
+          window.setTimeout(() => askRef.current?.(undefined, nextDraft), 0)
+        }
+      },
       onError: (error) => setDictationError(error === 'unsupported' ? 'Speech-to-text is not supported in this browser.' : error === 'not-allowed' || error === 'service-not-allowed' ? 'Microphone permission is required for dictation.' : 'Could not start speech-to-text.'),
       onEnd: () => {
         dictationRef.current = null
@@ -333,11 +346,12 @@ export default function OrbGuide() {
     return () => window.clearTimeout(timer)
   }, [open, voiceDictationRequest, startDictation])
 
-  const ask = async (event) => {
+  const ask = async (event, suppliedText = '') => {
     event?.preventDefault()
-    const text = draft.trim()
+    const text = (suppliedText || draftRef.current).trim()
     if (!text || thinking) return
     setMessages((items) => [...items, { id: makeId(), role: 'user', text }])
+    draftRef.current = ''
     setDraft('')
     const directCommand = directGuideCommand(text)
     if (directCommand) {
@@ -345,7 +359,6 @@ export default function OrbGuide() {
       const destinationLabel = actionLabels[directCommand.action] || pages[destination]?.title || ''
       setMessages((items) => [...items, { id: makeId(), role: 'orb', text: directCommand.answer, destination, destinationLabel }])
       window.setTimeout(() => {
-        closeGuide()
         navigate(destination)
       }, 420)
       return
@@ -360,9 +373,8 @@ export default function OrbGuide() {
       setMessages((items) => [...items, { id: makeId(), role: 'orb', text: result.answer, destination, destinationLabel }])
       if (destination && (isNavigationCommand(text) || action)) {
         // Show Orb's acknowledgement briefly, then take the user directly to
-        // the validated in-app route. Explanatory questions keep the button.
+        // the validated route without breaking the active conversation.
         window.setTimeout(() => {
-          closeGuide()
           navigate(destination)
         }, 420)
       }
@@ -378,16 +390,16 @@ export default function OrbGuide() {
     }
   }
 
-  if (flowPage) return null
+  askRef.current = ask
 
   return <div className="fixed bottom-5 right-5 z-[80] sm:bottom-6">
     {open && <section aria-label="Orb workspace guide" className="orb-guide-panel absolute bottom-16 right-0 flex h-[min(35rem,calc(100vh-8rem))] w-[min(23rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-primary/15 bg-white shadow-2xl shadow-slate-900/15">
       <header className="flex items-center gap-3 border-b border-slate-200 bg-gradient-to-r from-primary-tint/70 to-white px-4 py-3.5"><span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span><div className="min-w-0"><p className="text-sm font-extrabold text-slate-900">Ask Orb</p><p className="truncate text-[11px] text-slate-500">Guiding you through {current.title}</p></div><button type="button" onClick={closeGuide} aria-label="Close Orb guide" className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={17} /></button></header>
       <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-4">
         {messages.length === 0 && !thinking && <div aria-live="polite" className="orb-guide-greeting orb-guide-copy inline-flex rounded-2xl rounded-tl-md border border-slate-200 bg-white px-3 py-2.5 shadow-sm">How may I help you?</div>}
-        <div className={messages.length || thinking ? 'space-y-3' : 'mt-5 space-y-3'}>{messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`max-w-[84%] rounded-2xl px-3 py-2.5 shadow-sm ${message.role === 'user' ? 'rounded-br-md bg-primary text-xs leading-5 text-white' : message.error ? 'rounded-bl-md border border-red-200 bg-red-50 text-red-700' : 'orb-guide-copy rounded-bl-md border border-slate-200 bg-white'}`}><p>{message.text}</p>{message.destination && <button type="button" onClick={() => { navigate(message.destination); setOpen(false) }} className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary-tint px-2 py-1 text-[11px] font-bold text-primary transition hover:bg-primary/15">Open {message.destinationLabel || pages[message.destination]?.title || 'page'}<ArrowUpRight size={13} /></button>}</div></div>)}{thinking && <div aria-live="polite" className="orb-guide-thinking orb-guide-copy inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2.5"><span className="orb-guide-thinking__dots" aria-hidden="true"><i /><i /><i /></span>Orb is thinking…</div>}</div>
+        <div className={messages.length || thinking ? 'space-y-3' : 'mt-5 space-y-3'}>{messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`max-w-[84%] rounded-2xl px-3 py-2.5 shadow-sm ${message.role === 'user' ? 'rounded-br-md bg-primary text-xs leading-5 text-white' : message.error ? 'rounded-bl-md border border-red-200 bg-red-50 text-red-700' : 'orb-guide-copy rounded-bl-md border border-slate-200 bg-white'}`}><p>{message.text}</p>{message.destination && <button type="button" onClick={() => navigate(message.destination)} className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary-tint px-2 py-1 text-[11px] font-bold text-primary transition hover:bg-primary/15">Open {message.destinationLabel || pages[message.destination]?.title || 'page'}<ArrowUpRight size={13} /></button>}</div></div>)}{thinking && <div aria-live="polite" className="orb-guide-thinking orb-guide-copy inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2.5"><span className="orb-guide-thinking__dots" aria-hidden="true"><i /><i /><i /></span>Orb is thinking…</div>}</div>
       </div>
-      <form onSubmit={ask} className="orb-guide-prompt border-t border-slate-200 bg-white p-3"><div className={`orb-prompt-field rounded-xl border p-3 transition ${thinking ? 'opacity-70' : ''}`}><textarea ref={inputRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(event) } }} disabled={thinking} rows={2} placeholder="" className="block w-full resize-none bg-transparent text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed" />{!draft && !thinking && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPlaceholder}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><button type="button" onClick={startDictation} disabled={thinking} aria-label={dictating ? 'Stop dictation' : 'Start dictation'} title={dictating ? 'Stop dictation' : 'Dictate your question'} className={`orb-prompt-field__icon grid h-8 w-8 place-items-center rounded-lg transition hover:bg-primary/10 disabled:cursor-not-allowed ${dictating ? 'bg-primary/10 text-primary' : ''}`}>{dictating ? <MicOff size={16} /> : <Mic size={16} />}</button><button type="submit" aria-label="Ask Orb" disabled={!draft.trim() || thinking} className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{thinking ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={17} strokeWidth={2.5} />}</button></div></div>{dictationError && <p role="alert" className="px-1 pt-2 text-[11px] font-medium text-red-600">{dictationError}</p>}</form>
+      <form onSubmit={ask} className="orb-guide-prompt border-t border-slate-200 bg-white p-3"><div className={`orb-prompt-field rounded-xl border p-3 transition ${thinking ? 'opacity-70' : ''}`}><textarea ref={inputRef} value={draft} onChange={(event) => { draftRef.current = event.target.value; setDraft(event.target.value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(event) } }} disabled={thinking} rows={2} placeholder="" className="block w-full resize-none bg-transparent text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed" />{!draft && !thinking && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPlaceholder}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><button type="button" onClick={startDictation} disabled={thinking} aria-label={dictating ? 'Stop dictation' : 'Start dictation'} title={dictating ? 'Stop dictation' : 'Dictate your question'} className={`orb-prompt-field__icon grid h-8 w-8 place-items-center rounded-lg transition hover:bg-primary/10 disabled:cursor-not-allowed ${dictating ? 'bg-primary/10 text-primary' : ''}`}>{dictating ? <MicOff size={16} /> : <Mic size={16} />}</button><button type="submit" aria-label="Ask Orb" disabled={!draft.trim() || thinking} className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{thinking ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={17} strokeWidth={2.5} />}</button></div></div>{dictationError && <p role="alert" className="px-1 pt-2 text-[11px] font-medium text-red-600">{dictationError}</p>}</form>
     </section>}
     <button type="button" onClick={() => { if (open) closeGuide(); else setOpen(true) }} aria-label={open ? 'Close Orb guide' : 'Open Orb guide'} aria-expanded={open} className="group relative grid h-12 w-12 place-items-center rounded-full transition duration-200 hover:scale-105 focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/25"><span className="absolute inset-0 rounded-full bg-primary/10 blur-md transition group-hover:bg-primary/20" /><span className="relative h-12 w-12 overflow-hidden rounded-full shadow-lg shadow-primary/20"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span></button>
   </div>

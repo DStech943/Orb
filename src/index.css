@@ -177,8 +177,13 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 @keyframes orb-guide-greeting-enter { 0% { opacity: 0; transform: translateY(48px) scale(.98); } 72% { opacity: 1; transform: translateY(-1px) scale(1); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes orb-guide-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .38; } 30% { transform: translateY(-3px); opacity: 1; } }
 
+/* Operations reads like a conversation: each incoming update rises gently
+   into the thread instead of appearing as an abrupt block. */
+.operation-message-in { animation: operation-message-enter 280ms cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes operation-message-enter { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
 @media (prefers-reduced-motion: reduce) {
-  .orb-composer, .orb-guide-panel, .orb-guide-greeting, .orb-guide-thinking__dots i, .flow-dot-grid, .flow-stage--sharp, .flow-denoise-preview, .flow-denoise-preview__grain, .flow-denoise-preview__node, .pipeline-progress__indeterminate { animation: none; }
+  .orb-composer, .orb-guide-panel, .orb-guide-greeting, .orb-guide-thinking__dots i, .operation-message-in, .flow-dot-grid, .flow-stage--sharp, .flow-denoise-preview, .flow-denoise-preview__grain, .flow-denoise-preview__node, .pipeline-progress__indeterminate { animation: none; }
   .flow-stage--denoise, .flow-stage--resolve, .flow-stage--sharp { opacity: 1; filter: none; pointer-events: auto; }
   .flow-denoise-preview { display: none; }
 }
