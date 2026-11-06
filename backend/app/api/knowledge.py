@@ -1712,13 +1712,13 @@ async def list_flow_templates(
     request: Request,
     category_code: str | None = Query(default=None),
     include_all: bool = Query(default=False),
-    _: User = Depends(current_user),
+    user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """List global visual-flow templates; drafts are reserved for admins."""
     if category_code and category_code not in CATEGORIES:
         raise HTTPException(status_code=422, detail="Unknown category_code")
     if include_all:
-        await _admin(request)
+        await _admin(request, user)
     params = {
         "select": "id,category_code,title,lifecycle_stage,status,nodes,edges,import_source,version,created_at,updated_at",
         "order": "category_code.asc,updated_at.desc",
