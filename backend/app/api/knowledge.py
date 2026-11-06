@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Literal
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import asyncpg
 import httpx
@@ -643,6 +644,58 @@ def _operational_update_out(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _sync_cs_operational_update(
+    brand: dict[str, Any], update_id: str, message: str, submitted_by_name: str,
+) -> tuple[str, list[dict[str, str]]]:
+    """Apply a CS update to the deployed Support Agent's live daily briefing.
+
+    Product updates deliberately stay in review: only CS updates are safe to
+    publish into the response context without a Shopify confirmation step.
+    """
+    platform_config = decode_jsonb(brand.get("platform_config"))
+    platform_config = platform_config if isinstance(platform_config, dict) else {}
+    agent_url = str(platform_config.get("ai_support_agent_url") or "").strip().rstrip("/")
+    control_token = str(platform_config.get("ai_support_agent_control_token") or "").strip()
+    pending = [
+        {"system": "Support Agent", "status": "pending_connection", "label": "Waiting for the deployed Support Agent connection"},
+        {"system": "Slack", "status": "pending_destination", "label": "Ready to notify this brand's Slack channel once connected"},
+    ]
+    if not agent_url or not control_token:
+        return "ready_for_review", pending
+
+    parsed = urlparse(agent_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return "ready_for_review", pending
+
+    endpoint = f"{agent_url}/api/agent/operational-notes"
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            response = await client.post(
+                endpoint,
+                headers={"Accept": "application/json", "X-Agent-Token": control_token},
+                json={
+                    "brand_id": str(brand["id"]),
+                    "update_id": update_id,
+                    "message": message,
+                    "submitted_by": submitted_by_name,
+                },
+            )
+    except httpx.HTTPError:
+        return "ready_for_review", pending
+    if response.is_error:
+        return "ready_for_review", pending
+    try:
+        result = response.json()
+    except ValueError:
+        return "ready_for_review", pending
+    if str(result.get("status") or "") not in {"applied", "already_applied"}:
+        return "ready_for_review", pending
+    return "applied", [
+        {"system": "Support Agent", "status": "applied", "label": "Added to the AI's live operational notes"},
+        {"system": "Slack", "status": "pending_destination", "label": "Ready to notify this brand's Slack channel once connected"},
+    ]
+
+
 async def _remote_brand(request: Request, brand_id: str) -> dict[str, Any]:
     rows = await _supabase_rows(
         request,
@@ -658,7 +711,7 @@ async def _remote_brand_by_name(request: Request, brand_name: str) -> dict[str, 
     rows = await _supabase_rows(
         request,
         "brands",
-        {"select": "id,name,industry_category", "name": f"ilike.{brand_name.strip()}", "limit": "1"},
+        {"select": "id,name,industry_category,platform_config", "name": f"ilike.{brand_name.strip()}", "limit": "1"},
     )
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
@@ -1267,17 +1320,27 @@ async def create_operational_update(
         # not enabled profile reads for its own member yet.
         profile_rows = []
     submitted_by_name = str((profile_rows[0].get("full_name") if profile_rows else "") or "Workspace member").strip()
+    update_id = str(uuid4())
+    update_status = "recorded"
+    if classification == "cs_update":
+        update_status, action_plan = await _sync_cs_operational_update(
+            brand,
+            update_id,
+            payload.message.strip(),
+            submitted_by_name,
+        )
     rows = await _supabase_write(
         request,
         "POST",
         "orb_operational_updates",
         payload={
+            "id": update_id,
             "brand_id": brand["id"],
             "submitted_by": user.id,
             "submitted_by_name": submitted_by_name,
             "message": payload.message.strip(),
             "classification": classification,
-            "status": "recorded",
+            "status": update_status,
             "action_plan": action_plan,
         },
     )

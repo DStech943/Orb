@@ -162,7 +162,7 @@ export default function Operations() {
       </header>
 
       <div ref={feedRef} className="h-[min(31rem,calc(100vh-22rem))] min-h-80 overflow-y-auto px-4 py-6 sm:px-8" style={{ backgroundImage: "radial-gradient(rgba(80, 111, 255, 0.12) 1px, transparent 1px)", backgroundSize: "16px 16px" }}>
-        {showHistory ? <OperationsHistory updates={updates} /> : <div className="mx-auto max-w-3xl space-y-5">
+        {showHistory ? <OperationsHistory updates={updates} /> : <div className="max-w-3xl space-y-5">
           <div className="operation-message-in flex items-start"><div className="max-w-[84%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-700 shadow-sm"><p>Tell me what changed. I’ll identify the right work, keep it organised, and prepare the next step for your team.</p></div></div>
           {loading && !data ? <OrbLoader compact label="Opening operations" /> : error && !data ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><strong>Could not load operations.</strong><button type="button" onClick={reload} className="ml-2 font-bold underline">Try again</button></div> : chatUpdates.map((update) => <UpdateExchange key={update.id} update={update} />)}
         </div>}
