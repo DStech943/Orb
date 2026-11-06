@@ -42,6 +42,7 @@ import {
   createFlow,
   createFlowTemplate,
   deleteFlow,
+  deleteFlowTemplate,
   hasOrbApi,
   listFlowTemplates,
   listFlows,
@@ -3208,9 +3209,12 @@ function TemplateManager({
   onNew,
   onEdit,
   onAddToFlows,
+  onDelete,
 }) {
   const [categoryCode, setCategoryCode] = useState("");
   const [templateToAdd, setTemplateToAdd] = useState(null);
+  const [templateToDelete, setTemplateToDelete] = useState(null);
+  const [deletingTemplate, setDeletingTemplate] = useState(false);
   const appliedBrandCategoryRef = useRef(null);
   useEffect(() => {
     if (
@@ -3310,13 +3314,24 @@ function TemplateManager({
                   </span>
                 </span>
                 <span className="mt-3 flex w-full items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onEdit(template)}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-                  >
-                    Edit template <ChevronRight size={15} />
-                  </button>
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onEdit(template)}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                    >
+                      Edit template <ChevronRight size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTemplateToDelete(template)}
+                      className="grid h-7 w-7 place-items-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                      title="Delete template"
+                      aria-label={`Delete ${template.title}`}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </span>
                   <Button
                     type="button"
                     size="sm"
@@ -3376,6 +3391,49 @@ function TemplateManager({
             >
               <Plus size={15} />
               Add to flows
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        open={Boolean(templateToDelete)}
+        onClose={() => !deletingTemplate && setTemplateToDelete(null)}
+        title="Delete flow template?"
+      >
+        <div className="space-y-5">
+          <p className="text-sm leading-6 text-slate-600">
+            <strong>{templateToDelete?.title}</strong> will no longer be
+            available as a starting point for any brand. Existing brand flows
+            made from it are kept unchanged.
+          </p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setTemplateToDelete(null)}
+              disabled={deletingTemplate}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="bg-red-600 text-white hover:bg-red-700"
+              onClick={async () => {
+                if (!templateToDelete || deletingTemplate) return;
+                setDeletingTemplate(true);
+                try {
+                  await onDelete(templateToDelete);
+                  setTemplateToDelete(null);
+                } finally {
+                  setDeletingTemplate(false);
+                }
+              }}
+              disabled={deletingTemplate}
+            >
+              {deletingTemplate ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+              {deletingTemplate ? "Deleting…" : "Delete template"}
             </Button>
           </div>
         </div>
@@ -3512,6 +3570,16 @@ export default function FlowsSupabase() {
       },
     });
   };
+  const deleteTemplate = async (template) => {
+    try {
+      await deleteFlowTemplate(template.templateId);
+      setTemplateVersion((value) => value + 1);
+      showToast("Flow template deleted. Existing brand flows were kept.");
+    } catch (error) {
+      showToast(error.message || "Could not delete this flow template.");
+      throw error;
+    }
+  };
   const openFlow = (flow) => {
     setTemplateEditor(null);
     setWithOrb(false);
@@ -3581,6 +3649,7 @@ export default function FlowsSupabase() {
               onNew={startTemplate}
               onEdit={editTemplate}
               onAddToFlows={addTemplateToFlows}
+              onDelete={deleteTemplate}
             />
           ) : (
             <OrbFlowLibrary

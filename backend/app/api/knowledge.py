@@ -1771,6 +1771,17 @@ async def update_flow_template(template_id: str, payload: FlowTemplatePayload, r
     return {"point": _flow_template_out(rows[0]), "source": "supabase"}
 
 
+@router.delete("/flows/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_flow_template(template_id: str, request: Request, _: User = Depends(_admin)) -> Response:
+    """Remove a global template without deleting existing brand-specific copies."""
+    rows = await _supabase_service_write(request, "DELETE", "orb_flow_templates", params={
+        "id": f"eq.{template_id}", "select": "id",
+    })
+    if not rows:
+        raise HTTPException(status_code=404, detail="Flow template not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/flows", status_code=status.HTTP_201_CREATED)
 async def create_flow(payload: FlowPayload, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     brand = await _remote_brand_by_name(request, payload.brand_name)
