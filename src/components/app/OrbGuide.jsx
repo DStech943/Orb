@@ -44,12 +44,24 @@ const actionLabels = {
   open_create_with_orb: 'Create with Orb',
   focus_operational_update: 'new operational update',
 }
+const followPreviousDestination = (value) => /^(?:please\s+)?(?:take me there|take me to it|open (?:that|it)|go (?:there|to it)|show me(?: that)?|yes(?:\s+please)?)\s*[.!?]*$/i.test(String(value || '').trim())
+const flowBriefFromRequest = (value) => {
+  const request = String(value || '')
+    .replace(/\b(?:okay|ok|please|can you|could you|would you)\b/gi, ' ')
+    .replace(/\b(?:prompt\s+)?(?:the\s+)?orb\s+to\s+(?:create|build|make|start)\b/gi, ' ')
+    .replace(/\b(?:create|build|make|start)\s+(?:a\s+)?(?:new\s+)?flow\b/gi, ' ')
+    .replace(/\bfor me\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const subject = request || 'the requested customer-support scenario'
+  return `Create an editable customer-support flow for ${subject}. Include a trigger, the details to collect, validation checks, clear outcome branches, customer-facing messages, escalation or handoff where needed, and a completed end state for every branch.`
+}
 const directGuideCommand = (value) => {
   const text = normalizeSpeech(value)
   const asksToCreateFlow = /\b(?:create|build|make|start|new)\b.*\bflow\b/.test(text) || /\bcreate with orb\b/.test(text)
   const asksToWriteUpdate = /\b(?:write|record|add|new)\b.*\b(?:update|operation)\b/.test(text)
   if (!isNavigationCommand(value) && !asksToCreateFlow && !asksToWriteUpdate) return null
-  if (asksToCreateFlow) return { action: 'open_create_with_orb', answer: 'Opening Create with Orb so you can start a flow.' }
+  if (asksToCreateFlow) return { action: 'open_create_with_orb', answer: 'I prepared a flow brief and added it to Create with Orb. You can refine it before generating.', flowPrompt: flowBriefFromRequest(value) }
   if (asksToWriteUpdate) return { action: 'focus_operational_update', answer: 'Opening Operations and focusing a new update.' }
   if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: 'Opening the agent test chat.' }
   if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: 'Opening FAQs.' }
@@ -88,6 +100,7 @@ export default function OrbGuide() {
   const closeTimerRef = useRef(null)
   const draftRef = useRef('')
   const askRef = useRef(null)
+  const lastDestinationRef = useRef(null)
   const flowPage = location.pathname === '/app/flows'
   const rotatingPrompts = [`What's happening on ${current.title}?`, 'Where do I create a support flow?', 'Where can I test my AI agent?']
 
@@ -353,13 +366,31 @@ export default function OrbGuide() {
     setMessages((items) => [...items, { id: makeId(), role: 'user', text }])
     draftRef.current = ''
     setDraft('')
+    const previousDestination = followPreviousDestination(text) ? lastDestinationRef.current : null
+    if (previousDestination?.destination) {
+      const acknowledgement = `Opening ${previousDestination.destinationLabel || pages[previousDestination.destination]?.title || 'that page'}.`
+      setMessages((items) => [...items, {
+        id: makeId(),
+        role: 'orb',
+        text: acknowledgement,
+        destination: previousDestination.destination,
+        destinationLabel: previousDestination.destinationLabel,
+      }])
+      window.setTimeout(() => navigate(previousDestination.destination), 280)
+      return
+    }
     const directCommand = directGuideCommand(text)
     if (directCommand) {
       const destination = directCommand.destination || actionDestinations[directCommand.action] || ''
       const destinationLabel = actionLabels[directCommand.action] || pages[destination]?.title || ''
-      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: directCommand.answer, destination, destinationLabel }])
+      const flowPrompt = directCommand.flowPrompt || ''
+      const resolvedDestination = flowPrompt && destination === actionDestinations.open_create_with_orb
+        ? `${destination}&prompt=${encodeURIComponent(flowPrompt)}`
+        : destination
+      if (destination) lastDestinationRef.current = { destination: resolvedDestination, destinationLabel }
+      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: directCommand.answer, destination: resolvedDestination, destinationLabel }])
       window.setTimeout(() => {
-        navigate(destination)
+        navigate(resolvedDestination)
       }, 420)
       return
     }
@@ -370,12 +401,17 @@ export default function OrbGuide() {
       const action = actionDestinations[result?.action] ? result.action : ''
       const destination = actionDestinations[action] || (pages[result.navigate_to] ? result.navigate_to : '')
       const destinationLabel = actionLabels[action] || pages[destination]?.title || ''
-      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: result.answer, destination, destinationLabel }])
+      const flowPrompt = action === 'open_create_with_orb' ? flowBriefFromRequest(text) : ''
+      const resolvedDestination = flowPrompt && destination === actionDestinations.open_create_with_orb
+        ? `${destination}&prompt=${encodeURIComponent(flowPrompt)}`
+        : destination
+      if (destination) lastDestinationRef.current = { destination: resolvedDestination, destinationLabel }
+      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: result.answer, destination: resolvedDestination, destinationLabel }])
       if (destination && (isNavigationCommand(text) || action)) {
         // Show Orb's acknowledgement briefly, then take the user directly to
         // the validated route without breaking the active conversation.
         window.setTimeout(() => {
-          navigate(destination)
+          navigate(resolvedDestination)
         }, 420)
       }
     } catch (error) {
