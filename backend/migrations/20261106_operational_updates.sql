@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS cx_copilot.orb_operational_updates (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   brand_id uuid NOT NULL REFERENCES cx_copilot.brands(id) ON DELETE CASCADE,
   submitted_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  submitted_by_name text,
   message text NOT NULL CHECK (char_length(message) BETWEEN 8 AND 10000),
   classification text NOT NULL CHECK (classification IN ('cs_update', 'product_update')),
   status text NOT NULL DEFAULT 'recorded' CHECK (status IN ('recorded', 'ready_for_review', 'applied', 'dismissed')),
