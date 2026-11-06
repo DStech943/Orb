@@ -17,6 +17,18 @@ export const hasOrbApi = Boolean(
   configuredApiUrl || localBrowser || !import.meta.env.DEV,
 );
 
+// Global templates change rarely, but the manager can mount several times as
+// users navigate between flows and templates. Cache them briefly and let
+// concurrent consumers share the same request instead of showing a loader.
+const FLOW_TEMPLATE_CACHE_MS = 30_000;
+const flowTemplateCache = new Map();
+const flowTemplateRequests = new Map();
+const flowTemplateCacheKey = ({ categoryCode, includeAll = false } = {}) =>
+  `${includeAll ? "all" : "published"}:${categoryCode || "all"}`;
+const invalidateFlowTemplateCache = () => {
+  flowTemplateCache.clear();
+};
+
 const request = async (path, options = {}) => {
   if (!hasOrbApi) return null;
   const { data } = await supabase?.auth.getSession();
@@ -186,24 +198,57 @@ export const listFlows = (brandName = activeBrandName()) =>
   brandName
     ? request(`/api/flows?brand_name=${encodeURIComponent(brandName)}`)
     : Promise.resolve(null);
-export const listFlowTemplates = ({ categoryCode, includeAll = false } = {}) =>
-  request(
+export const listOperationalUpdates = (brandName = activeBrandName()) =>
+  brandName
+    ? request(`/api/operations?brand_name=${encodeURIComponent(brandName)}`)
+    : Promise.resolve({ updates: [] });
+export const createOperationalUpdate = (message, brandName = activeBrandName()) =>
+  request("/api/operations", {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, message }),
+  });
+export const listFlowTemplates = (options = {}) => {
+  const { categoryCode, includeAll = false } = options;
+  const key = flowTemplateCacheKey(options);
+  const cached = flowTemplateCache.get(key);
+  if (cached && Date.now() - cached.savedAt < FLOW_TEMPLATE_CACHE_MS)
+    return Promise.resolve(cached.data);
+  if (flowTemplateRequests.has(key)) return flowTemplateRequests.get(key);
+
+  const requestPromise = request(
     `/api/flows/templates?${new URLSearchParams({ ...(categoryCode ? { category_code: categoryCode } : {}), ...(includeAll ? { include_all: "true" } : {}) })}`,
-  );
-export const createFlowTemplate = ({ categoryCode, payload }) =>
-  request("/api/flows/templates", {
+  )
+    .then((data) => {
+      flowTemplateCache.set(key, { data, savedAt: Date.now() });
+      return data;
+    })
+    .finally(() => flowTemplateRequests.delete(key));
+  flowTemplateRequests.set(key, requestPromise);
+  return requestPromise;
+};
+export const createFlowTemplate = async ({ categoryCode, payload }) => {
+  const result = await request("/api/flows/templates", {
     method: "POST",
     body: JSON.stringify({ category_code: categoryCode, payload }),
   });
-export const updateFlowTemplate = (id, { categoryCode, payload }) =>
-  request(`/api/flows/templates/${encodeURIComponent(id)}`, {
+  invalidateFlowTemplateCache();
+  return result;
+};
+export const updateFlowTemplate = async (id, { categoryCode, payload }) => {
+  const result = await request(`/api/flows/templates/${encodeURIComponent(id)}`, {
     method: "PUT",
     body: JSON.stringify({ category_code: categoryCode, payload }),
   });
-export const deleteFlowTemplate = (id) =>
-  request(`/api/flows/templates/${encodeURIComponent(id)}`, {
+  invalidateFlowTemplateCache();
+  return result;
+};
+export const deleteFlowTemplate = async (id) => {
+  const result = await request(`/api/flows/templates/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+  invalidateFlowTemplateCache();
+  return result;
+};
 export const assistFlow = (prompt, brandName = activeBrandName()) =>
   request("/api/flows/assist", {
     method: "POST",

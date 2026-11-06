@@ -154,6 +154,11 @@ class FlowAssistRequest(RequestModel):
     prompt: str = Field(min_length=8, max_length=5_000)
 
 
+class OperationalUpdateCreate(RequestModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    message: str = Field(min_length=8, max_length=10_000)
+
+
 class AgentChatRequest(RequestModel):
     message: str = Field(min_length=1, max_length=4_096)
     session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
@@ -178,6 +183,7 @@ FLOW_CONTEXT_STOPWORDS = frozenset({
 ORB_GUIDE_PAGES = {
     "/app": {"name": "Overview", "purpose": "Check the selected brand's high-level activity, including crawling and content progress."},
     "/app/workspace": {"name": "Brand workspace", "purpose": "Set the brand context and the information Orb uses while creating support content."},
+    "/app/operations": {"name": "Operations", "purpose": "Record customer-support and product updates for the selected brand, then route them to the appropriate operational follow-up."},
     "/app/chat": {"name": "Agent chat", "purpose": "Test conversations with the selected brand's deployed support agent."},
     "/app/sops": {"name": "SOPs", "purpose": "Review and manage support operating procedures."},
     "/app/flows": {"name": "Flows", "purpose": "Build visual support flows manually or ask Orb to draft one."},
@@ -596,6 +602,37 @@ async def _supabase_private_write(
         return []
     data = response.json()
     return data if isinstance(data, list) else []
+
+
+def _classify_operational_update(message: str) -> tuple[str, list[dict[str, str]]]:
+    """Classify an intake without making an unreviewed change in another system."""
+    normalized = message.lower()
+    product_signals = (
+        "preorder", "pre-order", "back in stock", "restock", "variant",
+        "metafield", "sku", "inventory", "product", "price", "catalog",
+    )
+    if any(signal in normalized for signal in product_signals):
+        return "product_update", [
+            {"system": "Shopify", "status": "needs_review", "label": "Find the affected product and variants"},
+            {"system": "Shopify", "status": "needs_review", "label": "Review the relevant product and variant metafields before any edit"},
+        ]
+    return "cs_update", [
+        {"system": "Operational notes", "status": "pending_destination", "label": "Ready to add to the AI's operational notes once configured"},
+        {"system": "Slack", "status": "pending_destination", "label": "Ready to notify this brand's Slack channel once connected"},
+    ]
+
+
+def _operational_update_out(record: dict[str, Any]) -> dict[str, Any]:
+    value = dict(record)
+    return {
+        "id": str(value.get("id") or ""),
+        "brand_id": str(value.get("brand_id") or ""),
+        "message": str(value.get("message") or ""),
+        "classification": str(value.get("classification") or "cs_update"),
+        "status": str(value.get("status") or "recorded"),
+        "action_plan": decode_jsonb(value.get("action_plan")) or [],
+        "created_at": value.get("created_at"),
+    }
 
 
 async def _remote_brand(request: Request, brand_id: str) -> dict[str, Any]:
@@ -1180,6 +1217,53 @@ async def list_brands(request: Request, _: User = Depends(current_user)) -> dict
         {"select": "id,name,description,industry_category,platform_config", "order": "name.asc"},
     )
     return {"brands": [_brand_out(row) for row in rows]}
+
+
+@router.get("/operations")
+async def list_operational_updates(
+    request: Request,
+    brand_name: str = Query(min_length=1, max_length=160),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: User = Depends(current_user),
+) -> dict[str, list[dict[str, Any]]]:
+    brand = await _remote_brand_by_name(request, brand_name)
+    rows = await _supabase_rows(
+        request,
+        "orb_operational_updates",
+        {
+            "select": "id,brand_id,submitted_by,message,classification,status,action_plan,created_at",
+            "brand_id": f"eq.{brand['id']}",
+            "order": "created_at.desc",
+            "limit": str(limit),
+        },
+    )
+    return {"updates": [_operational_update_out(row) for row in rows]}
+
+
+@router.post("/operations", status_code=status.HTTP_201_CREATED)
+async def create_operational_update(
+    payload: OperationalUpdateCreate,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    classification, action_plan = _classify_operational_update(payload.message)
+    rows = await _supabase_write(
+        request,
+        "POST",
+        "orb_operational_updates",
+        payload={
+            "brand_id": brand["id"],
+            "submitted_by": user.id,
+            "message": payload.message.strip(),
+            "classification": classification,
+            "status": "recorded",
+            "action_plan": action_plan,
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=503, detail="Supabase did not return the operational update")
+    return {"update": _operational_update_out(rows[0])}
 
 
 def _agent_reply(payload: Any) -> str:

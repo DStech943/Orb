@@ -9,6 +9,7 @@ import { startBrowserDictation } from '../../lib/browserDictation'
 const pages = {
   '/app': { title: 'Overview', summary: "This is your brand's at-a-glance workspace for support activity and content progress." },
   '/app/workspace': { title: 'Brand workspace', summary: 'Use this page to add the brand context Orb needs for support content.' },
+  '/app/operations': { title: 'Operations', summary: 'Record customer-support and product updates, then review the follow-up Orb has queued for this brand.' },
   '/app/chat': { title: 'Agent chat', summary: "Use this page to test the selected brand's deployed support agent." },
   '/app/brain': { title: "AI's Brain", summary: 'Review and manage the SOPs and FAQs that give your agent dependable brand knowledge.' },
   '/app/sops': { title: "AI's Brain", summary: 'Use this page to review and manage support operating procedures.' },
