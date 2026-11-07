@@ -197,7 +197,7 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 
 /* Escalation is an action, not a warning state. Keep its top-bar control
    visually quiet while the modal makes the destructive broadcast explicit. */
-button[aria-label="Escalate to Slack"] { background-color: #fff !important; }
+button[aria-label="Share feedback with the team"] { background-color: #fff !important; }
 
 /* Separate the Shopify-inspired product workspace into calm, distinct surfaces.
    Form controls and media tiles deliberately stay white for a clear editing target. */

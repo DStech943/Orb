@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext'
 import { activeBrandName, sendSlackEscalation } from '../../services/orbApi'
 import { useToast } from '../../context/ToastContext'
 
-const titles = { '/app': 'Overview', '/app/workspace': 'Brand workspace', '/app/operations': 'Operations', '/app/brain': "AI's Brain", '/app/sops': "AI's Brain", '/app/flows': 'Flows', '/app/faqs': "AI's Brain", '/app/products': 'Products', '/app/tools': 'Tools', '/app/settings': 'Settings' }
+const titles = { '/app': 'Overview', '/app/workspace': 'Brand workspace', '/app/operations': 'Operations', '/app/brain': "AI's Brain", '/app/sops': "AI's Brain", '/app/flows': 'Flows', '/app/faqs': "AI's Brain", '/app/templates': 'Templates', '/app/products': 'Products', '/app/tools': 'Tools', '/app/settings': 'Settings' }
 
 function SlackEscalation() {
   const { showToast } = useToast()
@@ -32,19 +32,65 @@ function SlackEscalation() {
   }
   const submit = async (event) => {
     event.preventDefault()
-    if (!message.trim()) { setError('Write a message before escalating.'); return }
-    if (!brandName) { setError('Choose a brand before escalating.'); return }
+    if (!message.trim()) { setError('Write a message before sharing it with the team.'); return }
+    if (!brandName) { setError('Choose a brand before sharing feedback.'); return }
     setSending(true); setError('')
     try {
       await sendSlackEscalation({ message, files }, brandName)
-      showToast(`Escalation sent to ${brandName}'s Slack channel.`)
+      showToast(`Feedback shared with the ${brandName} team.`)
       setMessage(''); setFiles([]); setOpen(false)
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not send the escalation.')
+      setError(failure instanceof Error ? failure.message : 'Could not share the feedback.')
     } finally { setSending(false) }
   }
 
+  return (
+    <>
+      <button
+        type="button"
+        className="grid h-9 w-9 place-items-center rounded-md border-2 border-ink bg-orange text-ink transition-transform hover:-translate-y-0.5"
+        aria-label="Share feedback with the team"
+        title="Share feedback"
+        onClick={() => { setError(''); setOpen(true) }}
+      >
+        <CircleAlert size={19} strokeWidth={2.5} />
+      </button>
+      <Modal open={open} onClose={close} title="Share feedback with the team">
+        <form className="grid gap-4" onSubmit={submit}>
+          <div className="border-2 border-purple/30 bg-peach p-3 text-sm">
+            <p className="font-extrabold">{brandName || 'Selected brand'}</p>
+            <p className="mt-1 text-xs text-muted">Share feedback, an issue, or useful context with the team.</p>
+          </div>
+          <Textarea
+            label="What needs attention?"
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            placeholder="Describe the issue, feedback, and any useful context…"
+            disabled={sending}
+          />
+          <div className="grid gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-bold">Media or files <span className="font-medium text-muted">(optional)</span></p>
+              <input ref={fileRef} className="sr-only" id="team-feedback-files" type="file" multiple accept="image/*,video/*,audio/*,application/pdf" onChange={addFiles} disabled={sending} />
+              <label htmlFor="team-feedback-files" className="interactive-brutal inline-flex cursor-pointer items-center gap-2 rounded-md border-2 border-ink bg-white px-3 py-2 text-xs font-bold"><Paperclip size={14} />Attach media</label>
+            </div>
+            {files.length > 0 && <ul className="grid gap-2">{files.map((file, index) => <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-2 border-ink/20 bg-white px-3 py-2 text-xs"><span className="min-w-0 truncate font-bold">{file.name}</span><button type="button" className="shrink-0 text-muted hover:text-ink" aria-label={`Remove ${file.name}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button></li>)}</ul>}
+            <p className="text-xs text-muted">Up to 5 files, 10 MB each. Images, video, audio, and PDFs are supported.</p>
+          </div>
+          {error && <p role="alert" className="border-2 border-orange bg-orange/10 p-3 text-sm font-bold text-red-700">{error}</p>}
+          <div className="flex justify-end gap-3 border-t-2 border-ink/10 pt-4">
+            <Button type="button" variant="outline" onClick={close} disabled={sending}>Cancel</Button>
+            <Button type="submit" disabled={sending || !message.trim()}>{sending ? <><Loader2 className="animate-spin" size={16} />Sharing…</> : <><CircleAlert size={16} />Share with team</>}</Button>
+          </div>
+        </form>
+      </Modal>
+    </>
+  )
+
+  /*
+
   return <><button type="button" className="grid h-9 w-9 place-items-center rounded-md border-2 border-ink bg-orange text-ink transition-transform hover:-translate-y-0.5" aria-label="Escalate to Slack" title="Escalate to Slack" onClick={() => { setError(''); setOpen(true) }}><CircleAlert size={19} strokeWidth={2.5} /></button><Modal open={open} onClose={close} title="Escalate to Slack"><form className="grid gap-4" onSubmit={submit}><div className="border-2 border-purple/30 bg-peach p-3 text-sm"><p className="font-extrabold">{brandName || 'Selected brand'}</p><p className="mt-1 text-xs text-muted">Orb will notify the configured channel with <code className="font-bold">@channel</code>.</p></div><Textarea label="What needs attention?" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Describe the issue, urgency, and any useful context…" disabled={sending} /><div className="grid gap-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-bold">Media or files <span className="font-medium text-muted">(optional)</span></p><input ref={fileRef} className="sr-only" id="slack-escalation-files" type="file" multiple accept="image/*,video/*,audio/*,application/pdf" onChange={addFiles} disabled={sending} /><label htmlFor="slack-escalation-files" className="interactive-brutal inline-flex cursor-pointer items-center gap-2 rounded-md border-2 border-ink bg-white px-3 py-2 text-xs font-bold"><Paperclip size={14} />Attach media</label></div>{files.length > 0 && <ul className="grid gap-2">{files.map((file, index) => <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 border-2 border-ink/20 bg-white px-3 py-2 text-xs"><span className="min-w-0 truncate font-bold">{file.name}</span><button type="button" className="shrink-0 text-muted hover:text-ink" aria-label={`Remove ${file.name}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button></li>)}</ul>}<p className="text-xs text-muted">Up to 5 files, 10 MB each. Images, video, audio, and PDFs are supported.</p></div>{error && <p role="alert" className="border-2 border-orange bg-orange/10 p-3 text-sm font-bold text-red-700">{error}</p>}<div className="flex justify-end gap-3 border-t-2 border-ink/10 pt-4"><Button type="button" variant="outline" onClick={close} disabled={sending}>Cancel</Button><Button type="submit" disabled={sending || !message.trim()}>{sending ? <><Loader2 className="animate-spin" size={16} />Sending…</> : <><CircleAlert size={16} />Escalate to Slack</>}</Button></div></form></Modal></>
+  */
 }
 
 export default function Topbar({ onMenu }) {

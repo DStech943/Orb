@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowUp,
+  BrainCircuit,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -43,9 +44,11 @@ import {
   assistFlow,
   createFlow,
   createFlowTemplate,
+  createSopFromFlow,
   deleteFlow,
   deleteFlowTemplate,
   hasOrbApi,
+  listMessageTemplates,
   listFlowTemplates,
   listFlows,
   updateFlow,
@@ -101,9 +104,9 @@ const types = [
     "Add the customer-facing reply…",
   ],
   [
-    "branch",
-    "Branch",
-    GitBranch,
+    "template",
+    "Template",
+    Copy,
     "bg-purple/10 text-primary",
     "Describe the decision path…",
   ],
@@ -1204,7 +1207,7 @@ function Node({
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => onChange(node.id, { body: event.target.value })}
           className={`mt-2 min-h-0 flex-1 resize-none bg-transparent text-xs leading-5 text-slate-600 outline-none placeholder:text-slate-400 ${expanded ? "overflow-y-auto" : "overflow-hidden"}`}
-          placeholder={item.hint}
+          placeholder={node.type === "template" ? "Choose an approved message template" : item.hint}
         />
       </div>
       <span className="absolute -left-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white bg-slate-300" />
@@ -1637,8 +1640,6 @@ function Builder({
   withOrb = false,
   initialOrbPrompt = "",
   templateMode = null,
-  templateCategories = FLOW_TEMPLATE_CATEGORIES,
-  onTemplateExported,
 }) {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
@@ -1668,9 +1669,8 @@ function Builder({
     [deleting, setDeleting] = useState(false),
     [saving, setSaving] = useState(false),
     [attachedSops, setAttachedSops] = useState([]),
-    [templateExportOpen, setTemplateExportOpen] = useState(false),
-    [templateCategory, setTemplateCategory] = useState(""),
-    [exportingTemplate, setExportingTemplate] = useState(false),
+    [addToBrainOpen, setAddToBrainOpen] = useState(false),
+    [creatingSop, setCreatingSop] = useState(false),
     [expandedNodeIds, setExpandedNodeIds] = useState(() => new Set());
   useEffect(() => {
     if (initialOrbPrompt) setOrbPrompt(initialOrbPrompt);
@@ -1687,6 +1687,23 @@ function Builder({
     flowRevealTimersRef = useRef([]);
   const { data: sopData, loading: sopsLoading } = useAsync(listSops, []);
   const availableSops = Array.isArray(sopData) ? sopData : [];
+  const [messageTemplateBrandName, setMessageTemplateBrandName] = useState(() => activeBrandName());
+  useEffect(() => {
+    const onBrandChange = () => setMessageTemplateBrandName(activeBrandName());
+    window.addEventListener("orb:brand-changed", onBrandChange);
+    return () => window.removeEventListener("orb:brand-changed", onBrandChange);
+  }, []);
+  const messageTemplateLoader = useCallback(
+    () => listMessageTemplates(messageTemplateBrandName),
+    [messageTemplateBrandName],
+  );
+  const { data: messageTemplateData, loading: messageTemplatesLoading } = useAsync(
+    messageTemplateLoader,
+    [messageTemplateLoader],
+  );
+  const messageTemplates = Array.isArray(messageTemplateData?.templates)
+    ? messageTemplateData.templates.filter((item) => String(item.status || "").toUpperCase() === "APPROVED")
+    : [];
   const toggleAttachedSop = (sop) =>
     setAttachedSops((current) =>
       current.some((item) => item.id === sop.id)
@@ -2041,7 +2058,7 @@ function Builder({
         id: nodeId,
         type,
         title: block(type).label,
-        body: "",
+        body: type === "template" ? "Choose an approved template from the selected-card panel." : "",
         outputs: type === "condition" ? ["Yes", "No"] : ["Next"],
         x: Math.max(
           32,
@@ -2585,50 +2602,28 @@ function Builder({
       setSaving(false);
     }
   };
-  useEffect(() => {
-    if (!templateCategory && templateCategories[0])
-      setTemplateCategory(templateCategories[0].code);
-  }, [templateCategories, templateCategory]);
-  const exportAsTemplate = async () => {
-    if (!templateCategory || exportingTemplate) return;
+  const addToAIsBrain = async () => {
+    if (creatingSop) return;
     const disconnected = disconnectedCards();
     if (disconnected.length) {
       showToast(
-        "Connect every card to the Trigger before adding this flow to templates.",
+        "Connect every card to the Trigger before adding this flow to AI’s Brain.",
       );
       return;
     }
-    setExportingTemplate(true);
+    if (!hasOrbApi) {
+      showToast("AI’s Brain requires a connection to the Orb API.");
+      return;
+    }
+    setCreatingSop(true);
     try {
-      const {
-        id: sourceFlowId,
-        templateId,
-        templateVersion,
-        templateCategory: sourceCategory,
-        isTemplate,
-        updatedAt,
-        ...templatePayload
-      } = draft;
-      await createFlowTemplate({
-        categoryCode: templateCategory,
-        payload: {
-          ...templatePayload,
-          status: "published",
-          import_source: {
-            ...(draft.import_source || {}),
-            kind: "flow_template_export",
-            source_flow_id: sourceFlowId || null,
-            exported_at: new Date().toISOString(),
-          },
-        },
-      });
-      setTemplateExportOpen(false);
-      onTemplateExported?.();
-      showToast("Flow added as a published template for this category.");
+      await createSopFromFlow(draft);
+      setAddToBrainOpen(false);
+      showToast("Draft SOP added to AI’s Brain. Review it before publishing.");
     } catch (error) {
-      showToast(error.message || "Could not add this flow to templates.");
+      showToast(error.message || "Could not create an SOP from this flow.");
     } finally {
-      setExportingTemplate(false);
+      setCreatingSop(false);
     }
   };
   const requestLeave = (action) => {
@@ -2853,11 +2848,10 @@ function Builder({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setTemplateExportOpen(true)}
-              disabled={!templateCategories.length}
+              onClick={() => setAddToBrainOpen(true)}
             >
-              <Copy size={15} />
-              Add to templates
+              <BrainCircuit size={15} />
+              Add to AI’s Brain
             </Button>
           )}
           <Button
@@ -2876,39 +2870,23 @@ function Builder({
           </Button>
         </header>
         <Modal
-          open={templateExportOpen}
-          onClose={() => !exportingTemplate && setTemplateExportOpen(false)}
-          title="Add flow to templates"
+          open={addToBrainOpen}
+          onClose={() => !creatingSop && setAddToBrainOpen(false)}
+          title="Add this flow to AI’s Brain?"
         >
           <div className="space-y-5">
             <p className="text-sm leading-6 text-slate-600">
-              This creates a published global template from the current flow.
-              Every brand in the selected category will see it as a starting
-              point.
+              Orb will turn this flow into a structured SOP draft for the
+              selected brand. It stays in Draft until someone reviews and
+              publishes it, and the original flow is kept on the SOP.
             </p>
-            <label className="grid gap-2 text-sm font-bold text-slate-800">
-              Category
-              <select
-                value={templateCategory}
-                onChange={(event) => setTemplateCategory(event.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-primary"
-                disabled={exportingTemplate}
-              >
-                <option value="">Choose category</option>
-                {templateCategories.map((category) => (
-                  <option key={category.code} value={category.code}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setTemplateExportOpen(false)}
-                disabled={exportingTemplate}
+                onClick={() => setAddToBrainOpen(false)}
+                disabled={creatingSop}
               >
                 Cancel
               </Button>
@@ -2916,15 +2894,15 @@ function Builder({
                 type="button"
                 variant="purple"
                 size="sm"
-                onClick={exportAsTemplate}
-                disabled={!templateCategory || exportingTemplate}
+                onClick={addToAIsBrain}
+                disabled={creatingSop}
               >
-                {exportingTemplate ? (
+                {creatingSop ? (
                   <Loader2 size={15} className="animate-spin" />
                 ) : (
-                  <Copy size={15} />
+                  <BrainCircuit size={15} />
                 )}
-                {exportingTemplate ? "Adding…" : "Add template"}
+                {creatingSop ? "Creating SOP…" : "Create draft SOP"}
               </Button>
             </div>
           </div>
@@ -2964,6 +2942,34 @@ function Builder({
                   <p className="mt-2 text-sm font-bold text-slate-800">
                     {selected.title || block(selected.type).label}
                   </p>
+                  {selected.type === "template" && (
+                    <label className="mt-3 grid gap-1.5 text-xs font-bold text-slate-700">
+                      Send template
+                      <span className="font-medium text-slate-500">{messageTemplatesLoading ? "Loading approved templates…" : `${messageTemplates.length} approved template${messageTemplates.length === 1 ? "" : "s"} for ${messageTemplateBrandName || "this brand"}`}</span>
+                      <select
+                        value={selected.template_id || ""}
+                        disabled={messageTemplatesLoading}
+                        onChange={(event) => {
+                          const template = messageTemplates.find((item) => item.id === event.target.value);
+                          update(selected.id, template ? {
+                            template_id: template.id,
+                            template_name: template.name,
+                            template_language: template.language,
+                            title: `Send: ${template.name}`,
+                            body: template.content,
+                          } : {
+                            template_id: "", template_name: "", template_language: "",
+                            title: "Template", body: "Choose an approved template for this brand.",
+                          });
+                        }}
+                        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium outline-none focus:border-primary disabled:cursor-not-allowed"
+                      >
+                        <option value="">{messageTemplatesLoading ? "Loading templates…" : "Choose an approved template"}</option>
+                        {messageTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} ({template.language || "en"})</option>)}
+                      </select>
+                      {!messageTemplatesLoading && !messageTemplates.length && <span className="font-medium leading-4 text-slate-500">No approved templates are available for {messageTemplateBrandName || "this brand"}. Sync them from the Templates page first.</span>}
+                    </label>
+                  )}
                   <div className="mt-3 grid gap-2">
                     <button
                       type="button"
@@ -3884,7 +3890,6 @@ export default function FlowsSupabase() {
             setTemplateEditor(null);
             reload();
           }}
-          onTemplateExported={() => setTemplateVersion((value) => value + 1)}
         />
       ) : (
         <div>
