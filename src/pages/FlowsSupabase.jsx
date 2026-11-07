@@ -142,7 +142,12 @@ function OrbMark({ className = "", backgroundColor = "#ffffff", size = 0.85 }) {
     </span>
   );
 }
-const CARD = { width: 224, height: 176, expandedMinHeight: 264 };
+const CARD = {
+  width: 224,
+  height: 176,
+  expandedMinHeight: 264,
+  expandedMaxWidth: 312,
+};
 const NODE_CLEARANCE = 36;
 const ORB_PROMPT_EXAMPLES = [
   "Create a product availability flow",
@@ -150,13 +155,28 @@ const ORB_PROMPT_EXAMPLES = [
   "Build a return and exchange flow",
 ];
 let visibleNodeGeometry = new Map();
-const expandedCardHeight = (node) => {
+const expandedCardWidth = (node) => {
+  const titleLength = Math.max(
+    0,
+    ...String(node.title || "").split("\n").map((line) => line.length),
+  );
+  return Math.min(
+    CARD.expandedMaxWidth,
+    Math.max(CARD.width, Math.ceil(46 + titleLength * 6.6)),
+  );
+};
+const cardWidthFor = (node, expandedNodeIds) =>
+  expandedNodeIds?.has(node.id) ? expandedCardWidth(node) : CARD.width;
+const expandedCardHeight = (node, expandedNodeIds) => {
+  const width = cardWidthFor(node, expandedNodeIds);
+  const titleCharacters = Math.max(28, Math.floor((width - 30) / 7));
+  const bodyCharacters = Math.max(31, Math.floor((width - 30) / 6.5));
   const titleLines = String(node.title || "").split("\n").reduce(
-    (total, line) => total + Math.max(1, Math.ceil(line.length / 28)),
+    (total, line) => total + Math.max(1, Math.ceil(line.length / titleCharacters)),
     0,
   );
   const bodyLines = String(node.body || "").split("\n").reduce(
-    (total, line) => total + Math.max(1, Math.ceil(line.length / 31)),
+    (total, line) => total + Math.max(1, Math.ceil(line.length / bodyCharacters)),
     0,
   );
   const tools = Array.isArray(node.tools) && node.tools.length ? 26 : 0;
@@ -166,7 +186,9 @@ const expandedCardHeight = (node) => {
   );
 };
 const cardHeightFor = (node, expandedNodeIds) =>
-  expandedNodeIds?.has(node.id) ? expandedCardHeight(node) : CARD.height;
+  expandedNodeIds?.has(node.id)
+    ? expandedCardHeight(node, expandedNodeIds)
+    : CARD.height;
 // Cards share a visual column when their horizontal ranges intersect. Keep a
 // little clear air between them so an expanded card never covers a neighbour.
 // This is intentionally derived at render time: expanding a card does not
@@ -182,13 +204,14 @@ const resolveNodeCollisions = (nodes, expandedNodeIds) => {
     )
     .forEach((node) => {
       const left = Number(node.x || 0);
+      const width = cardWidthFor(node, expandedNodeIds);
       const height = cardHeightFor(node, expandedNodeIds);
       let top = Number(node.y || 0);
       while (true) {
         const overlaps = placed.filter(
           (item) =>
-            left < item.left + CARD.width &&
-            left + CARD.width > item.left &&
+            left < item.left + item.width &&
+            left + width > item.left &&
             top < item.top + item.height + NODE_CLEARANCE &&
             top + height + NODE_CLEARANCE > item.top,
         );
@@ -197,7 +220,7 @@ const resolveNodeCollisions = (nodes, expandedNodeIds) => {
           ...overlaps.map((item) => item.top + item.height + NODE_CLEARANCE),
         );
       }
-      const item = { id: node.id, left, top, height };
+      const item = { id: node.id, left, top, width, height };
       placed.push(item);
       resolved.set(node.id, { ...node, x: left, y: top });
     });
@@ -209,6 +232,7 @@ function geometryFor(nodes, edges = [], expandedNodeIds = new Set()) {
     nodes.map((node) => {
       const ports = outputs(node);
       const top = Number(node.y || 0);
+      const width = cardWidthFor(node, expandedNodeIds);
       const height = cardHeightFor(node, expandedNodeIds);
       const centre = top + height / 2;
       const left = Number(node.x || 0);
@@ -238,7 +262,7 @@ function geometryFor(nodes, edges = [], expandedNodeIds = new Set()) {
       const anchors = ordered.map((item, index) => [
         item.port,
         {
-          x: left + CARD.width,
+          x: left + width,
           y: top + ((index + 1) / (ports.length + 1)) * height,
         },
       ]);
@@ -247,6 +271,7 @@ function geometryFor(nodes, edges = [], expandedNodeIds = new Set()) {
         {
           left,
           top,
+          width,
           height,
           inputY: centre,
           output: new Map(anchors),
@@ -1083,9 +1108,17 @@ function Node({
     geometry = visibleNodeGeometry.get(node.id) || {
       left: node.x,
       top: node.y,
+      width: CARD.width,
       height: CARD.height,
       output: new Map(),
     };
+  const titleRows = expanded
+    ? String(node.title || "").split("\n").reduce(
+        (total, line) =>
+          total + Math.max(1, Math.ceil(line.length / Math.max(28, Math.floor((geometry.width - 30) / 7)))),
+        0,
+      )
+    : 1;
   const removeConnector = (event, port) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1103,9 +1136,10 @@ function Node({
       style={{
         left: geometry.left,
         top: geometry.top,
+        width: geometry.width,
         height: geometry.height,
       }}
-      className={`absolute z-10 flex w-56 flex-col overflow-visible rounded-lg border bg-white shadow-sm transition-[top,height,box-shadow,border-color] duration-200 ease-out ${connectionTarget ? "border-primary ring-4 ring-primary/20 shadow-lg" : selected ? "border-primary ring-2 ring-primary/15" : "border-slate-200"} ${connecting ? "cursor-crosshair" : ""}`}
+      className={`absolute z-10 flex flex-col overflow-visible rounded-lg border bg-white shadow-sm transition-[top,width,height,box-shadow,border-color] duration-200 ease-out ${connectionTarget ? "border-primary ring-4 ring-primary/20 shadow-lg" : selected ? "border-primary ring-2 ring-primary/15" : "border-slate-200"} ${connecting ? "cursor-crosshair" : ""}`}
     >
       <header
         onPointerDown={(event) => onDrag(event, node.id)}
@@ -1155,12 +1189,13 @@ function Node({
               </span>
             </div>
           )}
-        <input
+        <textarea
           value={node.title || ""}
           aria-label={`${item.label} title`}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => onChange(node.id, { title: event.target.value })}
-          className="bg-transparent text-xs font-extrabold text-slate-800 outline-none placeholder:text-slate-400"
+          rows={titleRows}
+          className={`w-full resize-none bg-transparent text-xs font-extrabold leading-5 text-slate-800 outline-none placeholder:text-slate-400 ${expanded ? "overflow-y-auto" : "overflow-hidden"}`}
           placeholder="Name this step"
         />
         <textarea
@@ -1175,7 +1210,7 @@ function Node({
       <span className="absolute -left-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white bg-slate-300" />
       {nodeOutputs.map((name, index) => {
         const output = geometry.output.get(name) || {
-          x: geometry.left + 225,
+          x: geometry.left + geometry.width,
           y:
             geometry.top +
             ((index + 1) / (nodeOutputs.length + 1)) * CARD.height,
@@ -1278,7 +1313,7 @@ function Edges({ nodes, edges, stage, geometry, connecting, hoveredTargetId }) {
         if (!from || !to || !fromGeometry || !toGeometry) return null;
         const port = edge.sourcePort || outputs(from)[0];
         const output = fromGeometry.output.get(port) || {
-          x: fromGeometry.left + CARD.width,
+          x: fromGeometry.left + fromGeometry.width,
           y: fromGeometry.inputY,
         };
         const startX = output.x,
@@ -1336,7 +1371,7 @@ function Edges({ nodes, edges, stage, geometry, connecting, hoveredTargetId }) {
           if (!from || !to || !fromGeometry || !toGeometry || from.id === to.id)
             return null;
           const output = fromGeometry.output.get(connecting.port) || {
-            x: fromGeometry.left + CARD.width,
+            x: fromGeometry.left + fromGeometry.width,
             y: fromGeometry.inputY,
           };
           const endX = toGeometry.left;
@@ -1659,6 +1694,11 @@ function Builder({
         : [sop],
     );
   const selected = draft.nodes.find((node) => node.id === selectedId);
+  const flowFitKey =
+    templateMode?.id ||
+    flow.templateId ||
+    flow.id ||
+    `${flow.title}:${flow.updatedAt}:${flow.nodes.map((node) => node.id).join("|")}`;
   useEffect(() => {
     if (!from) setConnectTargetHover(null);
   }, [from]);
@@ -1674,7 +1714,10 @@ function Builder({
     () => ({
       width: Math.max(
         STAGE.width,
-        ...draft.nodes.map((node) => Number(node.x || 0) + CARD.width + 420),
+        ...draft.nodes.map((node) => {
+          const geometry = editorGeometry.get(node.id);
+          return Number(node.x || 0) + (geometry?.width || CARD.width) + 420;
+        }),
       ),
       height: Math.max(
         STAGE.height,
@@ -1771,7 +1814,7 @@ function Builder({
       if (
         !viewport ||
         !layout.nodes.length ||
-        fittedFlowRef.current === flow.id
+        fittedFlowRef.current === flowFitKey
       )
         return;
       const right =
@@ -1784,10 +1827,12 @@ function Builder({
         (viewport.clientHeight - 48) / bottom,
       );
       setZoom(zoomLimit(fit));
-      fittedFlowRef.current = flow.id;
+      viewport.scrollLeft = 0;
+      viewport.scrollTop = 0;
+      fittedFlowRef.current = flowFitKey;
     });
     return () => cancelAnimationFrame(frame);
-  }, [flow]);
+  }, [flow, flowFitKey]);
   const update = (nodeId, patch) =>
     setDraft((current) => ({
       ...current,
@@ -2143,11 +2188,12 @@ function Builder({
         const geometry = editorGeometry.get(node.id) || {
           left: node.x,
           top: node.y,
+          width: CARD.width,
           height: CARD.height,
         };
         return (
           geometry.left < right &&
-          geometry.left + CARD.width > left &&
+          geometry.left + geometry.width > left &&
           geometry.top < bottom &&
           geometry.top + geometry.height > top
         );
@@ -3088,10 +3134,10 @@ function Builder({
               onClick={toggleAllNodesExpanded}
               disabled={!draft.nodes.length}
               className="absolute right-4 top-16 z-30 inline-flex items-center gap-2 rounded-md border border-primary/25 bg-white px-3.5 py-2.5 text-xs font-extrabold text-primary shadow-sm transition hover:bg-primary-tint disabled:cursor-not-allowed disabled:opacity-45"
-              title={allNodesExpanded ? "Collapse all cards" : "Expand all cards"}
+              title={allNodesExpanded ? "Shrink all cards" : "Expand all cards"}
             >
               {allNodesExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-              {allNodesExpanded ? "Collapse all" : "Expand all"}
+              {allNodesExpanded ? "Shrink all" : "Expand all"}
             </button>
             <div
               ref={zoomControlsRef}

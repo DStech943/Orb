@@ -44,7 +44,7 @@ const actionLabels = {
   open_create_with_orb: 'Create with Orb',
   focus_operational_update: 'new operational update',
 }
-const followPreviousDestination = (value) => /^(?:please\s+)?(?:take me there|take me to it|open (?:that|it)|go (?:there|to it)|show me(?: that)?|yes(?:\s+please)?)\s*[.!?]*$/i.test(String(value || '').trim())
+const followPreviousDestination = (value) => /^(?:(?:please|can|could|would)\s+(?:you\s+)?)?(?:take me there|take me to it|open (?:that|it)|go (?:there|to it)|show me(?: that)?|yes(?:\s+please)?)\s*[.!?]*$/i.test(String(value || '').trim())
 const flowBriefFromRequest = (value) => {
   const request = String(value || '')
     .replace(/\b(?:okay|ok|please|can you|could you|would you)\b/gi, ' ')
@@ -60,20 +60,26 @@ const directGuideCommand = (value) => {
   const text = normalizeSpeech(value)
   const asksToCreateFlow = /\b(?:create|build|make|start|new)\b.*\bflow\b/.test(text) || /\bcreate with orb\b/.test(text)
   const asksToWriteUpdate = /\b(?:write|record|add|new)\b.*\b(?:update|operation)\b/.test(text)
-  if (!isNavigationCommand(value) && !asksToCreateFlow && !asksToWriteUpdate) return null
+  const asksWhereToFindIt = /\b(?:where|which\s+page|find|location|located)\b/.test(text)
+  if (!isNavigationCommand(value) && !asksToCreateFlow && !asksToWriteUpdate && !asksWhereToFindIt) return null
   if (asksToCreateFlow) return { action: 'open_create_with_orb', answer: 'I prepared a flow brief and added it to Create with Orb. You can refine it before generating.', flowPrompt: flowBriefFromRequest(value) }
   if (asksToWriteUpdate) return { action: 'focus_operational_update', answer: 'Opening Operations and focusing a new update.' }
-  if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: 'Opening the agent test chat.' }
-  if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: 'Opening FAQs.' }
-  if (/\b(?:sop|sops)\b/.test(text)) return { action: 'open_sops', answer: 'Opening SOPs.' }
-  if (/\b(?:brain|knowledge|knowledge base)\b/.test(text)) return { destination: '/app/brain', answer: "Opening AI's Brain." }
-  if (/\boperations?\b/.test(text)) return { destination: '/app/operations', answer: 'Opening Operations.' }
-  if (/\b(?:brand workspace|workspace|brand voice)\b/.test(text)) return { destination: '/app/workspace', answer: 'Opening Brand Workspace.' }
-  if (/\bflow/.test(text)) return { destination: '/app/flows', answer: 'Opening Flows.' }
-  if (/\bproduct/.test(text)) return { destination: '/app/products', answer: 'Opening Products.' }
-  if (/\b(?:overview|dashboard|home)\b/.test(text)) return { destination: '/app', answer: 'Opening Overview.' }
-  if (/\b(?:setting|settings)\b/.test(text)) return { destination: '/app/settings', answer: 'Opening Settings.' }
-  if (/\btool/.test(text)) return { destination: '/app/tools', answer: 'Opening Tools.' }
+  const pageResponse = (destination, label, whereAnswer) => ({
+    destination,
+    answer: asksWhereToFindIt ? whereAnswer : `Opening ${label}.`,
+    autoNavigate: !asksWhereToFindIt,
+  })
+  if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: asksWhereToFindIt ? 'The agent test chat is in Brand Workspace.' : 'Opening the agent test chat.', autoNavigate: !asksWhereToFindIt }
+  if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: asksWhereToFindIt ? "FAQs are in AI's Brain." : 'Opening FAQs.', autoNavigate: !asksWhereToFindIt }
+  if (/\b(?:sop|sops)\b/.test(text)) return { action: 'open_sops', answer: asksWhereToFindIt ? "SOPs are in AI's Brain." : 'Opening SOPs.', autoNavigate: !asksWhereToFindIt }
+  if (/\b(?:brain|knowledge|knowledge base)\b/.test(text)) return pageResponse('/app/brain', "AI's Brain", "AI's Brain is in the left sidebar.")
+  if (/\boperations?\b/.test(text)) return pageResponse('/app/operations', 'Operations', 'Operations is in the left sidebar, below Brand Workspace.')
+  if (/\b(?:brand workspace|workspace|brand voice)\b/.test(text)) return pageResponse('/app/workspace', 'Brand Workspace', 'Brand Workspace is in the left sidebar.')
+  if (/\bflow/.test(text)) return pageResponse('/app/flows', 'Flows', 'Flows is in the left sidebar.')
+  if (/\bproduct/.test(text)) return pageResponse('/app/products', 'Products', 'Products is in the left sidebar.')
+  if (/\b(?:overview|dashboard|home)\b/.test(text)) return pageResponse('/app', 'Overview', 'Overview is the first item in the left sidebar.')
+  if (/\b(?:setting|settings)\b/.test(text)) return pageResponse('/app/settings', 'Settings', 'Settings is at the bottom of the left sidebar.')
+  if (/\btool/.test(text)) return pageResponse('/app/tools', 'Tools', 'Tools is in the left sidebar.')
   return null
 }
 
@@ -389,9 +395,11 @@ export default function OrbGuide() {
         : destination
       if (destination) lastDestinationRef.current = { destination: resolvedDestination, destinationLabel }
       setMessages((items) => [...items, { id: makeId(), role: 'orb', text: directCommand.answer, destination: resolvedDestination, destinationLabel }])
-      window.setTimeout(() => {
-        navigate(resolvedDestination)
-      }, 420)
+      if (directCommand.autoNavigate !== false) {
+        window.setTimeout(() => {
+          navigate(resolvedDestination)
+        }, 280)
+      }
       return
     }
     setThinking(true)
