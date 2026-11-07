@@ -89,9 +89,12 @@ export default function Operations() {
   useEffect(() => () => dictationRef.current?.stop(), []);
   useEffect(() => {
     if (searchParams.get("compose") !== "1") return;
+    const suppliedMessage = searchParams.get("message");
+    if (suppliedMessage) setMessage(suppliedMessage);
     const frame = window.requestAnimationFrame(() => composerRef.current?.focus());
     const next = new URLSearchParams(searchParams);
     next.delete("compose");
+    next.delete("message");
     setSearchParams(next, { replace: true });
     return () => window.cancelAnimationFrame(frame);
   }, [searchParams, setSearchParams]);

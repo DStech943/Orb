@@ -68,6 +68,7 @@ const faqDraftFromRequest = (value) => {
 }
 const assistantWorkFromRequest = (value) => {
   const text = String(value || '').trim()
+  if (isNavigationCommand(text) && /\boperations?\b/i.test(text) && /\bdraft\b/i.test(text)) return { type: 'draft_operation' }
   if (/\b(?:add|create|make)\s+(?:an?\s+)?faq\b/i.test(text)) return { type: 'faq' }
   if (/\b(?:out of stock|back in stock|pre[ -]?order|restock|expected to be back)\b/i.test(text)) return { type: 'product' }
   if (/\b(?:delayed|delay|sale|promotion|ganesh|operational note|operations?)\b/i.test(text)) return { type: 'operation' }
@@ -403,6 +404,16 @@ export default function OrbGuide() {
       }
       setThinking(true)
       try {
+        if (requestedWork.type === 'draft_operation') {
+          const message = text
+            .replace(/^.*?\b(?:draft|write)\s+(?:an?\s+)?(?:operation(?:al)?\s+)?message\s*(?:that|saying|for)?\s*/i, '')
+            .trim()
+          const destination = `/app/operations?compose=1&message=${encodeURIComponent(message || text)}`
+          lastDestinationRef.current = { destination, destinationLabel: 'Operations' }
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Operations with your draft ready to review and send.', destination, destinationLabel: 'Operations' }])
+          window.setTimeout(() => navigate(destination), 280)
+          return
+        }
         if (requestedWork.type === 'faq') {
           const faq = faqDraftFromRequest(text)
           await createAssistantFaq(faq, brandName)
