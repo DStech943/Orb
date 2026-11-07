@@ -1,18 +1,41 @@
-import React from 'react'
-import { BookOpenCheck, CircleHelp } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { BookOpenCheck, CircleHelp, MessageSquareText } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import Faqs from './Faqs'
 import Sops from './Sops'
+import AgentChat from './AgentChat'
+import { listBrands } from '../services/brands'
 
-const sections = [
+const baseSections = [
   { id: 'sops', label: 'SOPs', description: 'Operational guidance for your support team.', Icon: BookOpenCheck },
   { id: 'faqs', label: 'FAQs', description: 'Customer-facing answers your agent can use.', Icon: CircleHelp },
 ]
 
 export default function AIsBrain() {
   const [search, setSearch] = useSearchParams()
-  const active = search.get('tab') === 'faqs' ? 'faqs' : 'sops'
-  const ActivePage = active === 'faqs' ? Faqs : Sops
+  const [agentName, setAgentName] = useState('AI')
+  const active = ['sops', 'faqs', 'chat'].includes(search.get('tab')) ? search.get('tab') : 'sops'
+  useEffect(() => {
+    let live = true
+    const loadAgentName = async () => {
+      const brands = await listBrands()
+      if (!live) return
+      const selectedId = window.localStorage.getItem('orb_selected_brand') || ''
+      const brand = brands.find((item) => item.id === selectedId) || brands[0]
+      setAgentName(String(brand?.ai_agent_name || 'AI').trim() || 'AI')
+    }
+    const onBrandChange = () => loadAgentName()
+    loadAgentName()
+    window.addEventListener('orb:brand-changed', onBrandChange)
+    return () => {
+      live = false
+      window.removeEventListener('orb:brand-changed', onBrandChange)
+    }
+  }, [])
+  const sections = [
+    ...baseSections,
+    { id: 'chat', label: `Chat with ${agentName}`, description: `Test ${agentName}'s responses against this brand's approved knowledge.`, Icon: MessageSquareText },
+  ]
 
   return <div className="page-enter mx-auto max-w-6xl">
     <header className="mb-6">
@@ -29,6 +52,8 @@ export default function AIsBrain() {
         </button>
       })}
     </nav>
-    <ActivePage />
+    {active === 'sops' && <Sops />}
+    {active === 'faqs' && <Faqs />}
+    {active === 'chat' && <AgentChat embedded />}
   </div>
 }
