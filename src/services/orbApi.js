@@ -29,32 +29,65 @@ const invalidateFlowTemplateCache = () => {
   flowTemplateCache.clear();
 };
 
+// Keep an in-memory, per-signed-in-user cache for the views people revisit
+// during one workspace session. This avoids repeat Railway/Qdrant round trips
+// when moving between Overview, AI's Brain, Products, Flows, and Operations.
+// It intentionally does not use localStorage: cached knowledge is discarded
+// on a refresh, sign-out, or new browser session.
+const apiReadCache = new Map();
+const apiReadRequests = new Map();
+let apiReadCacheEpoch = 0;
+const clearApiReadCache = () => {
+  apiReadCacheEpoch += 1;
+  apiReadCache.clear();
+  apiReadRequests.clear();
+};
+
 const request = async (path, options = {}) => {
   if (!hasOrbApi) return null;
+  const { cacheTtl = 0, invalidateCache = true, ...fetchOptions } = options;
   const { data } = await supabase?.auth.getSession();
   const token = data?.session?.access_token;
   if (!token && !localBrowser && !mockAuth)
     throw new Error("Sign in again to access brand knowledge.");
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  if (!response.ok)
-    throw new Error(
-      (await response.json().catch(() => null))?.detail ||
-        "Orb API request failed.",
-    );
-  if (response.status === 204) return null;
-  if (!response.headers.get("content-type")?.includes("application/json")) {
-    throw new Error(
-      "Orb API returned a non-JSON response. Set VITE_ORB_API_URL to the public Railway orb-api domain and redeploy the frontend.",
-    );
-  }
-  return response.json();
+  const method = String(fetchOptions.method || "GET").toUpperCase();
+  const requestEpoch = apiReadCacheEpoch;
+  const cacheKey = `${data?.session?.user?.id || "anonymous"}:${path}`;
+  const cached = method === "GET" && cacheTtl ? apiReadCache.get(cacheKey) : null;
+  if (cached && Date.now() - cached.savedAt < cacheTtl) return cached.data;
+  if (method === "GET" && cacheTtl && apiReadRequests.has(cacheKey))
+    return apiReadRequests.get(cacheKey);
+
+  const run = async () => {
+    const response = await fetch(`${baseUrl}${path}`, {
+      ...fetchOptions,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        "Content-Type": "application/json",
+        ...(fetchOptions.headers || {}),
+      },
+    });
+    if (!response.ok)
+      throw new Error(
+        (await response.json().catch(() => null))?.detail ||
+          "Orb API request failed.",
+      );
+    if (response.status === 204) return null;
+    if (!response.headers.get("content-type")?.includes("application/json")) {
+      throw new Error(
+        "Orb API returned a non-JSON response. Set VITE_ORB_API_URL to the public Railway orb-api domain and redeploy the frontend.",
+      );
+    }
+    const payload = await response.json();
+    if (method === "GET" && cacheTtl && requestEpoch === apiReadCacheEpoch)
+      apiReadCache.set(cacheKey, { savedAt: Date.now(), data: payload });
+    if (method !== "GET" && invalidateCache) clearApiReadCache();
+    return payload;
+  };
+  if (method !== "GET" || !cacheTtl) return run();
+  const pending = run().finally(() => apiReadRequests.delete(cacheKey));
+  apiReadRequests.set(cacheKey, pending);
+  return pending;
 };
 
 // The deployed support-agent API is intentionally separate from Orb's admin
@@ -94,8 +127,8 @@ const agentRequest = async (path, options = {}) => {
 
 export const activeBrandName = () =>
   window.localStorage.getItem("orb_selected_brand_name") || "";
-export const listRemoteBrands = () => request("/api/brands");
-export const listBrandCategories = () => request("/api/categories");
+export const listRemoteBrands = () => request("/api/brands", { cacheTtl: 60_000 });
+export const listBrandCategories = () => request("/api/categories", { cacheTtl: 300_000 });
 export const setRemoteBrandCategory = (brandId, industryCategory) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/category`, {
     method: "PATCH",
@@ -107,11 +140,12 @@ export const setRemoteBrandProfile = (brandId, profile) =>
     body: JSON.stringify(profile),
   });
 export const askOrbGuide = (payload) =>
-  request("/api/orb-guide", { method: "POST", body: JSON.stringify(payload) });
+  request("/api/orb-guide", { method: "POST", body: JSON.stringify(payload), invalidateCache: false });
 export const chatWithDeployedAgent = (brandId, payload) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/agent/chat`, {
     method: "POST",
     body: JSON.stringify(payload),
+    invalidateCache: false,
   });
 export const hasBrandAgentApi = Boolean(agentBaseUrl);
 export const chatWithBrandAgent = async (brandId, payload) => {
@@ -139,7 +173,7 @@ export const syncBrandAgentSettings = (brandId, payload) =>
     body: JSON.stringify(payload),
   });
 export const getBrandVoice = (brandId) =>
-  request(`/api/brands/${encodeURIComponent(brandId)}/voice`);
+  request(`/api/brands/${encodeURIComponent(brandId)}/voice`, { cacheTtl: 30_000 });
 export const importBrandVoiceSource = (brandId, source) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/voice/sources`, {
     method: "POST",
@@ -172,6 +206,7 @@ export const listKnowledge = (
   brandName
     ? request(
         `/api/knowledge/${kind}?brand_name=${encodeURIComponent(brandName)}&limit=${Math.min(500, Math.max(1, Number(limit) || 500))}`,
+        { cacheTtl: 45_000 },
       )
     : Promise.resolve(null);
 export const updateKnowledge = (
@@ -196,11 +231,11 @@ export const deleteKnowledge = (kind, id, brandName = activeBrandName()) =>
   );
 export const listFlows = (brandName = activeBrandName()) =>
   brandName
-    ? request(`/api/flows?brand_name=${encodeURIComponent(brandName)}`)
+    ? request(`/api/flows?brand_name=${encodeURIComponent(brandName)}`, { cacheTtl: 45_000 })
     : Promise.resolve(null);
 export const listOperationalUpdates = (brandName = activeBrandName()) =>
   brandName
-    ? request(`/api/operations?brand_name=${encodeURIComponent(brandName)}`)
+    ? request(`/api/operations?brand_name=${encodeURIComponent(brandName)}`, { cacheTtl: 30_000 })
     : Promise.resolve({ updates: [] });
 export const createOperationalUpdate = (message, brandName = activeBrandName()) =>
   request("/api/operations", {
