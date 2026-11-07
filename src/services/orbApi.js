@@ -127,6 +127,34 @@ const agentRequest = async (path, options = {}) => {
 
 export const activeBrandName = () =>
   window.localStorage.getItem("orb_selected_brand_name") || "";
+
+// Multipart is deliberately kept out of `request`: setting application/json
+// there would corrupt the browser-generated FormData boundary. The Slack bot
+// token remains server-side; this only carries the signed-in user's session.
+export const sendSlackEscalation = async (
+  { message, files = [] },
+  brandName = activeBrandName(),
+) => {
+  if (!hasOrbApi) throw new Error("Orb API is unavailable.");
+  const { data } = await supabase?.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token && !localBrowser && !mockAuth)
+    throw new Error("Sign in again to send an escalation.");
+  const body = new FormData();
+  body.append("brand_name", brandName);
+  body.append("message", message.trim());
+  files.forEach((file) => body.append("files", file));
+  const response = await fetch(`${baseUrl}/api/escalations/slack`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.detail || "Could not send the Slack escalation.");
+  }
+  return response.json();
+};
 export const listRemoteBrands = () => request("/api/brands", { cacheTtl: 60_000 });
 export const listBrandCategories = () => request("/api/categories", { cacheTtl: 300_000 });
 export const setRemoteBrandCategory = (brandId, industryCategory) =>

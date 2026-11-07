@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # changing it makes previously stored tokens unreadable.
     shopify_credentials_encryption_key: str | None = Field(None, alias="SHOPIFY_CREDENTIALS_ENCRYPTION_KEY")
     shopify_admin_api_version: str = Field("2025-10", alias="SHOPIFY_ADMIN_API_VERSION")
+    # Slack escalation is server-only. The browser sends an authenticated
+    # request to Orb, while this token remains in Railway's environment.
+    slack_bot_token: str | None = Field(None, alias="SLACK_BOT_TOKEN")
+    slack_channel_id: str | None = Field(None, alias="SLACK_CHANNEL_ID")
+    slack_max_file_bytes: int = Field(10_000_000, alias="SLACK_MAX_FILE_BYTES", ge=1)
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
