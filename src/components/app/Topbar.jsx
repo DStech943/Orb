@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext'
 import { activeBrandName, sendSlackEscalation } from '../../services/orbApi'
 import { useToast } from '../../context/ToastContext'
 
-const titles = { '/app': 'Overview', '/app/workspace': 'Brand workspace', '/app/operations': 'Operations', '/app/brain': "AI's Brain", '/app/sops': "AI's Brain", '/app/flows': 'Flows', '/app/faqs': "AI's Brain", '/app/products': 'Products', '/app/tools': 'Tools', '/app/settings': 'Settings' }
+const titles = { '/app': 'Overview', '/app/workspace': 'Brand workspace', '/app/operations': 'Operations', '/app/brain': "AI's Brain", '/app/sops': "AI's Brain", '/app/flows': 'Flows', '/app/faqs': "AI's Brain", '/app/templates': 'Templates', '/app/products': 'Products', '/app/tools': 'Tools', '/app/settings': 'Settings' }
 
 function SlackEscalation() {
   const { showToast } = useToast()

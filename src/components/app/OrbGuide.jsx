@@ -14,6 +14,7 @@ const pages = {
   '/app/brain': { title: "AI's Brain", summary: 'Review and manage the SOPs and FAQs that give your agent dependable brand knowledge.' },
   '/app/sops': { title: "AI's Brain", summary: 'Use this page to review and manage support operating procedures.' },
   '/app/flows': { title: 'Flows', summary: 'Use this page to build visual support flows or have Orb draft one from a prompt.' },
+  '/app/templates': { title: 'Templates', summary: 'Review approved brand message templates and sync new ones from Zoko.' },
   '/app/faqs': { title: "AI's Brain", summary: 'Use this page to review and manage customer-facing questions and answers.' },
   '/app/products': { title: 'Products', summary: 'Use this page to review product knowledge for the support experience.' },
   '/app/tools': { title: 'Tools', summary: 'Use this page to inspect systems, tools, and prerequisites for support work.' },
@@ -94,6 +95,7 @@ const directGuideCommand = (value) => {
   if (/\boperations?\b/.test(text)) return pageResponse('/app/operations', 'Operations', 'Operations is in the left sidebar, below Brand Workspace.')
   if (/\b(?:brand workspace|workspace|brand voice)\b/.test(text)) return pageResponse('/app/workspace', 'Brand Workspace', 'Brand Workspace is in the left sidebar.')
   if (/\bflow/.test(text)) return pageResponse('/app/flows', 'Flows', 'Flows is in the left sidebar.')
+  if (/\b(?:message )?templates?\b/.test(text)) return pageResponse('/app/templates', 'Templates', 'Templates is in the left sidebar, below Flows.')
   if (/\bproduct/.test(text)) return pageResponse('/app/products', 'Products', 'Products is in the left sidebar.')
   if (/\b(?:overview|dashboard|home)\b/.test(text)) return pageResponse('/app', 'Overview', 'Overview is the first item in the left sidebar.')
   if (/\b(?:setting|settings)\b/.test(text)) return pageResponse('/app/settings', 'Settings', 'Settings is at the bottom of the left sidebar.')

@@ -284,6 +284,15 @@ export const createOperationalUpdate = (message, brandName = activeBrandName()) 
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, message }),
   });
+export const listMessageTemplates = (brandName = activeBrandName()) =>
+  brandName
+    ? request(`/api/templates?brand_name=${encodeURIComponent(brandName)}`, { cacheTtl: 30_000 })
+    : Promise.resolve({ templates: [] });
+export const syncZokoTemplates = (brandName = activeBrandName(), action = "sync") =>
+  request("/api/templates/sync", {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, action }),
+  });
 export const listFlowTemplates = (options = {}) => {
   const { categoryCode, includeAll = false } = options;
   const key = flowTemplateCacheKey(options);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -46,6 +46,7 @@ import {
   deleteFlow,
   deleteFlowTemplate,
   hasOrbApi,
+  listMessageTemplates,
   listFlowTemplates,
   listFlows,
   updateFlow,
@@ -101,9 +102,9 @@ const types = [
     "Add the customer-facing reply…",
   ],
   [
-    "branch",
-    "Branch",
-    GitBranch,
+    "template",
+    "Template",
+    Copy,
     "bg-purple/10 text-primary",
     "Describe the decision path…",
   ],
@@ -1204,7 +1205,7 @@ function Node({
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => onChange(node.id, { body: event.target.value })}
           className={`mt-2 min-h-0 flex-1 resize-none bg-transparent text-xs leading-5 text-slate-600 outline-none placeholder:text-slate-400 ${expanded ? "overflow-y-auto" : "overflow-hidden"}`}
-          placeholder={item.hint}
+          placeholder={node.type === "template" ? "Choose an approved message template" : item.hint}
         />
       </div>
       <span className="absolute -left-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white bg-slate-300" />
@@ -1687,6 +1688,23 @@ function Builder({
     flowRevealTimersRef = useRef([]);
   const { data: sopData, loading: sopsLoading } = useAsync(listSops, []);
   const availableSops = Array.isArray(sopData) ? sopData : [];
+  const [messageTemplateBrandName, setMessageTemplateBrandName] = useState(() => activeBrandName());
+  useEffect(() => {
+    const onBrandChange = () => setMessageTemplateBrandName(activeBrandName());
+    window.addEventListener("orb:brand-changed", onBrandChange);
+    return () => window.removeEventListener("orb:brand-changed", onBrandChange);
+  }, []);
+  const messageTemplateLoader = useCallback(
+    () => listMessageTemplates(messageTemplateBrandName),
+    [messageTemplateBrandName],
+  );
+  const { data: messageTemplateData, loading: messageTemplatesLoading } = useAsync(
+    messageTemplateLoader,
+    [messageTemplateLoader],
+  );
+  const messageTemplates = Array.isArray(messageTemplateData?.templates)
+    ? messageTemplateData.templates.filter((item) => String(item.status || "").toUpperCase() === "APPROVED")
+    : [];
   const toggleAttachedSop = (sop) =>
     setAttachedSops((current) =>
       current.some((item) => item.id === sop.id)
@@ -2041,7 +2059,7 @@ function Builder({
         id: nodeId,
         type,
         title: block(type).label,
-        body: "",
+        body: type === "template" ? "Choose an approved template from the selected-card panel." : "",
         outputs: type === "condition" ? ["Yes", "No"] : ["Next"],
         x: Math.max(
           32,
@@ -2964,6 +2982,34 @@ function Builder({
                   <p className="mt-2 text-sm font-bold text-slate-800">
                     {selected.title || block(selected.type).label}
                   </p>
+                  {selected.type === "template" && (
+                    <label className="mt-3 grid gap-1.5 text-xs font-bold text-slate-700">
+                      Send template
+                      <span className="font-medium text-slate-500">{messageTemplatesLoading ? "Loading approved templates…" : `${messageTemplates.length} approved template${messageTemplates.length === 1 ? "" : "s"} for ${messageTemplateBrandName || "this brand"}`}</span>
+                      <select
+                        value={selected.template_id || ""}
+                        disabled={messageTemplatesLoading}
+                        onChange={(event) => {
+                          const template = messageTemplates.find((item) => item.id === event.target.value);
+                          update(selected.id, template ? {
+                            template_id: template.id,
+                            template_name: template.name,
+                            template_language: template.language,
+                            title: `Send: ${template.name}`,
+                            body: template.content,
+                          } : {
+                            template_id: "", template_name: "", template_language: "",
+                            title: "Template", body: "Choose an approved template for this brand.",
+                          });
+                        }}
+                        className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium outline-none focus:border-primary disabled:cursor-not-allowed"
+                      >
+                        <option value="">{messageTemplatesLoading ? "Loading templates…" : "Choose an approved template"}</option>
+                        {messageTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} ({template.language || "en"})</option>)}
+                      </select>
+                      {!messageTemplatesLoading && !messageTemplates.length && <span className="font-medium leading-4 text-slate-500">No approved templates are available for {messageTemplateBrandName || "this brand"}. Sync them from the Templates page first.</span>}
+                    </label>
+                  )}
                   <div className="mt-3 grid gap-2">
                     <button
                       type="button"

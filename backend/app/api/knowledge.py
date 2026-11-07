@@ -211,6 +211,7 @@ ORB_GUIDE_PAGES = {
     "/app/chat": {"name": "Agent chat", "purpose": "Test conversations with the selected brand's deployed support agent."},
     "/app/sops": {"name": "SOPs", "purpose": "Review and manage support operating procedures."},
     "/app/flows": {"name": "Flows", "purpose": "Build visual support flows manually or ask Orb to draft one."},
+    "/app/templates": {"name": "Templates", "purpose": "Review approved brand message templates and sync eligible ones from Zoko."},
     "/app/faqs": {"name": "FAQs", "purpose": "Review and manage customer-facing frequently asked questions."},
     "/app/products": {"name": "Products", "purpose": "Review product knowledge used by the support experience."},
     "/app/tools": {"name": "Tools", "purpose": "Inspect the systems, tools, and prerequisites used by your support setup."},
