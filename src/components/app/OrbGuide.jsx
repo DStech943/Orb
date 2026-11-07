@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
-import { askOrbGuide } from '../../services/orbApi'
+import { activeBrandName, applyAssistantAvailabilityUpdate, askOrbGuide, createAssistantFaq, createOperationalUpdate } from '../../services/orbApi'
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, setOrbVoiceWakeEnabled, setOrbVoiceWakeStatus } from '../../lib/orbVoiceWake'
 import { startBrowserDictation } from '../../lib/browserDictation'
 
@@ -55,6 +55,23 @@ const flowBriefFromRequest = (value) => {
     .trim()
   const subject = request || 'the requested customer-support scenario'
   return `Create an editable customer-support flow for ${subject}. Include a trigger, the details to collect, validation checks, clear outcome branches, customer-facing messages, escalation or handoff where needed, and a completed end state for every branch.`
+}
+const faqDraftFromRequest = (value) => {
+  const answer = String(value || '')
+    .replace(/^.*?\b(?:add|create|make)\s+(?:an?\s+)?faq\s*(?:that|saying|for)?\s*/i, '')
+    .trim()
+  const productMatch = answer.match(/^(.+?)\s+is not made with real cranberries\b/i)
+  const question = productMatch
+    ? `Is ${productMatch[1].trim()} made with real cranberries or unsafe for people with berry allergies?`
+    : 'What should customers know about this update?'
+  return { question, answer: answer || String(value || '').trim() }
+}
+const assistantWorkFromRequest = (value) => {
+  const text = String(value || '').trim()
+  if (/\b(?:add|create|make)\s+(?:an?\s+)?faq\b/i.test(text)) return { type: 'faq' }
+  if (/\b(?:out of stock|back in stock|pre[ -]?order|restock|expected to be back)\b/i.test(text)) return { type: 'product' }
+  if (/\b(?:delayed|delay|sale|promotion|ganesh|operational note|operations?)\b/i.test(text)) return { type: 'operation' }
+  return null
 }
 const directGuideCommand = (value) => {
   const text = normalizeSpeech(value)
@@ -377,6 +394,43 @@ export default function OrbGuide() {
     // speech-recognition event from leaving the just-sent prompt visible.
     if (inputRef.current) inputRef.current.value = ''
     setPromptReset((value) => value + 1)
+    const requestedWork = assistantWorkFromRequest(text)
+    if (requestedWork) {
+      const brandName = activeBrandName()
+      if (!brandName) {
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', error: true, text: 'Choose a brand before I make this change.' }])
+        return
+      }
+      setThinking(true)
+      try {
+        if (requestedWork.type === 'faq') {
+          const faq = faqDraftFromRequest(text)
+          await createAssistantFaq(faq, brandName)
+          const destination = '/app/brain?tab=faqs'
+          lastDestinationRef.current = { destination, destinationLabel: 'FAQs' }
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: `I added a draft FAQ: “${faq.question}” Review and publish it when ready.`, destination, destinationLabel: 'FAQs' }])
+          return
+        }
+        await createOperationalUpdate(text, brandName)
+        if (requestedWork.type === 'product') {
+          const shopifyResult = await applyAssistantAvailabilityUpdate(text, brandName)
+          const destination = '/app/products'
+          lastDestinationRef.current = { destination, destinationLabel: 'Products' }
+          const updated = shopifyResult?.status === 'applied'
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: updated ? `I recorded the product update and updated ${shopifyResult.product_name}'s ${shopifyResult.metafield} metafield in Shopify.` : `I recorded the product update. Shopify was not changed: ${shopifyResult?.reason || 'a matching product and availability/preorder metafield were not found.'}`, destination, destinationLabel: 'Products' }])
+          return
+        }
+        const destination = '/app/operations'
+        lastDestinationRef.current = { destination, destinationLabel: 'Operations' }
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'I added that update to Operations and routed it to the brand’s operational follow-up.', destination, destinationLabel: 'Operations' }])
+        return
+      } catch (error) {
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', error: true, text: error?.message || 'I could not complete that change.' }])
+        return
+      } finally {
+        setThinking(false)
+      }
+    }
     const previousDestination = followPreviousDestination(text) ? lastDestinationRef.current : null
     if (previousDestination?.destination) {
       const acknowledgement = `Opening ${previousDestination.destinationLabel || pages[previousDestination.destination]?.title || 'that page'}.`
