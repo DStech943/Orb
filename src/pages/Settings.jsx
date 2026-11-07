@@ -25,6 +25,8 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, ORB_VOICE_WAKE_STATUS_EVENT, setOrbVoiceWakeEnabled, supportsOrbVoiceWake } from "../lib/orbVoiceWake";
+import { listBrands, invalidateBrandCache } from "../services/brands";
+import { getRemoteBrandAgentConnection, setRemoteBrandAgentConnection } from "../services/orbApi";
 
 const tabs = [
   { id: "profile", label: "Profile" },
@@ -72,8 +74,24 @@ export default function Settings() {
   const [voiceWakeEnabled, setVoiceWakeEnabled] = useState(isOrbVoiceWakeEnabled);
   const [voiceWakeSaving, setVoiceWakeSaving] = useState(false);
   const [voiceWakeStatus, setVoiceWakeStatus] = useState("off");
+  const [agentBrands, setAgentBrands] = useState([]);
+  const [agentBrandId, setAgentBrandId] = useState("");
+  const [agentConnection, setAgentConnection] = useState({
+    ai_agent_name: "",
+    ai_support_agent_url: "",
+    gateway_secret: "",
+    control_token: "",
+    clear_gateway_secret: false,
+    clear_control_token: false,
+    gateway_secret_configured: false,
+    control_token_configured: false,
+  });
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentError, setAgentError] = useState("");
   const products = useAsync(listProducts, []);
   const sources = useAsync(listSources, []);
+  const visibleTabs = user?.role === "admin" ? [...tabs, { id: "agents", label: "AI agents" }] : tabs;
   useEffect(() => {
     const warn = (event) => {
       if (dirty) {
@@ -94,6 +112,46 @@ export default function Settings() {
       window.removeEventListener(ORB_VOICE_WAKE_STATUS_EVENT, onVoiceWakeStatus);
     };
   }, []);
+  useEffect(() => {
+    if (active !== "agents" || user?.role !== "admin") return undefined;
+    let cancelled = false;
+    setAgentLoading(true);
+    setAgentError("");
+    listBrands()
+      .then((brands) => {
+        if (cancelled) return;
+        const next = Array.isArray(brands) ? brands : [];
+        setAgentBrands(next);
+        setAgentBrandId((current) => current || next[0]?.id || "");
+      })
+      .catch((error) => !cancelled && setAgentError(error.message || "Could not load brands."))
+      .finally(() => !cancelled && setAgentLoading(false));
+    return () => { cancelled = true; };
+  }, [active, user?.role]);
+  useEffect(() => {
+    if (active !== "agents" || !agentBrandId || user?.role !== "admin") return undefined;
+    let cancelled = false;
+    setAgentLoading(true);
+    setAgentError("");
+    getRemoteBrandAgentConnection(agentBrandId)
+      .then((result) => {
+        if (cancelled) return;
+        const connection = result?.connection || {};
+        setAgentConnection({
+          ai_agent_name: connection.ai_agent_name || "",
+          ai_support_agent_url: connection.ai_support_agent_url || "",
+          gateway_secret: "",
+          control_token: "",
+          clear_gateway_secret: false,
+          clear_control_token: false,
+          gateway_secret_configured: Boolean(connection.gateway_secret_configured),
+          control_token_configured: Boolean(connection.control_token_configured),
+        });
+      })
+      .catch((error) => !cancelled && setAgentError(error.message || "Could not load this agent connection."))
+      .finally(() => !cancelled && setAgentLoading(false));
+    return () => { cancelled = true; };
+  }, [active, agentBrandId, user?.role]);
   const tabChange = (next) => {
     if (dirty && !window.confirm("You have unsaved changes. Leave this tab?"))
       return;
@@ -103,6 +161,38 @@ export default function Settings() {
   const save = () => {
     setDirty(false);
     showToast("Settings saved.");
+  };
+  const saveAgentConnection = async () => {
+    if (!agentBrandId) return;
+    setAgentSaving(true);
+    setAgentError("");
+    try {
+      const result = await setRemoteBrandAgentConnection(agentBrandId, {
+        ai_agent_name: agentConnection.ai_agent_name,
+        ai_support_agent_url: agentConnection.ai_support_agent_url,
+        gateway_secret: agentConnection.gateway_secret || undefined,
+        control_token: agentConnection.control_token || undefined,
+        clear_gateway_secret: agentConnection.clear_gateway_secret,
+        clear_control_token: agentConnection.clear_control_token,
+      });
+      const connection = result?.connection || {};
+      setAgentConnection((current) => ({
+        ...current,
+        gateway_secret: "",
+        control_token: "",
+        clear_gateway_secret: false,
+        clear_control_token: false,
+        gateway_secret_configured: Boolean(connection.gateway_secret_configured),
+        control_token_configured: Boolean(connection.control_token_configured),
+      }));
+      invalidateBrandCache();
+      window.dispatchEvent(new Event("orb:brand-changed"));
+      showToast("AI agent connection saved.");
+    } catch (error) {
+      setAgentError(error.message || "Could not save this agent connection.");
+    } finally {
+      setAgentSaving(false);
+    }
   };
   const add = async (source) => {
     await addSource(source);
@@ -161,7 +251,7 @@ export default function Settings() {
       </p>
       <h2 className="mt-1 text-3xl font-extrabold tracking-tight">Settings</h2>
       <section className="mt-6 rounded-lg border-2 border-ink bg-white shadow-brutal">
-        <Tabs tabs={tabs} active={active} onChange={tabChange} />
+        <Tabs tabs={visibleTabs} active={active} onChange={tabChange} />
         <div className="p-5 sm:p-6">
           {active === "profile" && (
             <div className="grid max-w-xl gap-4">
@@ -456,6 +546,86 @@ export default function Settings() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+          {active === "agents" && user?.role === "admin" && (
+            <div className="grid max-w-2xl gap-5">
+              <div>
+                <h3 className="text-xl font-extrabold">Brand AI agents</h3>
+                <p className="mt-1 text-sm text-muted">
+                  Connect each brand to its deployed support agent. Secrets are write-only and are never shown in Orb after saving.
+                </p>
+              </div>
+              <Select
+                label="Configure brand"
+                value={agentBrandId}
+                disabled={agentLoading && !agentBrandId}
+                onChange={(event) => setAgentBrandId(event.target.value)}
+              >
+                {!agentBrands.length && <option value="">No brands available</option>}
+                {agentBrands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+              </Select>
+              {agentError && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{agentError}</p>}
+              {agentBrandId && (
+                <div className="grid gap-4 rounded-xl border border-primary/15 bg-primary-tint/20 p-4 sm:p-5">
+                  <Input
+                    label="Agent display name"
+                    placeholder="e.g. Nutrova AI"
+                    value={agentConnection.ai_agent_name}
+                    onChange={(event) => setAgentConnection((current) => ({ ...current, ai_agent_name: event.target.value }))}
+                  />
+                  <Input
+                    label="Deployed agent URL"
+                    type="url"
+                    placeholder="https://your-agent.up.railway.app"
+                    value={agentConnection.ai_support_agent_url}
+                    onChange={(event) => setAgentConnection((current) => ({ ...current, ai_support_agent_url: event.target.value }))}
+                  />
+                  <p className="-mt-2 text-xs text-muted">Orb sends test chats to <code>/api/widget/chat</code> on this HTTPS URL.</p>
+                  <div className="grid gap-3 rounded-lg border border-ink/10 bg-white/70 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                      <p className="text-sm font-extrabold">Gateway secret</p>
+                      <p className="mt-1 text-xs text-muted">{agentConnection.gateway_secret_configured ? "A secret is already stored. Enter a new value only to replace it." : "Required if this agent protects its chat endpoint with x-gateway-secret."}</p>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${agentConnection.gateway_secret_configured ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{agentConnection.gateway_secret_configured ? "Configured" : "Not configured"}</span>
+                    </div>
+                    <Input
+                      label=""
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={agentConnection.gateway_secret_configured ? "•••••••••••• (stored)" : "Paste the agent GATEWAY_SECRET"}
+                      value={agentConnection.gateway_secret}
+                      disabled={agentConnection.clear_gateway_secret}
+                      onChange={(event) => setAgentConnection((current) => ({ ...current, gateway_secret: event.target.value }))}
+                    />
+                    {agentConnection.gateway_secret_configured && <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={agentConnection.clear_gateway_secret} onChange={(event) => setAgentConnection((current) => ({ ...current, clear_gateway_secret: event.target.checked }))} /> Remove the saved gateway secret</label>}
+                  </div>
+                  <div className="grid gap-3 rounded-lg border border-ink/10 bg-white/70 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                      <p className="text-sm font-extrabold">Control token <span className="font-medium text-muted">(optional)</span></p>
+                      <p className="mt-1 text-xs text-muted">Used for tone sync and operational-note updates when the agent exposes those control endpoints.</p>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-extrabold ${agentConnection.control_token_configured ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{agentConnection.control_token_configured ? "Configured" : "Not configured"}</span>
+                    </div>
+                    <Input
+                      label=""
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={agentConnection.control_token_configured ? "•••••••••••• (stored)" : "Paste the agent control token"}
+                      value={agentConnection.control_token}
+                      disabled={agentConnection.clear_control_token}
+                      onChange={(event) => setAgentConnection((current) => ({ ...current, control_token: event.target.value }))}
+                    />
+                    {agentConnection.control_token_configured && <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={agentConnection.clear_control_token} onChange={(event) => setAgentConnection((current) => ({ ...current, clear_control_token: event.target.checked }))} /> Remove the saved control token</label>}
+                  </div>
+                  <Button variant="purple" disabled={agentSaving || agentLoading} onClick={saveAgentConnection}>
+                    <Save size={16} />
+                    {agentSaving ? "Saving connection…" : "Save agent connection"}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
           {active === "billing" && (

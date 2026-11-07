@@ -88,6 +88,21 @@ class BrandProfilePatch(RequestModel):
     ai_agent_name: str | None = Field(default=None, max_length=120)
 
 
+class BrandAgentConnectionPatch(RequestModel):
+    """Admin-only connection details for a brand's deployed support agent.
+
+    Secrets deliberately remain write-only: the browser can learn whether one
+    is configured, but is never sent the stored value back.
+    """
+
+    ai_agent_name: str = Field(default="", max_length=120)
+    ai_support_agent_url: str = Field(default="", max_length=2_000)
+    gateway_secret: str | None = Field(default=None, max_length=2_000)
+    control_token: str | None = Field(default=None, max_length=2_000)
+    clear_gateway_secret: bool = False
+    clear_control_token: bool = False
+
+
 class BrandVoiceSourceCreate(RequestModel):
     kind: Literal["paste", "csv"] = "paste"
     label: str = Field(default="Voice onboarding", min_length=1, max_length=200)
@@ -1565,6 +1580,74 @@ async def set_brand_profile(brand_id: str, payload: BrandProfilePatch, request: 
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
     return {"brand": _brand_out(row)}
+
+
+def _agent_connection_out(brand: Any) -> dict[str, Any]:
+    """Return connection metadata without ever exposing stored credentials."""
+    value = dict(brand)
+    platform_config = decode_jsonb(value.get("platform_config"))
+    platform_config = platform_config if isinstance(platform_config, dict) else {}
+    return {
+        "brand": _brand_out(value),
+        "connection": {
+            "ai_agent_name": str(platform_config.get("ai_agent_name") or "").strip(),
+            "ai_support_agent_url": str(platform_config.get("ai_support_agent_url") or "").strip(),
+            "gateway_secret_configured": bool(str(platform_config.get("ai_support_agent_gateway_secret") or "").strip()),
+            "control_token_configured": bool(str(platform_config.get("ai_support_agent_control_token") or "").strip()),
+        },
+    }
+
+
+@router.get("/brands/{brand_id}/agent-connection")
+async def get_brand_agent_connection(brand_id: str, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    """Read safe, admin-facing configuration status for a brand agent."""
+    brand = await _brand(request.app.state.supabase_db, brand_id)
+    return _agent_connection_out(brand)
+
+
+@router.patch("/brands/{brand_id}/agent-connection")
+async def set_brand_agent_connection(
+    brand_id: str, payload: BrandAgentConnectionPatch, request: Request, _: User = Depends(_admin)
+) -> dict[str, Any]:
+    """Save the selected brand's agent URL and write-only credentials."""
+    agent_url = payload.ai_support_agent_url.strip().rstrip("/")
+    if agent_url:
+        parsed = urlparse(agent_url)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+            raise HTTPException(status_code=422, detail="Agent URL must be a valid HTTPS URL without credentials.")
+
+    existing = await _brand(request.app.state.supabase_db, brand_id)
+    platform_config = decode_jsonb(existing["platform_config"])
+    platform_config = dict(platform_config) if isinstance(platform_config, dict) else {}
+
+    def set_or_remove(key: str, value: str) -> None:
+        if value:
+            platform_config[key] = value
+        else:
+            platform_config.pop(key, None)
+
+    set_or_remove("ai_agent_name", payload.ai_agent_name.strip())
+    set_or_remove("ai_support_agent_url", agent_url)
+    if payload.clear_gateway_secret:
+        platform_config.pop("ai_support_agent_gateway_secret", None)
+    elif payload.gateway_secret is not None and payload.gateway_secret.strip():
+        platform_config["ai_support_agent_gateway_secret"] = payload.gateway_secret.strip()
+    if payload.clear_control_token:
+        platform_config.pop("ai_support_agent_control_token", None)
+    elif payload.control_token is not None and payload.control_token.strip():
+        platform_config["ai_support_agent_control_token"] = payload.control_token.strip()
+
+    row = await request.app.state.supabase_db.fetchrow(
+        """UPDATE cx_copilot.brands
+           SET platform_config=$2::jsonb
+           WHERE id=$1::uuid
+           RETURNING id,name,description,industry_category,platform_config""",
+        brand_id,
+        platform_config,
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    return _agent_connection_out(row)
 
 
 @router.get("/brands/{brand_id}/voice")
