@@ -14,8 +14,10 @@ import {
   GripVertical,
   Link2,
   Loader2,
+  Maximize2,
   MessageSquareText,
   Mic,
+  Minimize2,
   Minus,
   Play,
   Plus,
@@ -140,27 +142,83 @@ function OrbMark({ className = "", backgroundColor = "#ffffff", size = 0.85 }) {
     </span>
   );
 }
-const CARD = { width: 224, height: 176 };
+const CARD = { width: 224, height: 176, expandedMinHeight: 264 };
+const NODE_CLEARANCE = 36;
 const ORB_PROMPT_EXAMPLES = [
   "Create a product availability flow",
   "Handle a delayed delivery request",
   "Build a return and exchange flow",
 ];
 let visibleNodeGeometry = new Map();
-function geometryFor(nodes, edges = []) {
+const expandedCardHeight = (node) => {
+  const titleLines = String(node.title || "").split("\n").reduce(
+    (total, line) => total + Math.max(1, Math.ceil(line.length / 28)),
+    0,
+  );
+  const bodyLines = String(node.body || "").split("\n").reduce(
+    (total, line) => total + Math.max(1, Math.ceil(line.length / 31)),
+    0,
+  );
+  const tools = Array.isArray(node.tools) && node.tools.length ? 26 : 0;
+  return Math.max(
+    CARD.expandedMinHeight,
+    88 + titleLines * 18 + bodyLines * 20 + tools,
+  );
+};
+const cardHeightFor = (node, expandedNodeIds) =>
+  expandedNodeIds?.has(node.id) ? expandedCardHeight(node) : CARD.height;
+// Cards share a visual column when their horizontal ranges intersect. Keep a
+// little clear air between them so an expanded card never covers a neighbour.
+// This is intentionally derived at render time: expanding a card does not
+// rewrite the author's saved canvas positions.
+const resolveNodeCollisions = (nodes, expandedNodeIds) => {
+  const placed = [];
+  const resolved = new Map();
+  [...nodes]
+    .sort(
+      (left, right) =>
+        Number(left.y || 0) - Number(right.y || 0) ||
+        Number(left.x || 0) - Number(right.x || 0),
+    )
+    .forEach((node) => {
+      const left = Number(node.x || 0);
+      const height = cardHeightFor(node, expandedNodeIds);
+      let top = Number(node.y || 0);
+      while (true) {
+        const overlaps = placed.filter(
+          (item) =>
+            left < item.left + CARD.width &&
+            left + CARD.width > item.left &&
+            top < item.top + item.height + NODE_CLEARANCE &&
+            top + height + NODE_CLEARANCE > item.top,
+        );
+        if (!overlaps.length) break;
+        top = Math.max(
+          ...overlaps.map((item) => item.top + item.height + NODE_CLEARANCE),
+        );
+      }
+      const item = { id: node.id, left, top, height };
+      placed.push(item);
+      resolved.set(node.id, { ...node, x: left, y: top });
+    });
+  return nodes.map((node) => resolved.get(node.id) || node);
+};
+function geometryFor(nodes, edges = [], expandedNodeIds = new Set()) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   return new Map(
     nodes.map((node) => {
       const ports = outputs(node);
       const top = Number(node.y || 0);
-      const centre = top + CARD.height / 2;
+      const height = cardHeightFor(node, expandedNodeIds);
+      const centre = top + height / 2;
       const left = Number(node.x || 0);
       const targetY = new Map(
         edges
           .filter((edge) => edge.source === node.id)
           .map((edge) => [
             edge.sourcePort,
-            (nodeById.get(edge.target)?.y || 0) + CARD.height / 2,
+            (nodeById.get(edge.target)?.y || 0) +
+              cardHeightFor(nodeById.get(edge.target) || {}, expandedNodeIds) / 2,
           ]),
       );
       const ordered = ports
@@ -181,7 +239,7 @@ function geometryFor(nodes, edges = []) {
         item.port,
         {
           x: left + CARD.width,
-          y: top + ((index + 1) / (ports.length + 1)) * CARD.height,
+          y: top + ((index + 1) / (ports.length + 1)) * height,
         },
       ]);
       return [
@@ -189,7 +247,7 @@ function geometryFor(nodes, edges = []) {
         {
           left,
           top,
-          height: CARD.height,
+          height,
           inputY: centre,
           output: new Map(anchors),
         },
@@ -1006,10 +1064,14 @@ function Node({
   node,
   selected,
   connecting,
+  connectionTarget,
   onSelect,
   onChange,
   onDrag,
   onConnect,
+  expanded,
+  onToggleExpanded,
+  onConnectionTargetHover,
 }) {
   const item = block(node.type),
     Icon = item.icon,
@@ -1036,12 +1098,14 @@ function Node({
   return (
     <article
       onClick={(event) => onSelect(node.id, event)}
+      onPointerEnter={() => connecting && onConnectionTargetHover(node.id)}
+      onPointerLeave={() => connecting && onConnectionTargetHover(null)}
       style={{
         left: geometry.left,
         top: geometry.top,
         height: geometry.height,
       }}
-      className={`absolute z-10 flex w-56 flex-col overflow-visible rounded-lg border bg-white shadow-sm transition-[top,height] duration-200 ease-out ${selected ? "border-primary ring-2 ring-primary/15" : "border-slate-200"} ${connecting ? "cursor-crosshair" : ""}`}
+      className={`absolute z-10 flex w-56 flex-col overflow-visible rounded-lg border bg-white shadow-sm transition-[top,height,box-shadow,border-color] duration-200 ease-out ${connectionTarget ? "border-primary ring-4 ring-primary/20 shadow-lg" : selected ? "border-primary ring-2 ring-primary/15" : "border-slate-200"} ${connecting ? "cursor-crosshair" : ""}`}
     >
       <header
         onPointerDown={(event) => onDrag(event, node.id)}
@@ -1055,6 +1119,19 @@ function Node({
         <span className="text-[10px] font-bold opacity-70">
           {node.type.toUpperCase()}
         </span>
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleExpanded(node.id);
+          }}
+          title={expanded ? "Collapse card" : "Expand card"}
+          aria-label={expanded ? "Collapse card" : "Expand card"}
+          className="-mr-1 ml-1 grid h-5 w-5 place-items-center rounded text-current/75 transition hover:bg-white/45 hover:text-current"
+        >
+          {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col rounded-b-lg bg-white p-3">
         {["action", "condition"].includes(node.type) &&
@@ -1091,7 +1168,7 @@ function Node({
           aria-label={`${item.label} details`}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => onChange(node.id, { body: event.target.value })}
-          className="mt-2 min-h-0 flex-1 resize-none bg-transparent text-xs leading-5 text-slate-600 outline-none placeholder:text-slate-400"
+          className={`mt-2 min-h-0 flex-1 resize-none bg-transparent text-xs leading-5 text-slate-600 outline-none placeholder:text-slate-400 ${expanded ? "overflow-y-auto" : "overflow-hidden"}`}
           placeholder={item.hint}
         />
       </div>
@@ -1169,12 +1246,11 @@ function Node({
     </article>
   );
 }
-function Edges({ nodes, edges, stage }) {
+function Edges({ nodes, edges, stage, geometry, connecting, hoveredTargetId }) {
   const nodeMap = useMemo(
     () => new Map(nodes.map((node) => [node.id, node])),
     [nodes],
   );
-  const geometry = useMemo(() => geometryFor(nodes, edges), [nodes, edges]);
   return (
     <svg
       width={stage.width}
@@ -1210,17 +1286,86 @@ function Edges({ nodes, edges, stage }) {
           endX = toGeometry.left,
           endY = toGeometry.inputY,
           bend = Math.max(72, Math.abs(endX - startX) * 0.42);
+        const path = `M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`;
+        const loopBack = endX <= startX;
+        const label = to.title || block(to.type).label;
+        const labelWidth = Math.min(190, Math.max(64, label.length * 6.1 + 24));
+        const labelX = (startX + endX) / 2;
+        const labelY = Math.min(startY, endY) - 14;
         return (
-          <path
-            key={edge.id}
-            d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
-            fill="none"
-            stroke="#94a3b8"
-            strokeWidth="1.5"
-            markerEnd="url(#flow-arrow)"
-          />
+          <g key={edge.id}>
+            <path
+              d={path}
+              fill="none"
+              stroke={loopBack ? "#6366f1" : "#94a3b8"}
+              strokeWidth={loopBack ? "2" : "1.5"}
+              strokeDasharray={loopBack ? "5 4" : undefined}
+              markerEnd="url(#flow-arrow)"
+            />
+            {loopBack && (
+              <g transform={`translate(${labelX} ${labelY})`}>
+                <rect
+                  x={-labelWidth / 2}
+                  y={-10}
+                  width={labelWidth}
+                  height="20"
+                  rx="10"
+                  fill="white"
+                  stroke="#c7d2fe"
+                />
+                <text
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill="#4f46e5"
+                  fontSize="10"
+                  fontWeight="700"
+                >
+                  ↩ {label.length > 25 ? `${label.slice(0, 24)}…` : label}
+                </text>
+              </g>
+            )}
+          </g>
         );
       })}
+      {connecting && hoveredTargetId && (
+        (() => {
+          const from = nodeMap.get(connecting.nodeId);
+          const to = nodeMap.get(hoveredTargetId);
+          const fromGeometry = geometry.get(connecting.nodeId);
+          const toGeometry = geometry.get(hoveredTargetId);
+          if (!from || !to || !fromGeometry || !toGeometry || from.id === to.id)
+            return null;
+          const output = fromGeometry.output.get(connecting.port) || {
+            x: fromGeometry.left + CARD.width,
+            y: fromGeometry.inputY,
+          };
+          const endX = toGeometry.left;
+          const endY = toGeometry.inputY;
+          const bend = Math.max(72, Math.abs(endX - output.x) * 0.42);
+          const previewLabel = to.title || block(to.type).label;
+          return (
+            <g>
+              <path
+                d={`M ${output.x} ${output.y} C ${output.x + bend} ${output.y}, ${endX - bend} ${endY}, ${endX} ${endY}`}
+                fill="none"
+                stroke="#374AF6"
+                strokeWidth="2"
+                strokeDasharray="6 5"
+              />
+              <text
+                x={(output.x + endX) / 2}
+                y={Math.min(output.y, endY) - 10}
+                textAnchor="middle"
+                fill="#374AF6"
+                fontSize="10"
+                fontWeight="700"
+              >
+                Connect to {previewLabel.length > 24 ? `${previewLabel.slice(0, 23)}…` : previewLabel}
+              </text>
+            </g>
+          );
+        })()
+      )}
     </svg>
   );
 }
@@ -1475,6 +1620,7 @@ function Builder({
     ),
     [selectionBox, setSelectionBox] = useState(null),
     [from, setFrom] = useState(null),
+    [connectTargetHover, setConnectTargetHover] = useState(null),
     [zoom, setZoom] = useState(DEFAULT_ZOOM),
     [orbPrompt, setOrbPrompt] = useState(initialOrbPrompt),
     [orbMessages, setOrbMessages] = useState([]),
@@ -1489,7 +1635,8 @@ function Builder({
     [attachedSops, setAttachedSops] = useState([]),
     [templateExportOpen, setTemplateExportOpen] = useState(false),
     [templateCategory, setTemplateCategory] = useState(""),
-    [exportingTemplate, setExportingTemplate] = useState(false);
+    [exportingTemplate, setExportingTemplate] = useState(false),
+    [expandedNodeIds, setExpandedNodeIds] = useState(() => new Set());
   useEffect(() => {
     if (initialOrbPrompt) setOrbPrompt(initialOrbPrompt);
   }, [initialOrbPrompt]);
@@ -1512,6 +1659,17 @@ function Builder({
         : [sop],
     );
   const selected = draft.nodes.find((node) => node.id === selectedId);
+  useEffect(() => {
+    if (!from) setConnectTargetHover(null);
+  }, [from]);
+  const collisionFreeNodes = useMemo(
+    () => resolveNodeCollisions(draft.nodes, expandedNodeIds),
+    [draft.nodes, expandedNodeIds],
+  );
+  const editorGeometry = useMemo(
+    () => geometryFor(collisionFreeNodes, draft.edges, expandedNodeIds),
+    [collisionFreeNodes, draft.edges, expandedNodeIds],
+  );
   const canvasSize = useMemo(
     () => ({
       width: Math.max(
@@ -1520,14 +1678,13 @@ function Builder({
       ),
       height: Math.max(
         STAGE.height,
-        ...draft.nodes.map((node) => Number(node.y || 0) + CARD.height + 260),
+        ...draft.nodes.map((node) => {
+          const geometry = editorGeometry.get(node.id);
+          return Number(node.y || 0) + (geometry?.height || CARD.height) + 260;
+        }),
       ),
     }),
-    [draft.nodes],
-  );
-  const editorGeometry = useMemo(
-    () => geometryFor(draft.nodes, draft.edges),
-    [draft.nodes, draft.edges],
+    [draft.nodes, editorGeometry],
   );
   const isDirty = flowSnapshot(draft) !== savedSnapshotRef.current;
   visibleNodeGeometry = editorGeometry;
@@ -1638,6 +1795,20 @@ function Builder({
         node.id === nodeId ? { ...node, ...patch } : node,
       ),
     }));
+  const toggleNodeExpanded = (nodeId) =>
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  const allNodesExpanded =
+    draft.nodes.length > 0 &&
+    draft.nodes.every((node) => expandedNodeIds.has(node.id));
+  const toggleAllNodesExpanded = () =>
+    setExpandedNodeIds(() =>
+      allNodesExpanded ? new Set() : new Set(draft.nodes.map((node) => node.id)),
+    );
   const createWithOrb = async () => {
     const attachedSop = attachedSops[0];
     const prompt =
@@ -1781,6 +1952,7 @@ function Builder({
         ),
       );
       setFrom(null);
+      setConnectTargetHover(null);
     }
     const additive = event.shiftKey || event.ctrlKey || event.metaKey;
     setSelectedIds((current) => {
@@ -1797,6 +1969,7 @@ function Builder({
       setSelectedId(nodeId);
       setSelectedIds(new Set([nodeId]));
       setFrom({ nodeId, port: outputs(node)[index] || "Next" });
+      setConnectTargetHover(null);
     }
   };
   const add = (type, position) => {
@@ -1876,7 +2049,13 @@ function Builder({
       positions: new Map(
         draft.nodes
           .filter((item) => movingIds.has(item.id))
-          .map((item) => [item.id, { x: item.x, y: item.y }]),
+          .map((item) => {
+            const geometry = editorGeometry.get(item.id);
+            return [item.id, {
+              x: geometry?.left ?? item.x,
+              y: geometry?.top ?? item.y,
+            }];
+          }),
       ),
       pointerX: event.clientX,
       pointerY: event.clientY,
@@ -2841,6 +3020,9 @@ function Builder({
                   nodes={draft.nodes}
                   edges={draft.edges}
                   stage={canvasSize}
+                  geometry={editorGeometry}
+                  connecting={from}
+                  hoveredTargetId={connectTargetHover}
                 />
                 {selectionBox && (
                   <span
@@ -2860,10 +3042,14 @@ function Builder({
                     node={node}
                     selected={selectedIds.has(node.id)}
                     connecting={Boolean(from)}
+                    connectionTarget={Boolean(from && from.nodeId !== node.id && connectTargetHover === node.id)}
                     onSelect={select}
                     onChange={update}
                     onDrag={drag}
                     onConnect={connect}
+                    expanded={expandedNodeIds.has(node.id)}
+                    onToggleExpanded={toggleNodeExpanded}
+                    onConnectionTargetHover={setConnectTargetHover}
                   />
                 ))}
                 {from && (
@@ -2897,6 +3083,16 @@ function Builder({
                 Reset view
               </button>
             )}
+            <button
+              type="button"
+              onClick={toggleAllNodesExpanded}
+              disabled={!draft.nodes.length}
+              className="absolute right-4 top-16 z-30 inline-flex items-center gap-2 rounded-md border border-primary/25 bg-white px-3.5 py-2.5 text-xs font-extrabold text-primary shadow-sm transition hover:bg-primary-tint disabled:cursor-not-allowed disabled:opacity-45"
+              title={allNodesExpanded ? "Collapse all cards" : "Expand all cards"}
+            >
+              {allNodesExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              {allNodesExpanded ? "Collapse all" : "Expand all"}
+            </button>
             <div
               ref={zoomControlsRef}
               className="absolute bottom-4 right-4 z-30 flex items-center overflow-hidden rounded-md border border-slate-200 bg-white shadow-md"
