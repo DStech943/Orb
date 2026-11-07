@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
-from app.api.knowledge import _remote_brand_by_name
+from app.api.knowledge import _remote_brand_by_name, _supabase_rows
 from app.auth import User, current_user
 
 
@@ -58,7 +58,7 @@ async def send_slack_escalation(
     brand_name: str = Form(..., min_length=1, max_length=160),
     message: str = Form(..., min_length=1, max_length=8_000),
     files: list[UploadFile] = File(default=[]),
-    _: User = Depends(current_user),
+    user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Send an Orb escalation and optional attachments to the brand Slack channel."""
     settings = request.app.state.settings
@@ -68,6 +68,15 @@ async def send_slack_escalation(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Attach at most {_MAX_ATTACHMENTS} files.")
 
     brand = await _remote_brand_by_name(request, brand_name)
+    try:
+        profile_rows = await _supabase_rows(
+            request,
+            "orb_profiles",
+            {"select": "full_name", "id": f"eq.{user.id}", "limit": "1"},
+        )
+    except HTTPException:
+        profile_rows = []
+    submitted_by = str((profile_rows[0].get("full_name") if profile_rows else "") or "Workspace member").strip()
     configured_channel = _platform_config(brand.get("platform_config")).get("slack_channel_id")
     channel_id = str(configured_channel or settings.slack_channel_id or "").strip()
     if not channel_id:
@@ -87,7 +96,7 @@ async def send_slack_escalation(
         {"type": "header", "text": {"type": "plain_text", "text": "Orb escalation"}},
         {"type": "section", "fields": [
             {"type": "mrkdwn", "text": f"*Brand*\n{_slack_text(str(brand.get('name') or brand_name))}"},
-            {"type": "mrkdwn", "text": "*Priority*\nChannel-wide escalation"},
+            {"type": "mrkdwn", "text": f"*Escalated by*\n{_slack_text(submitted_by)}"},
         ]},
         {"type": "section", "text": {"type": "mrkdwn", "text": f"<!channel>\n{safe_message}"}},
     ]
