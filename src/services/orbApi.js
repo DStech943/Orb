@@ -228,6 +228,11 @@ export const updateKnowledge = (
     method: "PATCH",
     body: JSON.stringify({ brand_name: brandName, payload }),
   });
+export const createAssistantFaq = ({ question, answer, category = "Customer support" }, brandName = activeBrandName()) =>
+  request("/api/knowledge/faqs/manual", {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, question, answer, category }),
+  });
 export const publishApprovedKnowledge = (kind, brandName = activeBrandName()) =>
   request(`/api/knowledge/${kind}/publish-approved`, {
     method: "POST",
@@ -431,4 +436,9 @@ export const saveShopifyProductMetafields = ({
       deleted_metafield_ids: deletedMetafieldIds,
       use_vault: true,
     }),
+  });
+export const applyAssistantAvailabilityUpdate = (message, brandName = activeBrandName()) =>
+  request("/api/shopify/products/assistant-availability", {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, message }),
   });

@@ -110,6 +110,11 @@ class ShopifyMetafieldSave(BaseModel):
     use_vault: bool = True
 
 
+class ShopifyAvailabilityAssistantUpdate(BaseModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    message: str = Field(min_length=8, max_length=2_000)
+
+
 def _shopify_vault_names(brand_name: str) -> tuple[str, str]:
     """Map a brand name to its two standard server/Vault secret names."""
     key = re.sub(r"[^A-Z0-9]+", "_", brand_name.upper()).strip("_")
@@ -846,6 +851,68 @@ async def save_shopify_product_metafields(
         payload={"payload": product_payload},
     )
     return {"saved": len(accepted), "deleted": len(deleted_keys), "product_id": str(row["id"]), "owner_id": owner_id}
+
+
+@router.post("/products/assistant-availability")
+async def apply_assistant_availability_update(
+    payload: ShopifyAvailabilityAssistantUpdate, request: Request, user: User = Depends(current_user),
+) -> dict:
+    """Update an existing, clearly named availability/preorder field from Orb.
+
+    This intentionally refuses to invent fields or guess at unrelated product
+    data. A chat instruction is applied only when one synced product and one
+    existing merchant-facing availability field can be identified.
+    """
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    rows = await _supabase_service_rows(request, "orb_products", {
+        "select": "id,external_id,payload", "brand_id": f"eq.{brand['id']}",
+        "provider": "eq.shopify_admin", "limit": "250",
+    })
+    message_words = {word for word in re.findall(r"[a-z0-9]{3,}", payload.message.lower()) if word not in {"the", "and", "with", "will", "back", "stock", "expected", "from", "that", "this", "product"}}
+    ranked: list[tuple[int, dict, dict]] = []
+    for row in rows:
+        product = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        title_words = set(re.findall(r"[a-z0-9]{3,}", str(product.get("name") or product.get("title") or "").lower()))
+        score = len(title_words.intersection(message_words))
+        if score:
+            ranked.append((score, row, product))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    if not ranked or (len(ranked) > 1 and ranked[0][0] == ranked[1][0]):
+        return {"status": "needs_review", "reason": "I could not identify one matching synced Shopify product."}
+    _score, row, product = ranked[0]
+    fields = product.get("metafields") if isinstance(product.get("metafields"), list) else []
+    availability = [field for field in fields if isinstance(field, dict) and re.search(r"(?:pre[ _-]?order|back[ _-]?in[ _-]?stock|availability|stock[ _-]?status)", f"{field.get('namespace')}.{field.get('key')}", re.I)]
+    if len(availability) != 1:
+        return {"status": "needs_review", "product_name": product.get("name"), "reason": "No single existing availability or preorder metafield was available to update."}
+    field = availability[0]
+    field_type = str(field.get("type") or "")
+    if field_type not in {"single_line_text_field", "multi_line_text_field", "boolean"}:
+        return {"status": "needs_review", "product_name": product.get("name"), "reason": "The matching metafield type is not safe for an automatic text update."}
+    is_preorder = bool(re.search(r"pre[ _-]?order", f"{field.get('namespace')}.{field.get('key')}", re.I))
+    value = "true" if field_type == "boolean" and is_preorder else ("false" if field_type == "boolean" else payload.message.strip())
+    domain, access_token, _source = await _resolve_credentials(request, payload.brand_name, True, user)
+    if not domain or not access_token:
+        raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
+    mutation = """
+    mutation OrbAssistantAvailability($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) { metafields { id namespace key type value } userErrors { message } }
+    }
+    """
+    try:
+        data = await _admin_query(request.app.state.settings, mutation, {"metafields": [{
+            "ownerId": str(row["external_id"]), "namespace": str(field.get("namespace") or ""),
+            "key": str(field.get("key") or ""), "type": field_type, "value": value,
+        }]}, domain=admin_domain(domain), access_token=access_token)
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    result = (data.get("metafieldsSet") or {}) if isinstance(data, dict) else {}
+    errors = result.get("userErrors") or []
+    if errors:
+        raise HTTPException(status_code=422, detail=str(errors[0].get("message") or "Shopify rejected the metafield update."))
+    saved = ((result.get("metafields") or [{}])[0])
+    next_fields = [{**item, **saved} if isinstance(item, dict) and item.get("namespace") == field.get("namespace") and item.get("key") == field.get("key") else item for item in fields]
+    await _supabase_service_write(request, "PATCH", "orb_products", params={"id": f"eq.{row['id']}", "select": "id"}, payload={"payload": {**product, "metafields": next_fields}})
+    return {"status": "applied", "product_name": product.get("name"), "metafield": f"{field.get('namespace')}.{field.get('key')}"}
 
 
 @router.post("/import", status_code=status.HTTP_202_ACCEPTED)

@@ -180,6 +180,13 @@ class AgentChatRequest(RequestModel):
     session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
 
 
+class ManualFaqCreate(RequestModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    question: str = Field(min_length=6, max_length=1_000)
+    answer: str = Field(min_length=8, max_length=5_000)
+    category: str = Field(default="Customer support", max_length=200)
+
+
 class OrbGuideRequest(RequestModel):
     page_path: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=1, max_length=1_200)
@@ -1601,8 +1608,14 @@ def _agent_connection_out(brand: Any) -> dict[str, Any]:
 @router.get("/brands/{brand_id}/agent-connection")
 async def get_brand_agent_connection(brand_id: str, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
     """Read safe, admin-facing configuration status for a brand agent."""
-    brand = await _brand(request.app.state.supabase_db, brand_id)
-    return _agent_connection_out(brand)
+    rows = await _supabase_service_rows(
+        request,
+        "brands",
+        {"select": "id,name,description,industry_category,platform_config", "id": f"eq.{brand_id}", "limit": "1"},
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    return _agent_connection_out(rows[0])
 
 
 @router.patch("/brands/{brand_id}/agent-connection")
@@ -1616,8 +1629,14 @@ async def set_brand_agent_connection(
         if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
             raise HTTPException(status_code=422, detail="Agent URL must be a valid HTTPS URL without credentials.")
 
-    existing = await _brand(request.app.state.supabase_db, brand_id)
-    platform_config = decode_jsonb(existing["platform_config"])
+    existing_rows = await _supabase_service_rows(
+        request,
+        "brands",
+        {"select": "id,name,description,industry_category,platform_config", "id": f"eq.{brand_id}", "limit": "1"},
+    )
+    if not existing_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    platform_config = decode_jsonb(existing_rows[0].get("platform_config"))
     platform_config = dict(platform_config) if isinstance(platform_config, dict) else {}
 
     def set_or_remove(key: str, value: str) -> None:
@@ -1637,17 +1656,16 @@ async def set_brand_agent_connection(
     elif payload.control_token is not None and payload.control_token.strip():
         platform_config["ai_support_agent_control_token"] = payload.control_token.strip()
 
-    row = await request.app.state.supabase_db.fetchrow(
-        """UPDATE cx_copilot.brands
-           SET platform_config=$2::jsonb
-           WHERE id=$1::uuid
-           RETURNING id,name,description,industry_category,platform_config""",
-        brand_id,
-        platform_config,
+    rows = await _supabase_service_write(
+        request,
+        "PATCH",
+        "brands",
+        params={"id": f"eq.{brand_id}", "select": "id,name,description,industry_category,platform_config"},
+        payload={"platform_config": platform_config},
     )
-    if not row:
+    if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-    return _agent_connection_out(row)
+    return _agent_connection_out(rows[0])
 
 
 @router.get("/brands/{brand_id}/voice")
@@ -2252,6 +2270,32 @@ async def list_knowledge(
             point_payload.setdefault("updated_at", updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at))
         points.append({"id": str(row["id"]), "payload": point_payload})
     return {"points": points, "source": "supabase"}
+
+
+@router.post("/knowledge/faqs/manual", status_code=status.HTTP_201_CREATED)
+async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    """Create a reviewable FAQ from an explicit Orb assistant instruction."""
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    faq = {
+        "question": payload.question.strip(),
+        "answer": payload.answer.strip(),
+        "category": payload.category.strip() or "Customer support",
+        "status": "Draft",
+        "source": "Orb assistant",
+        "source_urls": [],
+    }
+    rows = await _supabase_service_write(
+        request,
+        "POST",
+        "orb_generated_content",
+        params={"select": "id,payload,status,created_at"},
+        payload={"brand_id": brand["id"], "kind": "faq", "payload": faq, "evidence": []},
+    )
+    if not rows:
+        raise HTTPException(status_code=503, detail="Supabase did not return the new FAQ")
+    row = rows[0]
+    stored = decode_jsonb(row.get("payload"))
+    return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else faq}}
 
 
 @router.patch("/knowledge/{kind}/{item_id}")
