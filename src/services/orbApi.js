@@ -139,6 +139,15 @@ export const setRemoteBrandProfile = (brandId, profile) =>
     method: "PATCH",
     body: JSON.stringify(profile),
   });
+export const getRemoteBrandAgentConnection = (brandId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-connection`, {
+    cacheTtl: 0,
+  });
+export const setRemoteBrandAgentConnection = (brandId, connection) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-connection`, {
+    method: "PATCH",
+    body: JSON.stringify(connection),
+  });
 export const askOrbGuide = (payload) =>
   request("/api/orb-guide", { method: "POST", body: JSON.stringify(payload), invalidateCache: false });
 export const chatWithDeployedAgent = (brandId, payload) =>
