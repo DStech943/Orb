@@ -261,6 +261,11 @@ export const createAssistantFaq = ({ question, answer, category = "Customer supp
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, question, answer, category }),
   });
+export const createSopFromFlow = (flow, brandName = activeBrandName()) =>
+  request("/api/knowledge/sops/from-flow", {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, flow }),
+  });
 export const publishApprovedKnowledge = (kind, brandName = activeBrandName()) =>
   request(`/api/knowledge/${kind}/publish-approved`, {
     method: "POST",

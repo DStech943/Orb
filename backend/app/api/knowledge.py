@@ -170,6 +170,11 @@ class FlowAssistRequest(RequestModel):
     prompt: str = Field(min_length=8, max_length=5_000)
 
 
+class FlowToSopCreate(RequestModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    flow: dict[str, Any]
+
+
 class OperationalUpdateCreate(RequestModel):
     brand_name: str = Field(min_length=1, max_length=160)
     message: str = Field(min_length=8, max_length=10_000)
@@ -2297,6 +2302,127 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User 
     row = rows[0]
     stored = decode_jsonb(row.get("payload"))
     return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else faq}}
+
+
+def _flow_sop_node_text(node: dict[str, Any]) -> str:
+    """Make a concise, human-readable SOP fragment from one canvas card."""
+    title = str(node.get("title") or "").strip()
+    body = str(node.get("body") or "").strip()
+    template_name = str(node.get("template_name") or "").strip()
+    if template_name:
+        label = f'Send template “{template_name}”'
+        return f"{label}: {body}" if body else label
+    if title and body and body.casefold() != title.casefold():
+        return f"{title}: {body}"
+    return body or title
+
+
+def _flow_sop_snapshot(flow: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Validate the canvas document before retaining it on a generated SOP."""
+    raw_nodes = flow.get("nodes")
+    raw_edges = flow.get("edges")
+    if not isinstance(raw_nodes, list) or not raw_nodes:
+        raise HTTPException(status_code=422, detail="Add at least one card to the flow before creating an SOP")
+    if not isinstance(raw_edges, list):
+        raw_edges = []
+    if len(raw_nodes) > 150 or len(raw_edges) > 300:
+        raise HTTPException(status_code=422, detail="This flow is too large to convert into one SOP")
+    nodes = [node for node in raw_nodes if isinstance(node, dict)]
+    edges = [edge for edge in raw_edges if isinstance(edge, dict)]
+    if not nodes:
+        raise HTTPException(status_code=422, detail="Add at least one valid card to the flow before creating an SOP")
+    try:
+        serialized = json.dumps({"nodes": nodes, "edges": edges}, ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="The flow contains data that cannot be saved in an SOP") from exc
+    if len(serialized) > 250_000:
+        raise HTTPException(status_code=422, detail="This flow is too detailed to store as an SOP snapshot")
+    return nodes, edges
+
+
+@router.post("/knowledge/sops/from-flow", status_code=status.HTTP_201_CREATED)
+async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    """Convert an editable visual flow into a draft SOP for the brand library.
+
+    The source canvas is retained in the SOP payload so the team can always
+    trace a written procedure back to the exact flow that produced it.
+    """
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    flow = payload.flow
+    nodes, edges = _flow_sop_snapshot(flow)
+
+    def canvas_position(node: dict[str, Any], axis: str) -> float:
+        position = node.get("position")
+        raw = position.get(axis) if isinstance(position, dict) else node.get(axis)
+        try:
+            return float(raw or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    ordered_nodes = sorted(
+        enumerate(nodes),
+        key=lambda indexed: (
+            canvas_position(indexed[1], "x"),
+            canvas_position(indexed[1], "y"),
+            indexed[0],
+        ),
+    )
+    cards_by_type: dict[str, list[str]] = {}
+    for _, node in ordered_nodes:
+        card_type = str(node.get("type") or "").strip().lower()
+        text = _flow_sop_node_text(node)
+        if text:
+            cards_by_type.setdefault(card_type, []).append(text)
+
+    title = str(flow.get("title") or "").strip() or "Untitled support flow"
+    trigger = (cards_by_type.get("trigger") or [title])[0]
+    checks = cards_by_type.get("condition") or []
+    actions = cards_by_type.get("action") or []
+    messages = [
+        *cards_by_type.get("message", []),
+        *cards_by_type.get("template", []),
+    ]
+    handoffs = cards_by_type.get("handoff") or []
+    flow_snapshot = {
+        "flow_id": str(flow.get("id") or "").strip() or None,
+        "title": title,
+        "converted_at": datetime.now(timezone.utc).isoformat(),
+        "nodes": nodes,
+        "edges": edges,
+    }
+    sop = {
+        "title": title,
+        "situation": trigger,
+        "category": str(flow.get("queryCategory") or flow.get("query_category") or "Visual flow").strip(),
+        "lifecycle_stage": str(flow.get("lifecycleStage") or flow.get("lifecycle_stage") or "").strip(),
+        "status": "Draft",
+        "source": "Visual flow",
+        "updated_by": "Orb",
+        "check_first": "\n".join(f"• {item}" for item in checks) or "Follow the flow's trigger and required checks.",
+        "what_to_do": "\n".join(f"{index}. {item}" for index, item in enumerate(actions, start=1)) or "Follow the connected actions in the visual flow.",
+        "what_to_say": "\n".join(messages),
+        "escalate_to": "\n".join(handoffs),
+        "source_flow": flow_snapshot,
+        "source_urls": [],
+    }
+    rows = await _supabase_service_write(
+        request,
+        "POST",
+        "orb_generated_content",
+        params={"select": "id,payload,status,created_at"},
+        payload={
+            "brand_id": brand["id"],
+            "kind": "sop",
+            "status": "draft",
+            "payload": sop,
+            "evidence": [],
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=503, detail="Supabase did not return the new draft SOP")
+    row = rows[0]
+    stored = decode_jsonb(row.get("payload"))
+    return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else sop}}
 
 
 @router.patch("/knowledge/{kind}/{item_id}")

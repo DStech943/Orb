@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowUp,
+  BrainCircuit,
   Check,
   ChevronRight,
   ClipboardCheck,
@@ -43,6 +44,7 @@ import {
   assistFlow,
   createFlow,
   createFlowTemplate,
+  createSopFromFlow,
   deleteFlow,
   deleteFlowTemplate,
   hasOrbApi,
@@ -1638,8 +1640,6 @@ function Builder({
   withOrb = false,
   initialOrbPrompt = "",
   templateMode = null,
-  templateCategories = FLOW_TEMPLATE_CATEGORIES,
-  onTemplateExported,
 }) {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
@@ -1669,9 +1669,8 @@ function Builder({
     [deleting, setDeleting] = useState(false),
     [saving, setSaving] = useState(false),
     [attachedSops, setAttachedSops] = useState([]),
-    [templateExportOpen, setTemplateExportOpen] = useState(false),
-    [templateCategory, setTemplateCategory] = useState(""),
-    [exportingTemplate, setExportingTemplate] = useState(false),
+    [addToBrainOpen, setAddToBrainOpen] = useState(false),
+    [creatingSop, setCreatingSop] = useState(false),
     [expandedNodeIds, setExpandedNodeIds] = useState(() => new Set());
   useEffect(() => {
     if (initialOrbPrompt) setOrbPrompt(initialOrbPrompt);
@@ -2603,50 +2602,28 @@ function Builder({
       setSaving(false);
     }
   };
-  useEffect(() => {
-    if (!templateCategory && templateCategories[0])
-      setTemplateCategory(templateCategories[0].code);
-  }, [templateCategories, templateCategory]);
-  const exportAsTemplate = async () => {
-    if (!templateCategory || exportingTemplate) return;
+  const addToAIsBrain = async () => {
+    if (creatingSop) return;
     const disconnected = disconnectedCards();
     if (disconnected.length) {
       showToast(
-        "Connect every card to the Trigger before adding this flow to templates.",
+        "Connect every card to the Trigger before adding this flow to AI’s Brain.",
       );
       return;
     }
-    setExportingTemplate(true);
+    if (!hasOrbApi) {
+      showToast("AI’s Brain requires a connection to the Orb API.");
+      return;
+    }
+    setCreatingSop(true);
     try {
-      const {
-        id: sourceFlowId,
-        templateId,
-        templateVersion,
-        templateCategory: sourceCategory,
-        isTemplate,
-        updatedAt,
-        ...templatePayload
-      } = draft;
-      await createFlowTemplate({
-        categoryCode: templateCategory,
-        payload: {
-          ...templatePayload,
-          status: "published",
-          import_source: {
-            ...(draft.import_source || {}),
-            kind: "flow_template_export",
-            source_flow_id: sourceFlowId || null,
-            exported_at: new Date().toISOString(),
-          },
-        },
-      });
-      setTemplateExportOpen(false);
-      onTemplateExported?.();
-      showToast("Flow added as a published template for this category.");
+      await createSopFromFlow(draft);
+      setAddToBrainOpen(false);
+      showToast("Draft SOP added to AI’s Brain. Review it before publishing.");
     } catch (error) {
-      showToast(error.message || "Could not add this flow to templates.");
+      showToast(error.message || "Could not create an SOP from this flow.");
     } finally {
-      setExportingTemplate(false);
+      setCreatingSop(false);
     }
   };
   const requestLeave = (action) => {
@@ -2871,11 +2848,10 @@ function Builder({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setTemplateExportOpen(true)}
-              disabled={!templateCategories.length}
+              onClick={() => setAddToBrainOpen(true)}
             >
-              <Copy size={15} />
-              Add to templates
+              <BrainCircuit size={15} />
+              Add to AI’s Brain
             </Button>
           )}
           <Button
@@ -2894,39 +2870,23 @@ function Builder({
           </Button>
         </header>
         <Modal
-          open={templateExportOpen}
-          onClose={() => !exportingTemplate && setTemplateExportOpen(false)}
-          title="Add flow to templates"
+          open={addToBrainOpen}
+          onClose={() => !creatingSop && setAddToBrainOpen(false)}
+          title="Add this flow to AI’s Brain?"
         >
           <div className="space-y-5">
             <p className="text-sm leading-6 text-slate-600">
-              This creates a published global template from the current flow.
-              Every brand in the selected category will see it as a starting
-              point.
+              Orb will turn this flow into a structured SOP draft for the
+              selected brand. It stays in Draft until someone reviews and
+              publishes it, and the original flow is kept on the SOP.
             </p>
-            <label className="grid gap-2 text-sm font-bold text-slate-800">
-              Category
-              <select
-                value={templateCategory}
-                onChange={(event) => setTemplateCategory(event.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-primary"
-                disabled={exportingTemplate}
-              >
-                <option value="">Choose category</option>
-                {templateCategories.map((category) => (
-                  <option key={category.code} value={category.code}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setTemplateExportOpen(false)}
-                disabled={exportingTemplate}
+                onClick={() => setAddToBrainOpen(false)}
+                disabled={creatingSop}
               >
                 Cancel
               </Button>
@@ -2934,15 +2894,15 @@ function Builder({
                 type="button"
                 variant="purple"
                 size="sm"
-                onClick={exportAsTemplate}
-                disabled={!templateCategory || exportingTemplate}
+                onClick={addToAIsBrain}
+                disabled={creatingSop}
               >
-                {exportingTemplate ? (
+                {creatingSop ? (
                   <Loader2 size={15} className="animate-spin" />
                 ) : (
-                  <Copy size={15} />
+                  <BrainCircuit size={15} />
                 )}
-                {exportingTemplate ? "Adding…" : "Add template"}
+                {creatingSop ? "Creating SOP…" : "Create draft SOP"}
               </Button>
             </div>
           </div>
@@ -3930,7 +3890,6 @@ export default function FlowsSupabase() {
             setTemplateEditor(null);
             reload();
           }}
-          onTemplateExported={() => setTemplateVersion((value) => value + 1)}
         />
       ) : (
         <div>
