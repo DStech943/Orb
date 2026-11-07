@@ -31,7 +31,7 @@ const isWakePhraseOnly = (value) => /^(?:hey|hi|okay|ok)\s+(?:orb|orbe|or)$/.tes
 const isNavigationCommand = (value) => /(?:^\s*(?:please\s+)?(?:go|open|navigate|switch|show|take|bring)\b)|(?:\b(?:go|take|bring)\s+(?:me\s+)?(?:to|on|into)\b)|(?:\b(?:can|could|would)\s+you\s+(?:go|open|navigate|switch|show|take|bring)\b)/i.test(value)
 const VOICE_SEND_CUE = /\b(?:orb|orbe)\s*[.!?]*$/i
 const actionDestinations = {
-  open_agent_chat: '/app/workspace?tab=chat',
+  open_agent_chat: '/app/brain?tab=chat',
   open_sops: '/app/brain?tab=sops',
   open_faqs: '/app/brain?tab=faqs',
   open_create_with_orb: '/app/flows?create=orb',
@@ -69,7 +69,7 @@ const directGuideCommand = (value) => {
     answer: asksWhereToFindIt ? whereAnswer : `Opening ${label}.`,
     autoNavigate: !asksWhereToFindIt,
   })
-  if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: asksWhereToFindIt ? 'The agent test chat is in Brand Workspace.' : 'Opening the agent test chat.', autoNavigate: !asksWhereToFindIt }
+  if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: asksWhereToFindIt ? "The agent test chat is in AI's Brain." : 'Opening the agent test chat.', autoNavigate: !asksWhereToFindIt }
   if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: asksWhereToFindIt ? "FAQs are in AI's Brain." : 'Opening FAQs.', autoNavigate: !asksWhereToFindIt }
   if (/\b(?:sop|sops)\b/.test(text)) return { action: 'open_sops', answer: asksWhereToFindIt ? "SOPs are in AI's Brain." : 'Opening SOPs.', autoNavigate: !asksWhereToFindIt }
   if (/\b(?:brain|knowledge|knowledge base)\b/.test(text)) return pageResponse('/app/brain', "AI's Brain", "AI's Brain is in the left sidebar.")
@@ -97,6 +97,7 @@ export default function OrbGuide() {
   const [dictating, setDictating] = useState(false)
   const [dictationError, setDictationError] = useState('')
   const [voiceDictationRequest, setVoiceDictationRequest] = useState(0)
+  const [promptReset, setPromptReset] = useState(0)
   const inputRef = useRef(null)
   const recognitionRef = useRef(null)
   const restartTimerRef = useRef(null)
@@ -372,6 +373,10 @@ export default function OrbGuide() {
     setMessages((items) => [...items, { id: makeId(), role: 'user', text }])
     draftRef.current = ''
     setDraft('')
+    // Clear the browser control too. This prevents a late text-input or
+    // speech-recognition event from leaving the just-sent prompt visible.
+    if (inputRef.current) inputRef.current.value = ''
+    setPromptReset((value) => value + 1)
     const previousDestination = followPreviousDestination(text) ? lastDestinationRef.current : null
     if (previousDestination?.destination) {
       const acknowledgement = `Opening ${previousDestination.destinationLabel || pages[previousDestination.destination]?.title || 'that page'}.`
@@ -443,7 +448,7 @@ export default function OrbGuide() {
         {messages.length === 0 && !thinking && <div aria-live="polite" className="orb-guide-greeting orb-guide-copy inline-flex rounded-2xl rounded-tl-md border border-slate-200 bg-white px-3 py-2.5 shadow-sm">How may I help you?</div>}
         <div className={messages.length || thinking ? 'space-y-3' : 'mt-5 space-y-3'}>{messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`max-w-[84%] rounded-2xl px-3 py-2.5 shadow-sm ${message.role === 'user' ? 'rounded-br-md bg-primary text-xs leading-5 text-white' : message.error ? 'rounded-bl-md border border-red-200 bg-red-50 text-red-700' : 'orb-guide-copy rounded-bl-md border border-slate-200 bg-white'}`}><p>{message.text}</p>{message.destination && <button type="button" onClick={() => navigate(message.destination)} className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary-tint px-2 py-1 text-[11px] font-bold text-primary transition hover:bg-primary/15">Open {message.destinationLabel || pages[message.destination]?.title || 'page'}<ArrowUpRight size={13} /></button>}</div></div>)}{thinking && <div aria-live="polite" className="orb-guide-thinking orb-guide-copy inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2.5"><span className="orb-guide-thinking__dots" aria-hidden="true"><i /><i /><i /></span>Orb is thinking…</div>}</div>
       </div>
-      <form onSubmit={ask} className="orb-guide-prompt border-t border-slate-200 bg-white p-3"><div className={`orb-prompt-field rounded-xl border p-3 transition ${thinking ? 'opacity-70' : ''}`}><textarea ref={inputRef} value={draft} onChange={(event) => { draftRef.current = event.target.value; setDraft(event.target.value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(event) } }} disabled={thinking} rows={2} placeholder="" className="block w-full resize-none bg-transparent text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed" />{!draft && !thinking && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPlaceholder}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><button type="button" onClick={startDictation} disabled={thinking} aria-label={dictating ? 'Stop dictation' : 'Start dictation'} title={dictating ? 'Stop dictation' : 'Dictate your question'} className={`orb-prompt-field__icon grid h-8 w-8 place-items-center rounded-lg transition hover:bg-primary/10 disabled:cursor-not-allowed ${dictating ? 'bg-primary/10 text-primary' : ''}`}>{dictating ? <MicOff size={16} /> : <Mic size={16} />}</button><button type="submit" aria-label="Ask Orb" disabled={!draft.trim() || thinking} className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{thinking ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={17} strokeWidth={2.5} />}</button></div></div>{dictationError && <p role="alert" className="px-1 pt-2 text-[11px] font-medium text-red-600">{dictationError}</p>}</form>
+      <form onSubmit={ask} className="orb-guide-prompt border-t border-slate-200 bg-white p-3"><div className={`orb-prompt-field rounded-xl border p-3 transition ${thinking ? 'opacity-70' : ''}`}><textarea key={promptReset} ref={inputRef} value={draft} onChange={(event) => { draftRef.current = event.target.value; setDraft(event.target.value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(event) } }} disabled={thinking} rows={2} placeholder="" className="block w-full resize-none bg-transparent text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed" />{!draft && !thinking && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPlaceholder}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><button type="button" onClick={startDictation} disabled={thinking} aria-label={dictating ? 'Stop dictation' : 'Start dictation'} title={dictating ? 'Stop dictation' : 'Dictate your question'} className={`orb-prompt-field__icon grid h-8 w-8 place-items-center rounded-lg transition hover:bg-primary/10 disabled:cursor-not-allowed ${dictating ? 'bg-primary/10 text-primary' : ''}`}>{dictating ? <MicOff size={16} /> : <Mic size={16} />}</button><button type="submit" aria-label="Ask Orb" disabled={!draft.trim() || thinking} className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{thinking ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={17} strokeWidth={2.5} />}</button></div></div>{dictationError && <p role="alert" className="px-1 pt-2 text-[11px] font-medium text-red-600">{dictationError}</p>}</form>
     </section>}
     <button type="button" onClick={() => { if (open) closeGuide(); else setOpen(true) }} aria-label={open ? 'Close Orb guide' : 'Open Orb guide'} aria-expanded={open} className="group relative grid h-12 w-12 place-items-center rounded-full transition duration-200 hover:scale-105 focus:outline-none focus-visible:ring-4 focus-visible:ring-primary/25"><span className="absolute inset-0 rounded-full bg-primary/10 blur-md transition group-hover:bg-primary/20" /><span className="relative h-12 w-12 overflow-hidden rounded-full shadow-lg shadow-primary/20"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span></button>
   </div>
