@@ -716,6 +716,11 @@ async def _sync_cs_operational_update(
         result = response.json()
     except ValueError:
         return "ready_for_review", pending
+    # A connected agent may return a successful JSON response in a different
+    # envelope (for example, a list or an empty object). That must never stop
+    # Orb from recording the user's operational update locally.
+    if not isinstance(result, dict):
+        return "ready_for_review", pending
     if str(result.get("status") or "") not in {"applied", "already_applied"}:
         return "ready_for_review", pending
     return "applied", [
