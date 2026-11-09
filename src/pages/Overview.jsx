@@ -123,27 +123,29 @@ function useProductDrop(brandName, count) {
   return drop
 }
 
-function ProductImage({ product }) {
+function ProductImage({ product, onUnavailable }) {
   const [failed, setFailed] = useState(false)
   useEffect(() => setFailed(false), [product.id, product.imageUrl])
-  if (!product.imageUrl || failed) return <div className="grid aspect-square place-items-center rounded-2xl bg-primary/10 text-2xl font-extrabold text-primary">{String(product.title || '?').trim().charAt(0).toUpperCase() || '?'}</div>
-  return <img src={product.imageUrl} alt="" onError={() => setFailed(true)} className="aspect-square w-full rounded-2xl object-cover" />
+  if (!product.imageUrl || failed) return null
+  return <img src={product.imageUrl} alt="" onError={() => { setFailed(true); onUnavailable(product.id) }} className="aspect-square w-full rounded-2xl object-cover" />
 }
 
 function ProductBlock({ products, productError, loading, brandName, onRetry }) {
+  const [unavailableImageIds, setUnavailableImageIds] = useState([])
   const selected = useMemo(() => {
-    const items = [...(products || [])]
+    const items = (products || []).filter((product) => product.imageUrl && !unavailableImageIds.includes(product.id))
     const hasBestSellers = items.some((product) => product.bestSellerScore !== null && product.bestSellerScore !== undefined)
     return items.sort((a, b) => {
       if (hasBestSellers) return Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
       return String(b.newestAt || '').localeCompare(String(a.newestAt || ''))
     }).slice(0, 4)
-  }, [products])
+  }, [products, unavailableImageIds])
   const drop = useProductDrop(brandName, selected.length)
+  const hideUnavailableProduct = (id) => setUnavailableImageIds((current) => (current.includes(id) ? current : [...current, id]))
   if (loading) return <section aria-label="Loading featured products" className="overview-product-wave">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="overview-product-skeleton" />)}</section>
   if (productError) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="font-extrabold">Could not load products</p><Button size="sm" variant="outline" className="mt-4" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
-  if (!selected.length) return <Link to="/app/products" className="flex min-h-40 items-center justify-center rounded-xl border-2 border-dashed border-ink/35 bg-white px-5 text-sm font-extrabold transition hover:border-primary hover:text-primary">Add products <span className="ml-1">→</span></Link>
-  return <section aria-label="Featured products" className="overview-product-wave">{selected.map((product, index) => <Link key={product.id} aria-label={`${product.title || 'Product'}${product.price ? `, ${product.price}` : ''}`} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} relative`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, '--wave-y': `${[18, 0, 20, 5][index % 4]}px`, '--float-delay': `${index * -0.8}s`, animationDelay: `${index * 90}ms` }}><span className="overview-product-art"><ProductImage product={product} /></span><span className="overview-product-price">{product.price || 'Price unavailable'}</span></Link>)}</section>
+  if (!selected.length) return null
+  return <section aria-label="Featured products" className="overview-product-wave">{selected.map((product, index) => <Link key={product.id} aria-label={`${product.title || 'Product'}${product.price ? `, ${product.price}` : ''}`} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} relative`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, '--wave-y': `${[18, 0, 20, 5][index % 4]}px`, '--float-delay': `${index * -0.8}s`, animationDelay: `${index * 90}ms` }}><span className="overview-product-art"><ProductImage product={product} onUnavailable={hideUnavailableProduct} /></span><span className="overview-product-price">{product.price || 'Price unavailable'}</span></Link>)}</section>
 }
 
 const DAY = 86_400_000

@@ -82,9 +82,9 @@ class CategoryPatch(RequestModel):
 
 
 class BrandProfilePatch(RequestModel):
-    website_url: str = Field(default="", max_length=2_000)
-    support_email: str = Field(default="", max_length=320)
-    description: str = Field(default="", max_length=4_000)
+    website_url: str | None = Field(default=None, max_length=2_000)
+    support_email: str | None = Field(default=None, max_length=320)
+    description: str | None = Field(default=None, max_length=4_000)
     ai_agent_name: str | None = Field(default=None, max_length=120)
 
 
@@ -1657,25 +1657,29 @@ async def set_brand_profile(brand_id: str, payload: BrandProfilePatch, request: 
     platform_config = decode_jsonb(existing["platform_config"])
     platform_config = dict(platform_config) if isinstance(platform_config, dict) else {}
     profile_updates = {
-        "website_url": payload.website_url.strip(),
-        "support_email": payload.support_email.strip(),
+        "website_url": payload.website_url,
+        "support_email": payload.support_email,
     }
     # Existing callers update only business fields. Preserve an already
     # configured agent name unless this request explicitly includes one.
     if payload.ai_agent_name is not None:
         profile_updates["ai_agent_name"] = payload.ai_agent_name.strip()
-    for key, value in profile_updates.items():
+    for key, raw_value in profile_updates.items():
+        if raw_value is None:
+            continue
+        value = raw_value.strip()
         if value:
             platform_config[key] = value
         else:
             platform_config.pop(key, None)
+    description = existing["description"] if payload.description is None else (payload.description.strip() or None)
     row = await request.app.state.supabase_db.fetchrow(
         """UPDATE cx_copilot.brands
            SET description=$2, platform_config=$3::jsonb
            WHERE id=$1::uuid
            RETURNING id,name,description,industry_category,platform_config""",
         brand_id,
-        payload.description.strip() or None,
+        description,
         platform_config,
     )
     if not row:
@@ -1768,6 +1772,7 @@ async def get_brand_voice(brand_id: str, request: Request, _: User = Depends(_ad
     sources = await _supabase_private_rows(request, "orb_brand_voice_sources", {"select": "*", "brand_id": f"eq.{brand_id}", "order": "created_at.desc"})
     profiles = await _supabase_private_rows(request, "orb_brand_voice_profiles", {"select": "*", "brand_id": f"eq.{brand_id}", "order": "created_at.desc"})
     return {
+        "brand": _brand_out(brand),
         "sources": [_voice_source_out(row) for row in sources],
         "profiles": [_voice_profile_out(row) for row in profiles],
         "agent_tone": await _read_agent_tone(brand),

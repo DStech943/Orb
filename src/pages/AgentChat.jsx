@@ -1,11 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
-  Check,
   Eraser,
   Loader2,
   MessageCircleMore,
-  Pencil,
   ThumbsUp,
   X,
 } from "lucide-react";
@@ -19,7 +17,6 @@ import {
   hasBrandAgentApi,
   hasOrbApi,
   listBrandAgentFeedback,
-  setRemoteBrandProfile,
 } from "../services/orbApi";
 import useAsync from "../hooks/useAsync";
 import { useToast } from "../context/ToastContext";
@@ -113,9 +110,6 @@ export default function AgentChat({ embedded = false }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [agentNameOverride, setAgentNameOverride] = useState(null);
-  const [editingAgentName, setEditingAgentName] = useState(false);
-  const [agentNameDraft, setAgentNameDraft] = useState("");
-  const [savingAgentName, setSavingAgentName] = useState(false);
   const [feedback, setFeedback] = useState([]);
   const [feedbackTarget, setFeedbackTarget] = useState(null);
   const [selectedTags, setSelectedTags] = useState([]);
@@ -136,8 +130,6 @@ export default function AgentChat({ embedded = false }) {
 
   useEffect(() => {
     setAgentNameOverride(null);
-    setEditingAgentName(false);
-    setAgentNameDraft("");
   }, [activeBrand?.id]);
 
   useEffect(() => {
@@ -190,6 +182,9 @@ export default function AgentChat({ embedded = false }) {
     const onBrandChange = (event) => {
       if (event.detail?.id) {
         setBrandId(event.detail.id);
+        if (typeof event.detail.ai_agent_name === "string") {
+          setAgentNameOverride(event.detail.ai_agent_name.trim());
+        }
         setMessages([]);
         setFeedback([]);
         setFeedbackTarget(null);
@@ -225,47 +220,6 @@ export default function AgentChat({ embedded = false }) {
     setDraft("");
     setError("");
     setSessionId(sessionForBrand());
-  };
-
-  const beginAgentNameEdit = () => {
-    setAgentNameDraft(configuredAgentName);
-    setEditingAgentName(true);
-  };
-
-  const saveAgentName = async (event) => {
-    event?.preventDefault();
-    if (!activeBrand?.id || savingAgentName) return;
-    if (!hasOrbApi) {
-      showToast("Start the Orb backend to save the agent name.", "error");
-      return;
-    }
-    setSavingAgentName(true);
-    try {
-      const result = await setRemoteBrandProfile(activeBrand.id, {
-        website_url: activeBrand.profile?.website_url || "",
-        support_email: activeBrand.profile?.support_email || "",
-        description: activeBrand.description || "",
-        ai_agent_name: agentNameDraft.trim(),
-      });
-      const savedName = String(result?.brand?.ai_agent_name || "").trim();
-      setAgentNameOverride(savedName);
-      setEditingAgentName(false);
-      window.localStorage.setItem("orb_selected_brand_agent_name", savedName);
-      window.dispatchEvent(
-        new CustomEvent("orb:brand-changed", {
-          detail: { ...activeBrand, ai_agent_name: savedName },
-        }),
-      );
-      showToast(
-        savedName
-          ? `Agent name updated to ${savedName}.`
-          : "Agent name cleared. Chat with AI will be used.",
-      );
-    } catch (cause) {
-      showToast(cause?.message || "Could not save the agent name.", "error");
-    } finally {
-      setSavingAgentName(false);
-    }
   };
 
   const sendMessage = async (event, prompt) => {
@@ -360,15 +314,6 @@ export default function AgentChat({ embedded = false }) {
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
-            onClick={beginAgentNameEdit}
-            disabled={!activeBrand?.id || savingAgentName}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-primary/35 hover:bg-primary-tint hover:text-primary disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <Pencil size={14} />
-            Edit name
-          </button>
-          <button
-            type="button"
             onClick={clearChat}
             disabled={!messages.length && !draft && !error}
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
@@ -378,47 +323,6 @@ export default function AgentChat({ embedded = false }) {
           </button>
         </div>
       </div>
-      {editingAgentName && (
-        <form
-          onSubmit={saveAgentName}
-          className="mb-5 flex max-w-md items-center gap-2 rounded-lg border border-primary/20 bg-primary-tint/35 p-2"
-        >
-          <label className="sr-only" htmlFor="agent-display-name">
-            Agent display name
-          </label>
-          <input
-            id="agent-display-name"
-            autoFocus
-            value={agentNameDraft}
-            onChange={(event) => setAgentNameDraft(event.target.value)}
-            maxLength={120}
-            placeholder="Maya AI"
-            className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
-          />
-          <button
-            type="submit"
-            disabled={savingAgentName}
-            aria-label="Save agent name"
-            className="grid h-9 w-9 place-items-center rounded-md bg-primary text-white transition hover:bg-primary-dark disabled:opacity-50"
-          >
-            {savingAgentName ? (
-              <Loader2 size={15} className="animate-spin" />
-            ) : (
-              <Check size={16} />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditingAgentName(false)}
-            disabled={savingAgentName}
-            aria-label="Cancel editing agent name"
-            className="grid h-9 w-9 place-items-center rounded-md text-slate-500 transition hover:bg-white hover:text-slate-800"
-          >
-            <X size={16} />
-          </button>
-        </form>
-      )}
-
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-slate-200">
           <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
