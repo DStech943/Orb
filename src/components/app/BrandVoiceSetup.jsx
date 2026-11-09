@@ -3,7 +3,7 @@ import { CheckCircle2, FileText, Loader2, PencilLine, Trash2, Upload, Wand2 } fr
 import Button from '../ui/Button'
 import Textarea from '../ui/Textarea'
 import { useToast } from '../../context/ToastContext'
-import { hasOrbApi, approveBrandVoice, createManualBrandVoiceProfile, deleteBrandVoiceSource, generateBrandVoice, getBrandVoice, importBrandVoiceSource } from '../../services/orbApi'
+import { hasOrbApi, approveBrandVoice, createManualBrandVoiceProfile, deleteBrandVoiceSource, generateBrandVoice, getBrandVoice, importBrandVoiceSource, setRemoteBrandProfile } from '../../services/orbApi'
 
 const emptyProfile = { id: '', profile: {}, drafting_prompt: '', status: 'draft' }
 const VOICE_TONES = [
@@ -102,6 +102,8 @@ export default function BrandVoiceSetup({ isAdmin }) {
   const [selectedToneId, setSelectedToneId] = useState(VOICE_TONES[0].id)
   const [tonePrompt, setTonePrompt] = useState(() => detailedTonePrompt(VOICE_TONES[0]))
   const [customGuidance, setCustomGuidance] = useState('')
+  const [agentName, setAgentName] = useState('')
+  const [savingAgentName, setSavingAgentName] = useState(false)
   const selectedTone = VOICE_TONES.find((tone) => tone.id === selectedToneId) || VOICE_TONES[0]
 
   const load = useCallback(async (brandId = brand.id) => {
@@ -115,6 +117,7 @@ export default function BrandVoiceSetup({ isAdmin }) {
       setProfiles(nextProfiles)
       const preferred = nextProfiles.find((item) => item.status === 'draft') || nextProfiles.find((item) => item.status === 'approved') || emptyProfile
       const liveTone = result?.agent_tone || { status: 'not_connected', tone_system_prompt: '' }
+      setAgentName(String(result?.brand?.ai_agent_name || '').trim())
       const livePrompt = String(liveTone.tone_system_prompt || '').trim()
       setAgentTone(liveTone)
       // The deployed Support Agent is the runtime source of truth. When it
@@ -146,6 +149,7 @@ export default function BrandVoiceSetup({ isAdmin }) {
       setProfiles([])
       setDraft(emptyProfile)
       setAgentTone({ status: 'loading', tone_system_prompt: '' })
+      setAgentName('')
       if (next.id) load(next.id)
     }
     window.addEventListener('orb:brand-changed', onBrandChange)
@@ -249,6 +253,24 @@ export default function BrandVoiceSetup({ isAdmin }) {
     }
   }
 
+  const saveAgentName = async (event) => {
+    event.preventDefault()
+    if (!brand.id || savingAgentName) return
+    setSavingAgentName(true)
+    try {
+      const result = await setRemoteBrandProfile(brand.id, { ai_agent_name: agentName.trim() })
+      const savedName = String(result?.brand?.ai_agent_name || '').trim()
+      setAgentName(savedName)
+      window.localStorage.setItem('orb_selected_brand_agent_name', savedName)
+      window.dispatchEvent(new CustomEvent('orb:brand-changed', { detail: { id: brand.id, name: brand.name, ai_agent_name: savedName } }))
+      showToast(savedName ? `Agent name updated to ${savedName}.` : 'Agent name cleared. Chat with AI will be used.')
+    } catch (error) {
+      showToast(error.message || 'Could not save the agent name.', 'error')
+    } finally {
+      setSavingAgentName(false)
+    }
+  }
+
   if (!isAdmin) return <p className="rounded-md border border-ink/15 bg-peach p-3 text-sm text-muted">An administrator can import and approve the brand voice used for drafting.</p>
   if (!hasOrbApi) return <p className="rounded-md border border-ink/15 bg-peach p-3 text-sm text-muted">Start the Orb backend to import and approve a brand voice.</p>
 
@@ -261,6 +283,19 @@ export default function BrandVoiceSetup({ isAdmin }) {
     </div>
 
     {loadError && <div role="alert" className="animate-page-in rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">{loadError}</div>}
+
+    <form onSubmit={saveAgentName} className="rounded-xl border border-ink/15 bg-white p-4 sm:p-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-extrabold uppercase tracking-widest text-purple">Agent identity</p>
+          <h4 className="mt-1 text-lg font-extrabold">What should your AI be called?</h4>
+          <p className="mt-1 text-sm text-muted">This name appears in Chat with AI and is separate from the brand voice prompt.</p>
+          <label className="mt-4 block text-sm font-bold" htmlFor="brand-agent-display-name">Agent display name</label>
+          <input id="brand-agent-display-name" value={agentName} onChange={(event) => setAgentName(event.target.value)} maxLength={120} placeholder="e.g. Maya AI" className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal outline-none transition focus:border-purple focus:ring-2 focus:ring-purple/15" />
+        </div>
+        <Button type="submit" variant="purple" size="sm" disabled={savingAgentName || !brand.id}>{savingAgentName ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}Save name</Button>
+      </div>
+    </form>
 
     <section className="rounded-xl border border-ink/15 bg-slate-50 p-4 sm:p-5">
       <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand tonality</p><h4 className="mt-1 text-lg font-extrabold">Choose how your brand should sound</h4><p className="mt-1 text-sm text-muted">Start with one of five editable tonal directions, or create a custom one. The prompt you save becomes the live instruction used by this brand’s Support Agent.</p></div>
