@@ -119,6 +119,7 @@ async function fetchViaApi(brandName, user) {
         sh.images?.map((image) => image?.url ?? image?.src),
         sh.images?.edges?.map((edge) => edge?.node?.url ?? edge?.node?.src),
       ),
+      productUrl: pl.product_url ?? pl.url ?? sh.onlineStoreUrl ?? sh.productUrl ?? '',
       price: pl.price ?? '',
       coverage: pl.coverage ?? null, // [MOCK] coverage field not yet in API shape
       bestSellerScore: Number(pl.best_seller_score ?? pl.sales_rank ?? pl.sales ?? 0) || null,
