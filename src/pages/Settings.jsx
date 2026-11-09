@@ -36,12 +36,21 @@ const tabs = [
 const team = [
   { name: "Keith Fernandes", email: "keith@example.com", role: "Admin" },
 ];
+const setupGuideSteps = [
+  "Add a knowledge source",
+  "Generate your first drafts",
+  "Review a draft",
+  "Publish your first SOP or FAQ",
+  "Create your first flow",
+  "Connect Shopify when your brand uses it",
+];
 
 export default function Settings() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [params, setParams] = useSearchParams();
   const active = params.get("tab") || "profile";
+  const setupGuideOpen = params.get("setupGuide") === "1";
   const [dirty, setDirty] = useState(false);
   const [profile, setProfile] = useState({
     name: user?.name || "",
@@ -158,6 +167,7 @@ export default function Settings() {
     setDirty(false);
     setParams({ tab: next });
   };
+  const closeSetupGuide = () => setParams({ tab: active });
   const save = () => {
     setDirty(false);
     showToast("Settings saved.");
@@ -283,6 +293,7 @@ export default function Settings() {
                 <Save size={16} />
                 Save profile
               </Button>
+              <button type="button" onClick={() => setParams({ tab: "profile", setupGuide: "1" })} className="w-fit text-xs font-extrabold text-primary hover:underline">Setup guide</button>
               <section className="mt-3 rounded-xl border border-primary/15 bg-primary-tint/35 p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
@@ -709,6 +720,10 @@ export default function Settings() {
         >
           Send invite
         </Button>
+      </Modal>
+      <Modal open={setupGuideOpen} onClose={closeSetupGuide} title="Setup guide">
+        <p className="text-sm leading-6 text-muted">This guide is read-only. Complete each step from the Overview to prepare your brand workspace.</p>
+        <ol className="mt-4 grid gap-2">{setupGuideSteps.map((step, index) => <li key={step} className="flex items-center gap-3 rounded-lg border border-ink/10 px-3 py-2 text-sm"><span className="grid h-6 w-6 place-items-center rounded-full border border-ink/20 text-xs font-extrabold">{index + 1}</span>{step}</li>)}</ol>
       </Modal>
       <ConfirmDialog
         open={deleteAccount}

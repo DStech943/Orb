@@ -289,6 +289,14 @@ export const createOperationalUpdate = (message, brandName = activeBrandName()) 
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, message }),
   });
+// The operations API does not yet expose an expiry-update endpoint. Keep this
+// service boundary so the Overview can use the real endpoint as soon as it is
+// available, while the current UI updates its local operation row safely.
+export const extendOperation = async (id, newExpiresAt) => ({
+  id,
+  expires_at: newExpiresAt,
+  mock: true,
+});
 export const listMessageTemplates = (brandName = activeBrandName()) =>
   brandName
     ? request(`/api/templates?brand_name=${encodeURIComponent(brandName)}`, { cacheTtl: 30_000 })

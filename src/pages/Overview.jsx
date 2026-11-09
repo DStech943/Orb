@@ -1,59 +1,344 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, ClipboardList, FileText, GitBranch, HelpCircle, PackageSearch, RefreshCw, Sparkles } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router-dom'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUpRight, Check, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
-import StatCard from '../components/ui/StatCard'
-import Stepper from '../components/app/Stepper'
-import SourcePicker from '../components/app/SourcePicker'
-import OutputToggleCard from '../components/app/OutputToggleCard'
-import ProgressRow from '../components/app/ProgressRow'
-import useAsync from '../hooks/useAsync'
-import useGenerationJob from '../hooks/useGenerationJob'
-import { addSource, getOverviewData, removeSource, startGeneration } from '../services/generation'
+import { MOCK_STATES, useOverview } from '../services/overview'
+import { extendOperation } from '../services/orbApi'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { activeBrandName, hasOrbApi, listFlows, listKnowledge, listOperationalUpdates } from '../services/orbApi'
+import Modal from '../components/ui/Modal'
 
-const steps = [{ id: 'sources', label: 'Add sources', description: 'Website, files, or pasted text.' }, { id: 'outputs', label: 'Choose outputs', description: 'Select what Orb should draft.' }, { id: 'review', label: 'Review and generate', description: 'Check your choices before starting.' }]
-const outputInfo = { SOPs: 'Clear operating steps for your team.', FAQs: 'Answers your customers need.', Products: 'Product facts and descriptions.' }
+const WELCOME_LINES = [
+  'Good support is just consistency, repeated.',
+  'Every approved answer is one less reply someone has to rewrite.',
+  'Your agent is only as sharp as what it has been taught.',
+  'Small updates beat big rewrites. Refresh one thing today.',
+  'Clear answers mean fewer surprises for your customers.',
+]
 
-function Setup({ data, reload }) { const [search, setSearch] = useSearchParams(); const { user } = useAuth(); const { showToast } = useToast(); const [step, setStep] = useState(search.get('generate') ? 0 : 0); const [outputs, setOutputs] = useState({ SOPs: true, FAQs: true, Products: true }); const [jobId, setJobId] = useState(null); const job = useGenerationJob(jobId); const firstName = (user?.name || user?.email?.split('@')[0] || '').replace(/\d+/g, '').replace(/[._-]+/g, ' ').trim().split(' ')[0].replace(/^./, (letter) => letter.toUpperCase()) || 'there'; const selected = Object.entries(outputs).filter(([, value]) => value).map(([key]) => key); const ready = data.sources.length > 0 && selected.length > 0
-  useEffect(() => { if (job?.status === 'Done') { reload(); showToast('Generation finished'); setJobId(null); setSearch({}) } }, [job?.status])
-  const add = async (source) => { await addSource(source); reload() }; const remove = async (id) => { await removeSource(id); reload() }; const generate = async () => { const { jobId: id } = await startGeneration({ sources: data.sources, outputs: selected }); setJobId(id) }
-  if (job) return <section className="mx-auto max-w-4xl rounded-lg border-2 border-ink bg-white p-6 shadow-brutal"><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Generation in progress</p><h2 className="mt-2 text-3xl font-extrabold tracking-tight">Building your knowledge base</h2><div className="mt-5">{job.outputs.map((item) => <ProgressRow key={item.name} item={item} onRetry={() => generate()} />)}</div></section>
-  return <div className="mx-auto max-w-5xl"><section className="rounded-lg border-2 border-ink bg-purple p-6 text-white shadow-brutal"><p className="text-xs font-extrabold uppercase tracking-widest text-white/80">Welcome, {firstName}</p><h2 className="mt-2 text-3xl font-extrabold tracking-tight">Let’s build your knowledge base.</h2><p className="mt-2 max-w-2xl text-sm">Add your sources and Orb will draft your SOPs, FAQs and product knowledge.</p></section><div className="mt-6"><Stepper steps={steps} active={step} onChange={setStep} /><section className="mt-4 rounded-lg border-2 border-ink bg-white p-5 shadow-brutal">{step === 0 && <><h3 className="text-xl font-extrabold">Add sources</h3><p className="mt-1 text-sm text-muted">Use a website link, a file up to 12 MB, or text you paste in.</p><div className="mt-5"><SourcePicker sources={data.sources} onAdd={add} onRemove={remove} /></div></>}{step === 1 && <><h3 className="text-xl font-extrabold">Choose what to generate</h3><div className="mt-5 grid gap-3 md:grid-cols-3">{Object.entries(outputInfo).map(([title, description]) => <OutputToggleCard key={title} title={title} description={description} checked={outputs[title]} onChange={(value) => setOutputs({ ...outputs, [title]: value })} />)}</div></>}{step === 2 && <><h3 className="text-xl font-extrabold">Review and generate</h3><dl className="mt-5 grid gap-3 rounded-md bg-peach p-4 text-sm"><div><dt className="font-bold">Sources</dt><dd>{data.sources.length ? data.sources.map((source) => source.label).join(', ') : 'No sources added'}</dd></div><div><dt className="font-bold">Outputs</dt><dd>{selected.length ? selected.join(', ') : 'No outputs selected'}</dd></div></dl><p className="mt-4 text-xs text-muted">{ready ? 'Orb will begin processing your sources.' : 'Add at least one source and choose one output to generate.'}</p><Button className="mt-4" disabled={!ready} onClick={generate}>Generate <ArrowRight size={16} /></Button></>}</section><div className="mt-4 flex justify-between"><Button variant="outline" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</Button>{step < 2 && <Button variant="purple" onClick={() => setStep(step + 1)}>Continue</Button>}</div></div></div>
+const DEV_STATES = MOCK_STATES || {}
+
+const METRIC_CONFIG = [
+  { key: 'sops', label: 'SOPs', noun: 'SOP', nouns: 'SOPs', milestones: [1, 10, 25, 50], listTo: '/app/brain?tab=sops', draftTo: '/app/brain?tab=sops&status=draft', createTo: '/app/brain?tab=sops' },
+  { key: 'faqs', label: 'FAQs', noun: 'FAQ', nouns: 'FAQs', milestones: [1, 10, 25, 50], listTo: '/app/brain?tab=faqs', draftTo: '/app/brain?tab=faqs&status=draft', createTo: '/app/brain?tab=faqs' },
+  { key: 'flows', label: 'Flows', noun: 'flow', nouns: 'flows', milestones: [1, 3, 5, 10], listTo: '/app/flows', draftTo: '/app/flows?status=draft', createTo: '/app/flows?create=1' },
+]
+
+const hasReducedMotion = () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+function useCountUp(value, sessionKey) {
+  const safeValue = Math.max(0, Number(value) || 0)
+  const [display, setDisplay] = useState(() => (typeof window !== 'undefined' && window.sessionStorage.getItem(sessionKey) ? safeValue : 0))
+  useEffect(() => {
+    const hasPlayed = window.sessionStorage.getItem(sessionKey)
+    if (hasPlayed || hasReducedMotion() || safeValue === 0) { setDisplay(safeValue); return }
+    window.sessionStorage.setItem(sessionKey, 'shown')
+    let frame
+    const startedAt = performance.now()
+    const tick = (now) => {
+      const progress = Math.min(1, (now - startedAt) / 620)
+      setDisplay(Math.round(safeValue * (1 - Math.pow(1 - progress, 3))))
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [safeValue, sessionKey])
+  return display
 }
 
-function NormalOverview({ data }) { const [search, setSearch] = useSearchParams(); const drafts = [...data.sops, ...data.faqs].filter((item) => item.status === 'Draft'); const stats = [{ value: data.sops.length, label: 'SOPs generated', icon: ClipboardList }, { value: data.faqs.length, label: 'FAQs generated', icon: HelpCircle }, { value: data.products.length, label: 'Products found', icon: PackageSearch }, { value: drafts.length, label: 'Needs review', icon: RefreshCw }]; return <div className="mx-auto max-w-6xl"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Overview</p><h2 className="mt-1 text-3xl font-extrabold tracking-tight">Your knowledge base</h2></div><Button onClick={() => setSearch({ generate: '1' })}>Generate more <ArrowRight size={16} /></Button></div><section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((item) => <StatCard key={item.label} {...item} />)}</section><section className="mt-6 grid gap-6 lg:grid-cols-2"><section className="rounded-lg border-2 border-ink bg-white p-5 shadow-brutal"><h3 className="text-xl font-extrabold">Recent generations</h3>{data.generations.length ? <div className="mt-4 divide-y divide-ink/10">{data.generations.map((item) => <div key={item.id} className="py-3 text-sm"><strong>{item.source}</strong><p className="mt-1 text-xs text-muted">{item.date} · {item.outputs.join(', ')} · {item.status}</p></div>)}</div> : <EmptyState title="No generations yet." action="Generate" onAction={() => setSearch({ generate: '1' })} />}</section><section className="rounded-lg border-2 border-ink bg-white p-5 shadow-brutal"><h3 className="text-xl font-extrabold">Needs review</h3>{drafts.length ? <ul className="mt-4 divide-y divide-ink/10">{drafts.slice(0, 4).map((item) => <li key={item.id} className="py-3"><Link className="font-bold hover:text-purple" to={item.question ? '/app/faqs' : '/app/sops'}>{item.title || item.question}</Link><p className="mt-1 text-xs text-muted">Draft · {item.source}</p></li>)}</ul> : <p className="mt-4 text-sm text-muted">Nothing needs review.</p>}</section></section></div> }
-
-const dashboardPoints = (result) => Array.isArray(result?.points) ? result.points.map((item) => ({ id: item.id, ...(item.payload || {}) })) : []
-const dashboardDate = (value) => {
-  const date = value ? new Date(value) : null
-  return date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short', year: 'numeric' }).format(date) : 'No recent changes'
+function useMilestoneBadge(brandName, type, published, milestones, noun, nouns) {
+  const [badge, setBadge] = useState(null)
+  const storageKey = `orb:overview:milestones:${brandName}:${type}`
+  useEffect(() => {
+    const shown = new Set(JSON.parse(window.localStorage.getItem(storageKey) || '[]'))
+    const eligible = milestones.filter((milestone) => milestone <= published && !shown.has(milestone))
+    if (eligible.length) {
+      const milestone = eligible[eligible.length - 1]
+      setBadge({ milestone, message: milestone === 1 ? `First ${noun} published.` : `${milestone} ${nouns} published.` })
+    } else setBadge(null)
+  }, [brandName, type, published, milestones, noun, nouns, storageKey])
+  const dismiss = () => {
+    if (!badge) return
+    const shown = new Set(JSON.parse(window.localStorage.getItem(storageKey) || '[]'))
+    milestones.filter((milestone) => milestone <= badge.milestone).forEach((milestone) => shown.add(milestone))
+    window.localStorage.setItem(storageKey, JSON.stringify([...shown]))
+    setBadge(null)
+  }
+  return [badge, dismiss]
 }
 
-function ClientOverview() {
-  const [version, setVersion] = useState(0)
-  const brandName = activeBrandName()
-  const load = useCallback(async () => {
-    if (!brandName) return { sops: [], faqs: [], products: [], flows: [], updates: [] }
-    const settled = await Promise.allSettled([listKnowledge('sops', brandName), listKnowledge('faqs', brandName), listKnowledge('products', brandName), listFlows(brandName), listOperationalUpdates(brandName)])
-    const value = (index, fallback) => settled[index]?.status === 'fulfilled' ? settled[index].value : fallback
-    return { sops: dashboardPoints(value(0, null)), faqs: dashboardPoints(value(1, null)), products: dashboardPoints(value(2, null)), flows: dashboardPoints(value(3, null)), updates: value(4, { updates: [] })?.updates || [] }
-  }, [brandName, version])
-  const { data, loading, error, reload } = useAsync(load, [load])
-  useEffect(() => { const refresh = () => setVersion((value) => value + 1); window.addEventListener('orb:brand-changed', refresh); return () => window.removeEventListener('orb:brand-changed', refresh) }, [])
-  if (loading && !data) return <div className="grid gap-4"><Skeleton className="h-40" /><Skeleton className="h-64" /></div>
-  if (error && !data) return <EmptyState title="Could not load this brand overview." action="Retry" onAction={reload} />
-  const overview = data || { sops: [], faqs: [], products: [], flows: [], updates: [] }
-  const knowledge = [...overview.sops, ...overview.faqs]
-  const review = knowledge.filter((item) => String(item.status || '').toLowerCase() === 'draft')
-  const published = knowledge.filter((item) => ['published', 'approved'].includes(String(item.status || '').toLowerCase()))
-  const recent = [...knowledge, ...overview.products].sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''))).slice(0, 4)
-  const stats = [{ value: overview.sops.length, label: 'SOPs', icon: ClipboardList }, { value: overview.faqs.length, label: 'FAQs', icon: HelpCircle }, { value: overview.products.length, label: 'Products', icon: PackageSearch }, { value: overview.flows.length, label: 'Flows', icon: GitBranch }]
-  return <div className="mx-auto max-w-6xl"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand overview</p><h2 className="mt-1 text-3xl font-extrabold tracking-tight">{brandName || 'Your brand'} at a glance</h2><p className="mt-2 max-w-2xl text-sm text-muted">A clear view of what your support agent knows and what your team should do next.</p></div><Link to="/app/workspace?tab=source"><Button variant="purple"><Sparkles size={16} />Update knowledge source</Button></Link></div><section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((item) => <StatCard key={item.label} {...item} />)}</section><section className="mt-6 grid gap-4 lg:grid-cols-3"><div className="rounded-xl border border-ink/15 bg-white p-5 shadow-sm"><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Published knowledge</p><p className="mt-2 text-3xl font-extrabold">{published.length}</p><p className="mt-1 text-sm text-muted">SOPs and FAQs powering the agent</p></div><Link to="/app/brain?tab=sops" className="rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm transition hover:-translate-y-0.5"><p className="text-xs font-extrabold uppercase tracking-widest text-amber-700">Needs review</p><p className="mt-2 text-3xl font-extrabold text-ink">{review.length}</p><p className="mt-1 text-sm text-amber-800">draft knowledge items</p></Link><Link to="/app/operations" className="rounded-xl border border-primary/20 bg-primary-tint/35 p-5 shadow-sm transition hover:-translate-y-0.5"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Operations</p><p className="mt-2 text-3xl font-extrabold text-ink">{overview.updates.length}</p><p className="mt-1 text-sm text-muted">recorded brand updates</p></Link></section><section className="mt-6 grid gap-6 lg:grid-cols-2"><section className="rounded-xl border border-ink/15 bg-white p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h3 className="text-lg font-extrabold">Recent knowledge</h3><p className="mt-1 text-sm text-muted">Latest content available to your team.</p></div><Link className="text-xs font-bold text-primary hover:underline" to="/app/brain?tab=sops">Open AI’s Brain</Link></div>{recent.length ? <ul className="mt-4 divide-y divide-ink/10">{recent.map((item) => <li key={item.id} className="flex items-start gap-3 py-3"><FileText size={16} className="mt-0.5 shrink-0 text-primary" /><div className="min-w-0"><p className="truncate text-sm font-bold">{item.title || item.question || item.name || 'Untitled item'}</p><p className="mt-1 text-xs text-muted">{item.status || 'Draft'} · Updated {dashboardDate(item.updated_at || item.created_at)}</p></div></li>)}</ul> : <p className="mt-4 rounded-lg border border-dashed border-ink/20 p-4 text-sm text-muted">No knowledge yet. Add a website or another source in Brand Workspace.</p>}</section><section className="rounded-xl border border-ink/15 bg-white p-5 shadow-sm"><div className="flex items-center justify-between gap-3"><div><h3 className="text-lg font-extrabold">Next steps</h3><p className="mt-1 text-sm text-muted">Keep the support experience current.</p></div><RefreshCw size={17} className="text-primary" /></div><div className="mt-4 grid gap-3"><Link to="/app/workspace?tab=source" className="rounded-lg border border-ink/15 p-3 text-sm transition hover:border-primary/40 hover:bg-primary-tint/25"><strong>Refresh your knowledge source</strong><span className="mt-1 block text-xs text-muted">Crawl a website, update source content, or draft fresh knowledge.</span></Link><Link to="/app/brain?tab=sops" className="rounded-lg border border-ink/15 p-3 text-sm transition hover:border-primary/40 hover:bg-primary-tint/25"><strong>Review drafted knowledge</strong><span className="mt-1 block text-xs text-muted">Approve SOPs and FAQs before publishing them.</span></Link><Link to="/app/flows" className="rounded-lg border border-ink/15 p-3 text-sm transition hover:border-primary/40 hover:bg-primary-tint/25"><strong>Improve a support flow</strong><span className="mt-1 block text-xs text-muted">Create or refine visual playbooks for your team.</span></Link></div></section></section></div>
+function TilePile({ count, sessionKey }) {
+  const tiles = Math.min(30, count)
+  const [drop, setDrop] = useState(false)
+  useEffect(() => {
+    if (hasReducedMotion() || window.sessionStorage.getItem(sessionKey)) return
+    window.sessionStorage.setItem(sessionKey, 'shown')
+    setDrop(true)
+  }, [sessionKey])
+  if (!tiles) return null
+  return <div aria-hidden="true" className="pointer-events-none absolute right-3 top-9 h-20 w-24 overflow-hidden">
+    {Array.from({ length: tiles }, (_, index) => {
+      const column = index % 5
+      const row = Math.floor(index / 5)
+      const color = ['#e9eaff', '#fff0e7', '#dff7ef', '#f7e8ff'][index % 4]
+      return <i key={index} className={drop ? 'overview-tile' : 'overview-tile overview-tile--still'} style={{ backgroundColor: color, right: `${6 + column * 13}px`, bottom: `${4 + row * 9}px`, '--tile-rotation': `${((index * 17) % 18) - 9}deg`, animationDelay: `${index * 24}ms` }} />
+    })}
+    {count > 30 && <span className="absolute bottom-1 left-1 rounded-full border border-ink bg-white px-1.5 py-0.5 text-[10px] font-extrabold">+{count - 30}</span>}
+  </div>
 }
 
-export default function Overview() { const { data, loading, error, reload } = useAsync(getOverviewData, []); const [search] = useSearchParams(); if (hasOrbApi) return <ClientOverview />; if (loading) return <div className="grid gap-4"><Skeleton className="h-40" /><Skeleton className="h-64" /></div>; if (error) return <EmptyState title="Could not load your workspace." action="Retry" onAction={reload} />; const hasContent = data.sops.length || data.faqs.length || data.products.length; return hasContent && !search.get('generate') ? <NormalOverview data={data} /> : <Setup data={data} reload={reload} /> }
+function MetricBox({ config, data, brandName }) {
+  const published = Number(data?.published || 0)
+  const drafts = Number(data?.drafts || 0)
+  const display = useCountUp(published, `orb:overview:count:${brandName}:${config.key}`)
+  const [badge, dismissBadge] = useMilestoneBadge(brandName, config.key, published, config.milestones, config.noun, config.nouns)
+  const next = config.milestones.find((milestone) => milestone > published)
+  const previous = [...config.milestones].reverse().find((milestone) => milestone <= published) || 0
+  const progress = next ? Math.max(0, Math.min(100, ((published - previous) / (next - previous)) * 100)) : 100
+  if (published === 0) return <section className="relative min-h-44 rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="text-xs font-extrabold uppercase tracking-widest text-ink">{config.label}</p><Link to={config.createTo} className="mt-5 flex rounded-lg border-2 border-dashed border-ink/35 px-4 py-5 text-sm font-extrabold transition hover:border-primary hover:text-primary">Add your first {config.noun} <span className="ml-1">→</span></Link></section>
+  return <section className="relative min-h-44 overflow-hidden rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><Link to={config.listTo} aria-label={`Open ${config.label}`} className="absolute inset-0 z-0" /><div className="relative z-10 pointer-events-none"><p className="text-xs font-extrabold uppercase tracking-widest text-ink">{config.label}</p><strong className="mt-4 block text-4xl font-extrabold tracking-tight">{display}</strong>{next && <><div className="mt-4 h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-primary transition-[width] duration-300" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-xs font-bold text-muted">{next - published} more to {next}</p></>}</div><TilePile count={published} sessionKey={`orb:overview:tiles:${brandName}:${config.key}`} />{drafts > 0 && <Link to={config.draftTo} className="absolute bottom-4 left-5 z-20 rounded-full border border-ink/20 bg-white px-2 py-1 text-[11px] font-extrabold hover:border-primary hover:text-primary">+{drafts} draft{drafts === 1 ? '' : 's'}</Link>}{badge && <div className="absolute right-3 top-3 z-20 flex max-w-40 items-center gap-1 rounded-md border border-ink bg-white px-2 py-1.5 text-[10px] font-extrabold shadow-sm"><span>{badge.message}</span><button type="button" aria-label="Dismiss milestone" onClick={dismissBadge} className="rounded p-0.5 hover:bg-ink/5"><X size={12} /></button></div>}</section>
+}
+
+function InlineBlockError({ label, onRetry }) {
+  return <section className="rounded-xl border-2 border-ink bg-white p-4 shadow-brutal"><p className="text-sm font-extrabold">Could not load {label}</p><Button size="sm" variant="outline" className="mt-3" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
+}
+
+function MetricGrid({ counts, brandName, status, onRetry }) {
+  if (status === 'loading') return <section className="grid gap-5 md:grid-cols-3">{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-44" />)}</section>
+  if (status === 'error') return <InlineBlockError label="knowledge metrics" onRetry={onRetry} />
+  return <section className="grid gap-5 md:grid-cols-3">{METRIC_CONFIG.map((config) => <MetricBox key={config.key} config={config} data={counts?.[config.key]} brandName={brandName} />)}</section>
+}
+
+const coverageScore = (coverage) => {
+  if (typeof coverage === 'number') return coverage
+  const value = String(coverage || '').toLowerCase()
+  if (value.includes('covered')) return 100
+  if (value.includes('ingredient')) return 25
+  if (value.includes('faq')) return 0
+  const numeric = Number.parseFloat(value)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+const coverageLabel = (coverage) => {
+  if (coverage === null || coverage === undefined || coverage === '') return null
+  const value = String(coverage).toLowerCase()
+  if (value.includes('ingredient')) return 'Ingredients missing'
+  if (value.includes('faq')) return 'No FAQ yet'
+  return 'Covered'
+}
+
+function useProductDrop(brandName, count) {
+  const [drop, setDrop] = useState(false)
+  useEffect(() => {
+    if (!count || hasReducedMotion()) return
+    const key = `orb:overview:products-drop:${brandName}`
+    if (window.sessionStorage.getItem(key)) return
+    window.sessionStorage.setItem(key, 'shown')
+    setDrop(true)
+  }, [brandName, count])
+  return drop
+}
+
+function ProductImage({ product }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [product.id, product.imageUrl])
+  if (!product.imageUrl || failed) return <div className="grid aspect-square place-items-center rounded-lg border border-ink/15 bg-peach text-2xl font-extrabold text-ink">{String(product.title || '?').trim().charAt(0).toUpperCase() || '?'}</div>
+  return <img src={product.imageUrl} alt="" onError={() => setFailed(true)} className="aspect-square w-full rounded-lg border border-ink/15 object-cover" />
+}
+
+function ProductBlock({ products, productError, loading, brandName, onRetry }) {
+  const selected = useMemo(() => {
+    const items = [...(products || [])]
+    const hasCoverage = items.some((product) => product.coverage !== null && product.coverage !== undefined && product.coverage !== '')
+    const hasBestSellers = items.some((product) => product.bestSellerScore !== null && product.bestSellerScore !== undefined)
+    return items.sort((a, b) => {
+      if (hasCoverage) return coverageScore(a.coverage) - coverageScore(b.coverage) || Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
+      if (hasBestSellers) return Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
+      return String(b.newestAt || '').localeCompare(String(a.newestAt || ''))
+    }).slice(0, 4)
+  }, [products])
+  const drop = useProductDrop(brandName, selected.length)
+  if (loading) return <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-64" />)}</section>
+  if (productError) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="font-extrabold">Could not load products</p><Button size="sm" variant="outline" className="mt-4" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
+  if (!selected.length) return <Link to="/app/products" className="flex min-h-40 items-center justify-center rounded-xl border-2 border-dashed border-ink/35 bg-white px-5 text-sm font-extrabold transition hover:border-primary hover:text-primary">Add products <span className="ml-1">→</span></Link>
+  return <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{selected.map((product, index) => <Link key={product.id} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} rounded-xl border-2 border-ink bg-white p-3 shadow-brutal`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, animationDelay: `${index * 90}ms` }}><ProductImage product={product} /><h2 className="mt-3 line-clamp-2 min-h-10 text-sm font-extrabold leading-5">{product.title || 'Untitled product'}</h2><div className="mt-2 flex items-center justify-between gap-2"><p className="text-sm font-bold">{product.price || 'Price unavailable'}</p>{coverageLabel(product.coverage) && <span className="rounded-full border border-ink/15 px-2 py-0.5 text-[10px] font-extrabold">{coverageLabel(product.coverage)}</span>}</div></Link>)}</section>
+}
+
+const DAY = 86_400_000
+const expiryDate = (value) => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) date.setHours(23, 59, 59, 999)
+  return date
+}
+const countdown = (value, now) => {
+  const date = expiryDate(value)
+  if (!date) return { label: 'no expiry', urgent: false, expired: false }
+  if (date.getTime() < now) return { label: 'expired', urgent: false, expired: true }
+  const endOfToday = new Date(now)
+  endOfToday.setHours(23, 59, 59, 999)
+  if (date.getTime() <= endOfToday.getTime()) return { label: 'expires today', urgent: true, expired: false }
+  const days = Math.ceil((date.getTime() - endOfToday.getTime()) / DAY)
+  return { label: `expires in ${days} day${days === 1 ? '' : 's'}`, urgent: days <= 3, expired: false }
+}
+
+function QuickActions({ overview, now, isAdmin, status, onRetry }) {
+  if (status === 'loading') return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><Skeleton className="h-5 w-28" /><Skeleton className="mt-5 h-12" /><Skeleton className="mt-3 h-12" /></section>
+  if (status === 'error') return <InlineBlockError label="quick actions" onRetry={onRetry} />
+  const drafts = Object.values(overview.counts || {}).reduce((total, item) => total + Number(item?.drafts || 0), 0)
+  const approved = Object.values(overview.counts || {}).reduce((total, item) => total + Number(item?.approved || 0), 0)
+  const expiring = (overview.operations || []).find((operation) => {
+    const state = countdown(operation.expiresAt, now)
+    return !state.expired && state.urgent && operation.expiresAt
+  })
+  const syncedAt = overview.flags?.lastSyncedAt ? new Date(overview.flags.lastSyncedAt) : null
+  const daysOld = syncedAt && !Number.isNaN(syncedAt.getTime()) ? Math.floor((now - syncedAt.getTime()) / DAY) : null
+  const actions = [
+    overview.flags?.failedPages > 0 && isAdmin && { label: `Fix ${overview.flags.failedPages} failed pages`, to: '/app/workspace?tab=source' },
+    expiring && isAdmin && { label: `Extend ${expiring.title}`, to: '/app/operations' },
+    drafts > 0 && { label: `Review ${drafts} drafts`, to: '/app/brain?tab=sops&status=draft' },
+    approved > 0 && isAdmin && { label: `Publish ${approved} approved items`, to: '/app/brain?tab=sops' },
+    daysOld !== null && daysOld > 14 && isAdmin && { label: `Re-sync website (${daysOld} days old)`, to: '/app/workspace?tab=source' },
+    overview.flags?.sourceCount === 0 && isAdmin && { label: 'Add a source', to: '/app/workspace?tab=source' },
+    overview.flags?.sourceCount > 0 && isAdmin && { label: 'Update knowledge source', to: '/app/workspace?tab=source' },
+  ].filter(Boolean).slice(0, 4)
+  return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Quick actions</p>{actions.length ? <div className="mt-3 divide-y divide-ink/10">{actions.map((action) => <Link key={action.label} to={action.to} className="flex items-center justify-between gap-3 py-3 text-sm font-bold transition hover:text-primary"><span>{action.label}</span><ArrowUpRight size={16} className="shrink-0" /></Link>)}</div> : <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted"><Check size={17} className="text-emerald-600" />Nothing needs attention.</div>}</section>
+}
+
+function ExtendOperationModal({ operation, onClose, onSaved }) {
+  const { showToast } = useToast()
+  const [value, setValue] = useState(() => operation?.expiresAt ? String(operation.expiresAt).slice(0, 10) : '')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => setValue(operation?.expiresAt ? String(operation.expiresAt).slice(0, 10) : ''), [operation])
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!value) return
+    setSaving(true)
+    try {
+      const result = await extendOperation(operation.id, new Date(`${value}T23:59:59`).toISOString())
+      onSaved(result.expires_at)
+      showToast('Operation extended.')
+      onClose()
+    } catch (error) { showToast(error.message || 'Could not extend this operation.', 'error') } finally { setSaving(false) }
+  }
+  return <Modal open={Boolean(operation)} onClose={onClose} title="Extend operation"><form onSubmit={submit} className="grid gap-4"><p className="text-sm text-muted">Choose the new date until which the agent should use this update.</p><label className="grid gap-1.5 text-sm font-bold">New expiry date<input required type="date" value={value} onChange={(event) => setValue(event.target.value)} className="rounded-md border border-ink/20 px-3 py-2 font-normal outline-none focus:border-primary" /></label><div className="flex justify-end gap-2"><Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" variant="purple" size="sm" disabled={saving || !value}>{saving ? 'Extending…' : 'Extend'}</Button></div></form></Modal>
+}
+
+function ActiveOperations({ operations, now, isAdmin, onExtended, status, onRetry }) {
+  const [extending, setExtending] = useState(null)
+  if (status === 'loading') return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><Skeleton className="h-5 w-32" /><Skeleton className="mt-5 h-16" /><Skeleton className="mt-3 h-16" /></section>
+  if (status === 'error') return <InlineBlockError label="operations" onRetry={onRetry} />
+  const sorted = [...(operations || [])].sort((a, b) => {
+    const first = expiryDate(a.expiresAt)?.getTime() ?? Number.POSITIVE_INFINITY
+    const second = expiryDate(b.expiresAt)?.getTime() ?? Number.POSITIVE_INFINITY
+    return first - second
+  })
+  const active = sorted.filter((operation) => !countdown(operation.expiresAt, now).expired).slice(0, 5)
+  const expired = sorted.filter((operation) => countdown(operation.expiresAt, now).expired)
+  return <><section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><div className="flex items-center justify-between gap-3"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Active operations</p><Link to="/app/operations" className="text-xs font-extrabold text-primary hover:underline">View all</Link></div>{active.length ? <div className="mt-3 divide-y divide-ink/10">{active.map((operation) => { const state = countdown(operation.expiresAt, now); return <article key={operation.id} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-extrabold">{operation.title}</p><div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-bold"><span className="rounded-full border border-ink/15 px-2 py-0.5 capitalize">{operation.kind || 'notice'}</span><span className={state.urgent ? 'text-primary' : 'text-muted'}>{state.label}</span></div></div>{isAdmin && <button type="button" onClick={() => setExtending(operation)} className="shrink-0 text-xs font-extrabold text-primary hover:underline">Extend</button>}</div><p className="mt-2 text-xs leading-5 text-muted">{operation.agentBehaviour || 'The agent uses this update while it is active.'}</p></article> })}</div> : <p className="mt-5 text-sm leading-6 text-muted">No active operations. Add an offer or restock date so the agent can use it.</p>}{expired.length > 0 && <details className="mt-4 border-t border-ink/10 pt-3"><summary className="cursor-pointer text-xs font-extrabold text-muted">Recently expired ({expired.length})</summary><div className="mt-2 divide-y divide-ink/10">{expired.map((operation) => <div key={operation.id} className="py-2"><p className="text-sm font-bold text-muted">{operation.title}</p><p className="mt-1 text-xs text-muted">No longer used by the agent.</p></div>)}</div></details>}</section><ExtendOperationModal operation={extending} onClose={() => setExtending(null)} onSaved={(newExpiresAt) => onExtended(extending.id, newExpiresAt)} /></>
+}
+
+function deriveSetupSteps(overview) {
+  const counts = overview.counts || {}
+  const sops = counts.sops || {}
+  const faqs = counts.faqs || {}
+  const flows = counts.flows || {}
+  const draftsAndPublished = [sops, faqs, flows].reduce((total, item) => total + Number(item.drafts || 0) + Number(item.published || 0), 0)
+  const steps = [
+    { key: 'source', label: 'Add a knowledge source', why: 'Give Orb reliable material to learn from.', done: Number(overview.flags?.sourceCount || 0) > 0, to: '/app/workspace?tab=source' },
+    { key: 'generate', label: 'Generate your first drafts', why: 'Turn your source into editable customer knowledge.', done: draftsAndPublished > 0, to: '/app/workspace?tab=source' },
+    { key: 'review', label: 'Review a draft', why: 'Check that the response is accurate and on-brand.', done: Number(sops.approved || 0) + Number(faqs.approved || 0) > 0, to: '/app/brain?tab=sops&status=draft' },
+    { key: 'publish', label: 'Publish your first SOP or FAQ', why: 'Make approved knowledge available to the agent.', done: Number(sops.published || 0) + Number(faqs.published || 0) > 0, to: '/app/brain?tab=sops' },
+    { key: 'flow', label: 'Create your first flow', why: 'Document the decisions your team repeats most often.', done: Number(flows.published || 0) + Number(flows.drafts || 0) > 0, to: '/app/flows?create=1' },
+  ]
+  if (overview.brand?.platform === 'shopify' && !overview.brand?.shopifyConnected) steps.push({ key: 'shopify', label: 'Connect Shopify', why: 'Keep products and availability current for the agent.', done: false, to: '/app/tools' })
+  return steps
+}
+
+function SpringCheck({ animated }) {
+  return <svg className={`setup-check ${animated ? 'setup-check--draw' : ''}`} viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 3.5 3.5L16 5.8" /></svg>
+}
+
+function SetupChecklist({ steps = [], large = false }) {
+  const previous = useRef(null)
+  const [drawn, setDrawn] = useState({})
+  useEffect(() => {
+    if (!previous.current) { previous.current = Object.fromEntries(steps.map((step) => [step.key, step.done])); return undefined }
+    const next = {}
+    steps.forEach((step) => { if (!previous.current[step.key] && step.done) next[step.key] = true })
+    previous.current = Object.fromEntries(steps.map((step) => [step.key, step.done]))
+    if (!Object.keys(next).length) return undefined
+    setDrawn(next)
+    const timer = window.setTimeout(() => setDrawn({}), 700)
+    return () => window.clearTimeout(timer)
+  }, [steps])
+  const firstIncomplete = steps.find((step) => !step.done)?.key
+  return <section className={`${large ? 'mt-8 p-7 sm:p-9' : 'p-5'} rounded-xl border-2 border-ink bg-white shadow-brutal`}><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Next steps</p><h2 className={`${large ? 'mt-2 text-2xl' : 'mt-1 text-lg'} font-extrabold`}>{large ? 'Set up your support workspace' : 'Finish setting up Orb'}</h2><div className="mt-5 grid gap-2">{steps.map((step) => <Link key={step.key} to={step.to} className={`flex items-center gap-3 rounded-lg border px-3 py-3 transition hover:border-primary/50 ${!step.done && step.key === firstIncomplete ? 'border-primary bg-primary-tint/35' : 'border-ink/10 bg-white'}`}><span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${step.done ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-ink/25 text-muted'}`}>{step.done ? <SpringCheck animated={Boolean(drawn[step.key])} /> : <span className="text-xs font-extrabold">{steps.indexOf(step) + 1}</span>}</span><span className="min-w-0 flex-1"><span className="block text-sm font-extrabold">{step.label}</span><span className="mt-0.5 block text-xs leading-5 text-muted">{step.why}</span></span><ArrowUpRight size={16} className="shrink-0 text-muted" /></Link>)}</div></section>
+}
+
+function NewBrandSetup({ steps }) {
+  return <section className="mt-8 rounded-2xl border border-ink/15 bg-white p-8 shadow-sm sm:p-10"><div className="max-w-2xl"><span className="grid h-12 w-12 place-items-center rounded-xl bg-primary-tint text-primary"><Sparkles size={22} /></span><h2 className="mt-5 text-2xl font-extrabold tracking-tight">Start building your agent's brain</h2><p className="mt-2 text-sm leading-6 text-muted">Add a website, document, or product source. Orb will turn it into support knowledge your team can review.</p><Link to="/app/workspace?tab=source" className="mt-6 inline-flex"><Button variant="purple"><Plus size={16} />Add your first source</Button></Link></div><SetupChecklist steps={steps} large /></section>
+}
+
+function BrandOverview({ overview, onRetry }) {
+  const { isAdmin } = useAuth()
+  const totalDrafts = Object.values(overview.counts || {}).reduce((total, item) => total + Number(item?.drafts || 0), 0)
+  const sourceCount = Number(overview.flags?.sourceCount || 0)
+  const isNewBrand = (overview.blockStatus?.metrics || 'ready') === 'ready' && sourceCount === 0 && totalDrafts === 0 && Object.values(overview.counts || {}).every((item) => Number(item?.published || 0) === 0)
+  const brandName = overview.brand?.name || 'Your brand'
+  const setupSteps = useMemo(() => deriveSetupSteps(overview), [overview])
+  const setupComplete = setupSteps.every((step) => step.done)
+  const setupStorageKey = `orb:overview:setup-completed:${brandName}`
+  const sessionKey = `orb:overview-welcome:${brandName}`
+  const [welcome, setWelcome] = useState('')
+  const [now, setNow] = useState(() => Date.now())
+  const [operations, setOperations] = useState(overview.operations || [])
+  const [setupHidden, setSetupHidden] = useState(false)
+  const [setupCelebrating, setSetupCelebrating] = useState(false)
+
+  useEffect(() => {
+    const saved = window.sessionStorage.getItem(sessionKey)
+    if (saved) { setWelcome(saved); return }
+    const selected = WELCOME_LINES[Math.floor(Math.random() * WELCOME_LINES.length)]
+    window.sessionStorage.setItem(sessionKey, selected)
+    setWelcome(selected)
+  }, [sessionKey])
+
+  useEffect(() => { setOperations(overview.operations || []) }, [overview.operations])
+  useEffect(() => {
+    if (window.localStorage.getItem(setupStorageKey)) { setSetupHidden(true); setSetupCelebrating(false); return undefined }
+    if (!setupComplete) { setSetupHidden(false); setSetupCelebrating(false); return undefined }
+    setSetupCelebrating(true)
+    const timer = window.setTimeout(() => {
+      window.localStorage.setItem(setupStorageKey, new Date().toISOString())
+      setSetupHidden(true)
+      setSetupCelebrating(false)
+    }, 1450)
+    return () => window.clearTimeout(timer)
+  }, [setupComplete, setupStorageKey])
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  const extend = (id, newExpiresAt) => setOperations((items) => items.map((operation) => operation.id === id ? { ...operation, expiresAt: newExpiresAt } : operation))
+
+  return <div className="mx-auto max-w-6xl"><header><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p></header>
+    {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
+      <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />
+      <MetricGrid counts={overview.counts} brandName={brandName} status={overview.blockStatus?.metrics} onRetry={onRetry} />
+      <div className="grid gap-5 lg:grid-cols-2"><QuickActions overview={overview} now={now} isAdmin={isAdmin} status={overview.blockStatus?.metrics} onRetry={onRetry} /><ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} /></div>
+      {!setupHidden && (setupCelebrating ? <section className="rounded-xl border-2 border-ink bg-white p-6 text-center shadow-brutal"><span className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-emerald-500 bg-emerald-50 text-emerald-600"><SpringCheck animated /></span><h2 className="mt-3 text-xl font-extrabold">Setup complete</h2><p className="mt-1 text-sm text-muted">Orb is ready for your team.</p></section> : <SetupChecklist steps={setupSteps} />)}
+    </main>}
+  </div>
+}
+
+export default function Overview() {
+  const { data, loading, error, reload } = useOverview()
+  const [devState, setDevState] = useState('live')
+  const overview = useMemo(() => devState === 'live' ? data : DEV_STATES[devState], [data, devState])
+  if (loading && !overview) return <div className="mx-auto grid max-w-6xl gap-5"><Skeleton className="h-28" /><section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-64" />)}</section><Skeleton className="h-48" /></div>
+  if (error && !overview) return <EmptyState title="Could not load this brand overview." action="Retry" onAction={reload} />
+  return <>{import.meta.env.DEV && <label className="mb-5 flex w-fit items-center gap-2 rounded-lg border border-dashed border-ink/20 bg-white/70 px-3 py-2 text-xs font-bold text-muted">Preview state <select value={devState} onChange={(event) => setDevState(event.target.value)} className="bg-transparent text-ink outline-none"><option value="live">Live data</option><option value="new">New brand</option><option value="partial">Partial setup</option><option value="complete">Complete setup</option><option value="nonShopify">Non-Shopify brand</option></select></label>}{overview && <BrandOverview overview={overview} onRetry={reload} />}</>
+}
