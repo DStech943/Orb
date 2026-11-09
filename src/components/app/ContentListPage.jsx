@@ -299,7 +299,7 @@ function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loa
   </div>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved }) {
+export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, initialDraft = null, assistantDraft = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isProduct = kind === 'product'
@@ -319,6 +319,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const [publishingApproved, setPublishingApproved] = useState(false)
   const [savingShopify, setSavingShopify] = useState(false)
   const scrollPosition = useRef(0)
+  const handledHandoffRef = useRef('')
 
   useEffect(() => {
     const reloadForBrand = () => setBrandVersion((version) => version + 1)
@@ -328,6 +329,25 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
 
   const { data: fetchedData, loading, error, reload } = useAsync(list, [list, brandVersion])
   const data = Array.isArray(fetchedData) ? fetchedData : []
+  useEffect(() => {
+    if (!initialDraft || handledHandoffRef.current === initialDraft.id) return
+    handledHandoffRef.current = initialDraft.id
+    scrollPosition.current = window.scrollY
+    setSelected(initialDraft)
+  }, [initialDraft])
+  useEffect(() => {
+    if (!isProduct || !assistantDraft?.message || !data.length) return
+    const handoffKey = `${assistantDraft.target}|${assistantDraft.message}`
+    if (handledHandoffRef.current === handoffKey) return
+    handledHandoffRef.current = handoffKey
+    const target = String(assistantDraft.target || '').trim().toLowerCase()
+    const product = target ? data.find((item) => String(item.name || item.title || '').toLowerCase().includes(target)) : null
+    if (target) setQuery(assistantDraft.target)
+    if (product) {
+      scrollPosition.current = window.scrollY
+      setSelected(product)
+    }
+  }, [assistantDraft, data, isProduct])
   const rows = useMemo(() => {
     const filtered = data.filter((item) => {
       const text = [item.title, item.question, item.name, item.description, item.category].filter(Boolean).join(' ').toLowerCase()
@@ -461,6 +481,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         <Button onClick={() => navigate('/app?generate=1')}><Plus size={16} />Generate more</Button>
       </div>
     </div>
+    {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Review the matching product and use a Save action only when you approve the update.</p></section>}
     <section className="mt-6 rounded-lg border-2 border-ink bg-white p-4 shadow-brutal">
       <div className={`grid gap-3 ${isProduct ? 'md:grid-cols-[1fr_150px_190px]' : 'md:grid-cols-[1fr_150px_150px]'}`}>
         <label className="flex items-center gap-2 rounded-md border-2 border-ink px-3 py-2"><Search size={16} /><input className="min-w-0 flex-1 outline-none" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -470,7 +491,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       {!isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
       <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action="Generate content" onAction={() => navigate('/app?generate=1')} />}</div>
     </section>
-    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{isSop ? <SopFlow sop={selected} onChange={setSelected} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={setSelected} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
     <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />
     <ConfirmDialog open={confirmApproveAll} onClose={() => setConfirmApproveAll(false)} onConfirm={() => { setConfirmApproveAll(false); approve(draftIds) }} title="Approve all drafts?" description={`${draftIds.length} ${draftIds.length === 1 ? 'draft will' : 'drafts will'} be marked approved and become available to Create with Orb.`} confirmLabel="Approve all" />
   </div>

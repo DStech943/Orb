@@ -195,9 +195,11 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 /* Product cards use a small, physical drop on their first appearance for a
    brand. Their resting rotation is retained throughout the keyframe. */
 .overview-product-card { transform: rotate(var(--product-tilt)); transition: transform 150ms ease, box-shadow 150ms ease; }
+.overview-product-price { position: absolute; right: 1rem; bottom: 1rem; border: 1px solid rgba(17, 17, 17, .15); border-radius: 999px; background: rgba(255, 255, 255, .94); padding: .35rem .6rem; font-size: .75rem; font-weight: 800; opacity: 0; transform: translateY(6px); transition: opacity 150ms ease, transform 150ms ease; }
 .overview-product-card--drop { animation: overview-product-drop 440ms cubic-bezier(.2, .9, .28, 1.18) both; }
 @keyframes overview-product-drop { from { opacity: 0; transform: translateY(-42px) rotate(var(--product-tilt)); } 72% { transform: translateY(3px) rotate(var(--product-tilt)); } to { opacity: 1; transform: translateY(0) rotate(var(--product-tilt)); } }
-@media (hover: hover) and (prefers-reduced-motion: no-preference) { .overview-product-card:hover { transform: translateY(-4px) rotate(calc(var(--product-tilt) + 2deg)); } }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) { .overview-product-card:hover { transform: translateY(-4px) rotate(calc(var(--product-tilt) + 2deg)); } .overview-product-card:hover .overview-product-price { opacity: 1; transform: translateY(0); } }
+.overview-product-card:focus-visible .overview-product-price { opacity: 1; transform: translateY(0); }
 
 .setup-check { width: 15px; height: 15px; overflow: visible; }
 .setup-check path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.25; stroke-dasharray: 20; stroke-dashoffset: 0; }
@@ -207,7 +209,7 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 @keyframes setup-check-pop { from { transform: scale(.5); } to { transform: scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .orb-composer, .orb-guide-panel, .orb-guide-greeting, .orb-guide-thinking__dots i, .operation-message-in, .overview-tile, .overview-product-card, .setup-check, .setup-check path, .flow-dot-grid, .flow-stage--sharp, .flow-denoise-preview, .flow-denoise-preview__grain, .flow-denoise-preview__node, .pipeline-progress__indeterminate { animation: none; }
+  .orb-composer, .orb-guide-panel, .orb-guide-greeting, .orb-guide-thinking__dots i, .operation-message-in, .overview-tile, .overview-product-card, .overview-product-price, .setup-check, .setup-check path, .flow-dot-grid, .flow-stage--sharp, .flow-denoise-preview, .flow-denoise-preview__grain, .flow-denoise-preview__node, .pipeline-progress__indeterminate { animation: none; transition: none; }
   .flow-stage--denoise, .flow-stage--resolve, .flow-stage--sharp { opacity: 1; filter: none; pointer-events: auto; }
   .flow-denoise-preview { display: none; }
 }
