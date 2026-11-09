@@ -67,9 +67,19 @@ const faqDraftFromRequest = (value) => {
     : 'What should customers know about this update?'
   return { question, answer: answer || String(value || '').trim() }
 }
+const operationDraftFromRequest = (value) => {
+  const original = String(value || '').trim()
+  const draft = original
+    .replace(/^.*?\b(?:go|open|navigate|switch|take|bring)\s+(?:me\s+)?(?:to\s+)?operations?\b\s*(?:and|then)?\s*/i, '')
+    .replace(/^(?:(?:could|can|would)\s+you\s+|please\s+)?(?:create|make|add|record|draft|write|compose)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?operations?\s*(?:(?:uh|um)\s*)?(?:update|note|message)?\s*(?:(?:saying\s+)?(?:that|for)\s*)?/i, '')
+    .trim()
+  return draft || original
+}
 const assistantWorkFromRequest = (value) => {
   const text = String(value || '').trim()
-  if (isNavigationCommand(text) && /\boperations?\b/i.test(text) && /\bdraft\b/i.test(text)) return { type: 'draft_operation' }
+  if (
+    /\b(?:draft|write|compose|create|make|add|record)\b[\s\S]{0,80}\b(?:operations?|operational\s+(?:update|note)|update|note|message)\b/i.test(text)
+  ) return { type: 'draft_operation' }
   if (/\b(?:add|create|make)\s+(?:an?\s+)?faq\b/i.test(text)) return { type: 'faq' }
   if (/\b(?:out of stock|back in stock|pre[ -]?order|restock|expected to be back)\b/i.test(text)) return { type: 'product' }
   if (/\b(?:delayed|delay|sale|promotion|ganesh|operational note|operations?)\b/i.test(text)) return { type: 'operation' }
@@ -407,9 +417,7 @@ export default function OrbGuide() {
       setThinking(true)
       try {
         if (requestedWork.type === 'draft_operation') {
-          const message = text
-            .replace(/^.*?\b(?:draft|write)\s+(?:an?\s+)?(?:operation(?:al)?\s+)?message\s*(?:that|saying|for)?\s*/i, '')
-            .trim()
+          const message = operationDraftFromRequest(text)
           const destination = `/app/operations?compose=1&message=${encodeURIComponent(message || text)}`
           lastDestinationRef.current = { destination, destinationLabel: 'Operations' }
           setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Operations with your draft ready to review and send.', destination, destinationLabel: 'Operations' }])
