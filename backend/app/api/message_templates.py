@@ -99,12 +99,14 @@ def _zoko_key(brand_name: str, config: dict[str, Any]) -> str:
 
 
 def _template_out(row: dict[str, Any]) -> dict[str, Any]:
+    raw_type = str(row.get("template_type") or "")
+    _, _, category = raw_type.partition(":")
     return {
         "id": str(row.get("id") or ""),
         "name": str(row.get("template_name") or ""),
         "language": str(row.get("language") or "en"),
         "content": str(row.get("template") or ""),
-        "type": str(row.get("template_type") or ""),
+        "type": category.title() if category else "Other",
         "status": str(row.get("status") or ""),
     }
 
@@ -120,6 +122,7 @@ async def list_message_templates(
         {
             "select": "id,template_name,language,template,template_type,status",
             "brand_id": f"eq.{brand['id']}",
+            "template_type": "like.zoko_sync*",
             "order": "template_name.asc",
             "limit": "500",
         },
@@ -153,7 +156,7 @@ async def sync_zoko_templates(
 
     source = raw if isinstance(raw, list) else (raw.get("templates") or raw.get("data") or raw.get("value") or []) if isinstance(raw, dict) else []
     existing = await _supabase_service_rows(
-        request, "template_messages", {"select": "id,template_name,language,template", "brand_id": f"eq.{brand['id']}", "limit": "1000"}
+        request, "template_messages", {"select": "id,template_name,language,template", "brand_id": f"eq.{brand['id']}", "template_type": "like.zoko_sync*", "limit": "1000"}
     )
     by_key = {f"{_normalise(row.get('template_name'))}|{_normalise(row.get('language'))}": row for row in existing}
     report: dict[str, list[str]] = {"new": [], "unchanged": [], "differs": [], "skipped_media_header": [], "skipped_inactive": [], "skipped_other": []}
@@ -183,7 +186,9 @@ async def sync_zoko_templates(
             report["unchanged" if _normalise(parsed["body"]) in _normalise(found.get("template")) else "differs"].append(name)
             continue
         report["new"].append(name)
-        inserts.append({"brand_id": brand["id"], "template_name": name, "language": language, "status": "APPROVED", "template_type": "zoko_sync", "template": _template_text(parsed)})
+        raw_category = str(item.get("templateCategory") or item.get("templateType") or item.get("category") or "other").strip().lower()
+        category = raw_category if raw_category in {"marketing", "utility", "authentication"} else "other"
+        inserts.append({"brand_id": brand["id"], "template_name": name, "language": language, "status": "APPROVED", "template_type": f"zoko_sync:{category}", "template": _template_text(parsed)})
     if payload.action == "sync" and inserts:
         await _supabase_service_write(request, "POST", "template_messages", payload=inserts)
     return {"success": True, "dry_run": payload.action == "preview", "total_from_zoko": len(source) if isinstance(source, list) else 0, "inserted": len(inserts) if payload.action == "sync" else 0, "report": report}

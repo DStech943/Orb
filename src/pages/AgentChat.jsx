@@ -6,6 +6,7 @@ import {
   Loader2,
   MessageCircleMore,
   Pencil,
+  ThumbsUp,
   X,
 } from "lucide-react";
 import Orb from "../components/Orb";
@@ -13,9 +14,11 @@ import { listBrands } from "../services/brands";
 import {
   chatWithBrandAgent,
   clearBrandChatHistory,
+  createBrandAgentFeedback,
   getBrandChatHistory,
   hasBrandAgentApi,
   hasOrbApi,
+  listBrandAgentFeedback,
   setRemoteBrandProfile,
 } from "../services/orbApi";
 import useAsync from "../hooks/useAsync";
@@ -27,6 +30,7 @@ const prompts = [
   "Can you help me track my order?",
   "Do you have this product in stock?",
 ];
+const feedbackTags = ["Wrong info", "Tone", "Too long", "Missing SOP", "Should escalate"];
 
 const newSessionId = () => {
   if (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -112,6 +116,13 @@ export default function AgentChat({ embedded = false }) {
   const [editingAgentName, setEditingAgentName] = useState(false);
   const [agentNameDraft, setAgentNameDraft] = useState("");
   const [savingAgentName, setSavingAgentName] = useState(false);
+  const [feedback, setFeedback] = useState([]);
+  const [feedbackTarget, setFeedbackTarget] = useState(null);
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [feedbackNote, setFeedbackNote] = useState("");
+  const [idealReply, setIdealReply] = useState("");
+  const [overallNote, setOverallNote] = useState("");
+  const [savingFeedback, setSavingFeedback] = useState(false);
   const messagesRef = useRef(null);
   const activeBrand = brands.find((brand) => brand.id === brandId) || brands[0];
   const configuredAgentName = String(activeBrand?.ai_agent_name || "").trim();
@@ -164,10 +175,24 @@ export default function AgentChat({ embedded = false }) {
   }, [activeBrand?.id, sessionId]);
 
   useEffect(() => {
+    let live = true;
+    if (!activeBrand?.id || !sessionId || !hasOrbApi) {
+      setFeedback([]);
+      return undefined;
+    }
+    listBrandAgentFeedback(activeBrand.id, sessionId)
+      .then((result) => { if (live) setFeedback(Array.isArray(result?.feedback) ? result.feedback : []); })
+      .catch(() => { if (live) setFeedback([]); });
+    return () => { live = false; };
+  }, [activeBrand?.id, sessionId]);
+
+  useEffect(() => {
     const onBrandChange = (event) => {
       if (event.detail?.id) {
         setBrandId(event.detail.id);
         setMessages([]);
+        setFeedback([]);
+        setFeedbackTarget(null);
         setError("");
         setSessionId(sessionForBrand());
       }
@@ -195,9 +220,11 @@ export default function AgentChat({ embedded = false }) {
       }
     }
     setMessages([]);
+    setFeedback([]);
+    setFeedbackTarget(null);
     setDraft("");
     setError("");
-    if (!hasBrandAgentApi) setSessionId(newSessionId());
+    setSessionId(sessionForBrand());
   };
 
   const beginAgentNameEdit = () => {
@@ -279,6 +306,40 @@ export default function AgentChat({ embedded = false }) {
     }
   };
 
+  const resetReplyFeedback = () => {
+    setFeedbackTarget(null);
+    setSelectedTags([]);
+    setFeedbackNote("");
+    setIdealReply("");
+  };
+
+  const saveFeedback = async ({ scope, target = null, tags = [], note = "", ideal = "" }) => {
+    if (!activeBrand?.id || !sessionId || savingFeedback) return;
+    if (!tags.length && !note.trim() && !ideal.trim()) return;
+    setSavingFeedback(true);
+    try {
+      const result = await createBrandAgentFeedback(activeBrand.id, {
+        session_id: sessionId,
+        scope,
+        message_id: target?.id || "",
+        agent_reply: target?.text || "",
+        tags,
+        note: note.trim(),
+        ideal_reply: ideal.trim(),
+      });
+      if (result?.feedback) setFeedback((items) => [...items, result.feedback]);
+      if (scope === "reply") resetReplyFeedback();
+      else setOverallNote("");
+      showToast("Feedback saved for the team.");
+    } catch (cause) {
+      showToast(cause?.message || "Could not save feedback.", "error");
+    } finally {
+      setSavingFeedback(false);
+    }
+  };
+
+  const toggleFeedbackTag = (tag) => setSelectedTags((tags) => tags.includes(tag) ? tags.filter((item) => item !== tag) : [...tags, tag]);
+
   return (
     <div
       className={`mx-auto flex max-w-5xl flex-col ${embedded ? "h-[calc(100dvh-15rem)] min-h-[38rem]" : "h-[calc(100dvh-8rem)] min-h-[38rem]"}`}
@@ -358,8 +419,8 @@ export default function AgentChat({ embedded = false }) {
         </form>
       )}
 
-      <section className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex-row">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-slate-200">
           <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
             <AgentOrb className="h-10 w-10 shadow-sm" />
             <div className="min-w-0">
@@ -421,6 +482,7 @@ export default function AgentChat({ embedded = false }) {
                     >
                       {timeLabel(message.createdAt)}
                     </p>
+                    {message.role === "agent" && <div className="mt-2 flex flex-wrap items-center gap-1.5"><button type="button" onClick={() => saveFeedback({ scope: "reply", target: message, tags: ["Good reply"] })} disabled={savingFeedback || feedback.some((item) => item.message_id === message.id && item.tags?.includes("Good reply"))} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-500 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-45"><ThumbsUp size={12} />Good</button><button type="button" onClick={() => { setFeedbackTarget(message); setSelectedTags([]); setFeedbackNote(""); setIdealReply(""); }} className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-500 transition hover:border-primary/35 hover:bg-primary-tint hover:text-primary">Suggest change</button>{feedback.filter((item) => item.message_id === message.id).length > 0 && <span className="text-[10px] font-semibold text-primary">{feedback.filter((item) => item.message_id === message.id).length} saved</span>}</div>}
                   </div>
                 </div>
               ))}
@@ -493,6 +555,150 @@ export default function AgentChat({ embedded = false }) {
             )}
           </form>
         </div>
+        <aside className="w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-slate-50/70 p-4 lg:w-80 lg:border-l lg:border-t-0">
+          <div>
+            <h2 className="text-sm font-extrabold text-slate-900">Feedback</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Help improve this brand’s AI without changing its live knowledge yet.
+            </p>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            {feedbackTarget ? (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-indigo-600">Reply feedback</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Tell the team what needs to improve.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={resetReplyFeedback}
+                    className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Close reply feedback"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <p className="mt-3 line-clamp-3 rounded-lg bg-slate-50 p-2 text-xs leading-5 text-slate-600">
+                  {feedbackTarget.text}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {feedbackTags.map((tag) => {
+                    const active = selectedTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleFeedbackTag(tag)}
+                        className={`rounded-full border px-2 py-1 text-[11px] font-semibold transition ${active
+                          ? "border-indigo-600 bg-indigo-600 text-white"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"
+                          }`}
+                        aria-pressed={active}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+                <label className="mt-3 block text-xs font-bold text-slate-700" htmlFor="reply-feedback-note">
+                  What should change?
+                </label>
+                <textarea
+                  id="reply-feedback-note"
+                  value={feedbackNote}
+                  onChange={(event) => setFeedbackNote(event.target.value)}
+                  placeholder="Share the issue or missing detail…"
+                  rows={3}
+                  className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                />
+                <label className="mt-3 block text-xs font-bold text-slate-700" htmlFor="ideal-agent-reply">
+                  Ideal reply <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <textarea
+                  id="ideal-agent-reply"
+                  value={idealReply}
+                  onChange={(event) => setIdealReply(event.target.value)}
+                  placeholder="What should the AI have said?"
+                  rows={3}
+                  className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={resetReplyFeedback}
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingFeedback || (!selectedTags.length && !feedbackNote.trim() && !idealReply.trim())}
+                    onClick={() => saveFeedback({
+                      scope: "reply",
+                      target: feedbackTarget,
+                      tags: selectedTags,
+                      note: feedbackNote,
+                      ideal: idealReply,
+                    })}
+                    className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-extrabold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingFeedback ? "Saving…" : "Save feedback"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs leading-5 text-slate-500">
+                Choose <strong className="font-bold text-slate-700">Suggest change</strong> under an AI reply to give detailed feedback.
+              </p>
+            )}
+          </div>
+
+          <div className="mt-5 border-t border-slate-200 pt-4">
+            <label className="block text-xs font-extrabold text-slate-800" htmlFor="conversation-feedback-note">
+              Overall chat note
+            </label>
+            <p className="mt-1 text-xs leading-5 text-slate-500">For feedback about the conversation as a whole.</p>
+            <textarea
+              id="conversation-feedback-note"
+              value={overallNote}
+              onChange={(event) => setOverallNote(event.target.value)}
+              placeholder="What worked well or needs improvement?"
+              rows={3}
+              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            />
+            <button
+              type="button"
+              disabled={savingFeedback || !overallNote.trim()}
+              onClick={() => saveFeedback({ scope: "conversation", note: overallNote })}
+              className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingFeedback ? "Saving…" : "Add overall note"}
+            </button>
+          </div>
+
+          <div className="mt-5 border-t border-slate-200 pt-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-700">Feedback log</h3>
+              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">{feedback.length}</span>
+            </div>
+            {feedback.length ? (
+              <div className="mt-3 space-y-2">
+                {[...feedback].reverse().slice(0, 6).map((item) => (
+                  <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-2.5 text-xs">
+                    <p className="font-bold text-slate-800">{item.scope === "reply" ? "AI reply" : "Whole conversation"}</p>
+                    {item.tags?.length ? <p className="mt-1 text-[11px] font-semibold text-indigo-600">{item.tags.join(" · ")}</p> : null}
+                    <p className="mt-1 leading-5 text-slate-600">{item.note || "Marked as a good reply."}</p>
+                    {item.ideal_reply ? <p className="mt-1.5 border-t border-slate-100 pt-1.5 leading-5 text-slate-500">Ideal: {item.ideal_reply}</p> : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs leading-5 text-slate-500">Feedback you send in this test chat will appear here.</p>
+            )}
+          </div>
+        </aside>
       </section>
     </div>
   );
