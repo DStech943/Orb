@@ -114,20 +114,107 @@ function MetricGrid({ counts, brandName, status, onRetry }) {
 function useProductDrop(brandName, count) {
   const [drop, setDrop] = useState(false)
   useEffect(() => {
-    if (!count || hasReducedMotion()) return
-    const key = `orb:overview:products-drop:${brandName}`
-    if (window.sessionStorage.getItem(key)) return
-    window.sessionStorage.setItem(key, 'shown')
-    setDrop(true)
+    setDrop(false)
+    if (!count || hasReducedMotion()) return undefined
+    const frame = window.requestAnimationFrame(() => setDrop(true))
+    return () => window.cancelAnimationFrame(frame)
   }, [brandName, count])
   return drop
 }
 
-function ProductImage({ product, onUnavailable }) {
+function removeWhiteImageCanvas(image) {
+  const maxSize = 900
+  const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight))
+  const width = Math.max(1, Math.round(image.naturalWidth * scale))
+  const height = Math.max(1, Math.round(image.naturalHeight * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return ''
+  context.drawImage(image, 0, 0, width, height)
+  const pixels = context.getImageData(0, 0, width, height)
+  const { data } = pixels
+  const total = width * height
+  const seen = new Uint8Array(total)
+  const queue = new Int32Array(total)
+  let head = 0
+  let tail = 0
+  const isWhiteCanvas = (index) => {
+    const offset = index * 4
+    return data[offset + 3] > 12 && data[offset] > 240 && data[offset + 1] > 240 && data[offset + 2] > 240
+  }
+  const add = (index) => {
+    if (seen[index] || !isWhiteCanvas(index)) return
+    seen[index] = 1
+    queue[tail++] = index
+  }
+  for (let x = 0; x < width; x += 1) {
+    add(x)
+    add((height - 1) * width + x)
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    add(y * width)
+    add(y * width + width - 1)
+  }
+  while (head < tail) {
+    const index = queue[head++]
+    const x = index % width
+    const y = Math.floor(index / width)
+    data[index * 4 + 3] = 0
+    if (x) add(index - 1)
+    if (x < width - 1) add(index + 1)
+    if (y) add(index - width)
+    if (y < height - 1) add(index + width)
+  }
+  context.putImageData(pixels, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
+function ProductImage({ product, onUnavailable, onReady }) {
   const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [product.id, product.imageUrl])
+  const [source, setSource] = useState(product.imageUrl)
+  const [withoutCors, setWithoutCors] = useState(false)
+  const processed = useRef(false)
+  useEffect(() => {
+    setFailed(false)
+    setSource(product.imageUrl)
+    setWithoutCors(false)
+    processed.current = false
+  }, [product.id, product.imageUrl])
   if (!product.imageUrl || failed) return null
-  return <img src={product.imageUrl} alt="" onError={() => { setFailed(true); onUnavailable(product.id) }} className="aspect-square w-full rounded-2xl object-cover" />
+  const cleanBackground = (event) => {
+    onReady()
+    if (processed.current) return
+    processed.current = true
+    try {
+      const cleaned = removeWhiteImageCanvas(event.currentTarget)
+      if (cleaned) setSource(cleaned)
+    } catch {
+      // A non-CORS image can still render normally; it simply keeps its source canvas.
+    }
+  }
+  const handleImageError = () => {
+    // Keep valid non-CORS product images visible. They cannot be processed by
+    // canvas, but still fall back to the normal image instead of disappearing.
+    if (!withoutCors) {
+      setWithoutCors(true)
+      return
+    }
+    setFailed(true)
+    onUnavailable(product.id)
+  }
+  return <img key={`${source}:${withoutCors ? 'plain' : 'cors'}`} crossOrigin={withoutCors ? undefined : 'anonymous'} src={source} alt="" onLoad={cleanBackground} onError={handleImageError} className="aspect-square w-full object-contain" />
+}
+
+function ProductCard({ product, index, drop, onUnavailable }) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => setReady(false), [product.id, product.imageUrl])
+  const style = { '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, '--wave-y': `${[18, 0, 20, 5][index % 4]}px`, '--float-delay': `${index * -0.8}s`, animationDelay: `${index * 90}ms` }
+  const className = `overview-product-card ${drop && ready ? 'overview-product-card--drop' : ''} relative`
+  const content = <span className="overview-product-art"><ProductImage product={product} onUnavailable={onUnavailable} onReady={() => setReady(true)} /></span>
+  if (product.productUrl) return <a href={product.productUrl} target="_blank" rel="noreferrer" aria-label={`Open ${product.title || 'product'} on the store`} className={className} style={style}>{content}</a>
+  return <Link to={`/app/products?product=${encodeURIComponent(product.id)}`} aria-label={`Open ${product.title || 'product'}`} className={className} style={style}>{content}</Link>
 }
 
 function ProductBlock({ products, productError, loading, brandName, onRetry }) {
@@ -145,7 +232,7 @@ function ProductBlock({ products, productError, loading, brandName, onRetry }) {
   if (loading) return <section aria-label="Loading featured products" className="overview-product-wave">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="overview-product-skeleton" />)}</section>
   if (productError) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="font-extrabold">Could not load products</p><Button size="sm" variant="outline" className="mt-4" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
   if (!selected.length) return null
-  return <section aria-label="Featured products" className="overview-product-wave">{selected.map((product, index) => <Link key={product.id} aria-label={`${product.title || 'Product'}${product.price ? `, ${product.price}` : ''}`} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} relative`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, '--wave-y': `${[18, 0, 20, 5][index % 4]}px`, '--float-delay': `${index * -0.8}s`, animationDelay: `${index * 90}ms` }}><span className="overview-product-art"><ProductImage product={product} onUnavailable={hideUnavailableProduct} /></span><span className="overview-product-price">{product.price || 'Price unavailable'}</span></Link>)}</section>
+  return <section aria-label="Featured products" className="overview-product-wave">{selected.map((product, index) => <ProductCard key={product.id} product={product} index={index} drop={drop} onUnavailable={hideUnavailableProduct} />)}</section>
 }
 
 const DAY = 86_400_000
