@@ -111,23 +111,6 @@ function MetricGrid({ counts, brandName, status, onRetry }) {
   return <section className="grid gap-5 md:grid-cols-3">{METRIC_CONFIG.map((config) => <MetricBox key={config.key} config={config} data={counts?.[config.key]} brandName={brandName} />)}</section>
 }
 
-const coverageScore = (coverage) => {
-  if (typeof coverage === 'number') return coverage
-  const value = String(coverage || '').toLowerCase()
-  if (value.includes('covered')) return 100
-  if (value.includes('ingredient')) return 25
-  if (value.includes('faq')) return 0
-  const numeric = Number.parseFloat(value)
-  return Number.isFinite(numeric) ? numeric : 0
-}
-const coverageLabel = (coverage) => {
-  if (coverage === null || coverage === undefined || coverage === '') return null
-  const value = String(coverage).toLowerCase()
-  if (value.includes('ingredient')) return 'Ingredients missing'
-  if (value.includes('faq')) return 'No FAQ yet'
-  return 'Covered'
-}
-
 function useProductDrop(brandName, count) {
   const [drop, setDrop] = useState(false)
   useEffect(() => {
@@ -150,10 +133,8 @@ function ProductImage({ product }) {
 function ProductBlock({ products, productError, loading, brandName, onRetry }) {
   const selected = useMemo(() => {
     const items = [...(products || [])]
-    const hasCoverage = items.some((product) => product.coverage !== null && product.coverage !== undefined && product.coverage !== '')
     const hasBestSellers = items.some((product) => product.bestSellerScore !== null && product.bestSellerScore !== undefined)
     return items.sort((a, b) => {
-      if (hasCoverage) return coverageScore(a.coverage) - coverageScore(b.coverage) || Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
       if (hasBestSellers) return Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
       return String(b.newestAt || '').localeCompare(String(a.newestAt || ''))
     }).slice(0, 4)
@@ -162,7 +143,7 @@ function ProductBlock({ products, productError, loading, brandName, onRetry }) {
   if (loading) return <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-64" />)}</section>
   if (productError) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="font-extrabold">Could not load products</p><Button size="sm" variant="outline" className="mt-4" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
   if (!selected.length) return <Link to="/app/products" className="flex min-h-40 items-center justify-center rounded-xl border-2 border-dashed border-ink/35 bg-white px-5 text-sm font-extrabold transition hover:border-primary hover:text-primary">Add products <span className="ml-1">→</span></Link>
-  return <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{selected.map((product, index) => <Link key={product.id} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} rounded-xl border-2 border-ink bg-white p-3 shadow-brutal`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, animationDelay: `${index * 90}ms` }}><ProductImage product={product} /><h2 className="mt-3 line-clamp-2 min-h-10 text-sm font-extrabold leading-5">{product.title || 'Untitled product'}</h2><div className="mt-2 flex items-center justify-between gap-2"><p className="text-sm font-bold">{product.price || 'Price unavailable'}</p>{coverageLabel(product.coverage) && <span className="rounded-full border border-ink/15 px-2 py-0.5 text-[10px] font-extrabold">{coverageLabel(product.coverage)}</span>}</div></Link>)}</section>
+  return <section aria-label="Featured products" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{selected.map((product, index) => <Link key={product.id} aria-label={`${product.title || 'Product'}${product.price ? `, ${product.price}` : ''}`} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} relative overflow-hidden rounded-xl border-2 border-ink bg-white p-3 shadow-brutal`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, animationDelay: `${index * 90}ms` }}><ProductImage product={product} /><span className="overview-product-price">{product.price || 'Price unavailable'}</span></Link>)}</section>
 }
 
 const DAY = 86_400_000

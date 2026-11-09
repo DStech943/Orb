@@ -108,14 +108,17 @@ async function fetchViaApi(brandName, user) {
   const products = productsPoints.slice(0, 8).map((p) => {
     const pl = p?.payload ?? {}
     const sh = pl.shopify ?? pl.structured?.shopify_admin ?? {}
+    const firstImage = (...candidates) => candidates.flat(Infinity).find((image) => typeof image === 'string' && image.trim()) ?? null
     return {
       id: p.id,
       title: pl.title ?? pl.name ?? sh.title ?? 'Untitled product',
-      imageUrl:
-        pl.featured_image?.url ??
-        pl.featuredImage?.url ??
-        sh.featuredImage?.url ??
-        null,
+      imageUrl: firstImage(
+        pl.featured_image?.url, pl.featured_image?.src, pl.featuredImage?.url, pl.featuredImage?.src,
+        pl.image?.url, pl.image?.src, pl.images?.map((image) => image?.url ?? image?.src),
+        sh.featuredImage?.url, sh.featuredImage?.src, sh.image?.url, sh.image?.src,
+        sh.images?.map((image) => image?.url ?? image?.src),
+        sh.images?.edges?.map((edge) => edge?.node?.url ?? edge?.node?.src),
+      ),
       price: pl.price ?? '',
       coverage: pl.coverage ?? null, // [MOCK] coverage field not yet in API shape
       bestSellerScore: Number(pl.best_seller_score ?? pl.sales_rank ?? pl.sales ?? 0) || null,

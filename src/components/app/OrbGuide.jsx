@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
-import { activeBrandName, applyAssistantAvailabilityUpdate, askOrbGuide, createAssistantFaq, createOperationalUpdate } from '../../services/orbApi'
+import { activeBrandName, askOrbGuide } from '../../services/orbApi'
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, setOrbVoiceWakeEnabled, setOrbVoiceWakeStatus } from '../../lib/orbVoiceWake'
 import { startBrowserDictation } from '../../lib/browserDictation'
 
@@ -67,6 +67,11 @@ const faqDraftFromRequest = (value) => {
     : 'What should customers know about this update?'
   return { question, answer: answer || String(value || '').trim() }
 }
+const productDraftFromRequest = (value) => {
+  const message = String(value || '').trim()
+  const target = message.match(/^\s*(.+?)\s+(?:is|are)\s+(?:out of stock|back in stock|on pre[ -]?order|available again|expected to be back)/i)?.[1]?.trim() || ''
+  return { message, target }
+}
 const operationDraftFromRequest = (value) => {
   const original = String(value || '').trim()
   const draft = original
@@ -77,12 +82,15 @@ const operationDraftFromRequest = (value) => {
 }
 const assistantWorkFromRequest = (value) => {
   const text = String(value || '').trim()
+  const isQuestion = /\?$/.test(text) || /^(?:what|why|how|where|when|who|can|could|would|do|does|is|are)\b/i.test(text)
+  const explicitAction = /\b(?:draft|write|compose|create|make|add|record|update|change|edit)\b/i.test(text)
+  if (isQuestion && !explicitAction) return null
   if (
     /\b(?:draft|write|compose|create|make|add|record)\b[\s\S]{0,80}\b(?:operations?|operational\s+(?:update|note)|update|note|message)\b/i.test(text)
   ) return { type: 'draft_operation' }
   if (/\b(?:add|create|make)\s+(?:an?\s+)?faq\b/i.test(text)) return { type: 'faq' }
   if (/\b(?:out of stock|back in stock|pre[ -]?order|restock|expected to be back)\b/i.test(text)) return { type: 'product' }
-  if (/\b(?:delayed|delay|sale|promotion|ganesh|operational note|operations?)\b/i.test(text)) return { type: 'operation' }
+  if (/\b(?:delayed|delay|late|running late|sale|promotion|ganesh|diwali|operational note|operations?)\b/i.test(text)) return { type: 'operation' }
   return null
 }
 const directGuideCommand = (value) => {
@@ -416,35 +424,30 @@ export default function OrbGuide() {
       }
       setThinking(true)
       try {
-        if (requestedWork.type === 'draft_operation') {
+        if (requestedWork.type === 'draft_operation' || requestedWork.type === 'operation') {
           const message = operationDraftFromRequest(text)
           const destination = `/app/operations?compose=1&message=${encodeURIComponent(message || text)}`
           lastDestinationRef.current = { destination, destinationLabel: 'Operations' }
-          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Operations with your draft ready to review and send.', destination, destinationLabel: 'Operations' }])
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Operations with your update drafted and ready to review before sending.', destination, destinationLabel: 'Operations' }])
           window.setTimeout(() => navigate(destination), 280)
           return
         }
         if (requestedWork.type === 'faq') {
           const faq = faqDraftFromRequest(text)
-          await createAssistantFaq(faq, brandName)
-          const destination = '/app/brain?tab=faqs'
+          const destination = `/app/brain?tab=faqs&draftQuestion=${encodeURIComponent(faq.question)}&draftAnswer=${encodeURIComponent(faq.answer)}`
           lastDestinationRef.current = { destination, destinationLabel: 'FAQs' }
-          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: `I added a draft FAQ: “${faq.question}” Review and publish it when ready.`, destination, destinationLabel: 'FAQs' }])
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening an unsaved FAQ draft for you to review. Nothing will be added until you choose Save.', destination, destinationLabel: 'FAQs' }])
+          window.setTimeout(() => navigate(destination), 280)
           return
         }
-        await createOperationalUpdate(text, brandName)
         if (requestedWork.type === 'product') {
-          const shopifyResult = await applyAssistantAvailabilityUpdate(text, brandName)
-          const destination = '/app/products'
+          const productDraft = productDraftFromRequest(text)
+          const destination = `/app/products?draft=${encodeURIComponent(productDraft.message)}${productDraft.target ? `&target=${encodeURIComponent(productDraft.target)}` : ''}`
           lastDestinationRef.current = { destination, destinationLabel: 'Products' }
-          const updated = shopifyResult?.status === 'applied'
-          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: updated ? `I recorded the product update and updated ${shopifyResult.product_name}'s ${shopifyResult.metafield} metafield in Shopify.` : `I recorded the product update. Shopify was not changed: ${shopifyResult?.reason || 'a matching product and availability/preorder metafield were not found.'}`, destination, destinationLabel: 'Products' }])
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Products with an unsaved update draft. Review the product details and choose the appropriate save action when you are ready.', destination, destinationLabel: 'Products' }])
+          window.setTimeout(() => navigate(destination), 280)
           return
         }
-        const destination = '/app/operations'
-        lastDestinationRef.current = { destination, destinationLabel: 'Operations' }
-        setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'I added that update to Operations and routed it to the brand’s operational follow-up.', destination, destinationLabel: 'Operations' }])
-        return
       } catch (error) {
         setMessages((items) => [...items, { id: makeId(), role: 'orb', error: true, text: error?.message || 'I could not complete that change.' }])
         return
