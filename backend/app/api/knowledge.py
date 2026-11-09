@@ -185,6 +185,16 @@ class AgentChatRequest(RequestModel):
     session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
 
 
+class AgentFeedbackCreate(RequestModel):
+    session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
+    scope: Literal["reply", "conversation"]
+    message_id: str = Field(default="", max_length=160)
+    agent_reply: str = Field(default="", max_length=10_000)
+    tags: list[str] = Field(default_factory=list, max_length=6)
+    note: str = Field(default="", max_length=5_000)
+    ideal_reply: str = Field(default="", max_length=5_000)
+
+
 class ManualFaqCreate(RequestModel):
     brand_name: str = Field(min_length=1, max_length=160)
     question: str = Field(min_length=6, max_length=1_000)
@@ -1544,6 +1554,79 @@ async def chat_with_deployed_agent(
     if not reply:
         raise HTTPException(status_code=502, detail="The deployed AI agent returned no chat reply.")
     return {"reply": reply}
+
+
+def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
+    tags = row.get("tags") if isinstance(row.get("tags"), list) else []
+    return {
+        "id": str(row.get("id") or ""),
+        "session_id": str(row.get("session_id") or ""),
+        "scope": str(row.get("scope") or "conversation"),
+        "message_id": str(row.get("message_id") or ""),
+        "agent_reply": str(row.get("agent_reply") or ""),
+        "tags": [str(tag) for tag in tags if str(tag).strip()],
+        "note": str(row.get("note") or ""),
+        "ideal_reply": str(row.get("ideal_reply") or ""),
+        "status": str(row.get("status") or "open"),
+        "created_at": row.get("created_at"),
+    }
+
+
+@router.get("/brands/{brand_id}/agent-feedback")
+async def list_agent_feedback(
+    brand_id: str,
+    request: Request,
+    session_id: str = Query(pattern=r"^[A-Za-z0-9_-]{8,64}$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: User = Depends(current_user),
+) -> dict[str, list[dict[str, Any]]]:
+    brand = await _remote_brand(request, brand_id)
+    rows = await _supabase_rows(
+        request,
+        "orb_agent_feedback",
+        {
+            "select": "id,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at",
+            "brand_id": f"eq.{brand['id']}",
+            "session_id": f"eq.{session_id}",
+            "order": "created_at.asc",
+            "limit": str(limit),
+        },
+    )
+    return {"feedback": [_agent_feedback_out(row) for row in rows]}
+
+
+@router.post("/brands/{brand_id}/agent-feedback", status_code=status.HTTP_201_CREATED)
+async def create_agent_feedback(
+    brand_id: str,
+    payload: AgentFeedbackCreate,
+    request: Request,
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    if not (payload.tags or payload.note.strip() or payload.ideal_reply.strip()):
+        raise HTTPException(status_code=422, detail="Choose feedback tags or add a note before saving feedback.")
+    if payload.scope == "reply" and not payload.agent_reply.strip():
+        raise HTTPException(status_code=422, detail="Reply feedback must include the AI response it refers to.")
+    brand = await _remote_brand(request, brand_id)
+    tags = list(dict.fromkeys(tag.strip()[:80] for tag in payload.tags if tag.strip()))
+    rows = await _supabase_write(
+        request,
+        "POST",
+        "orb_agent_feedback",
+        payload={
+            "brand_id": brand["id"],
+            "submitted_by": str(user.id),
+            "session_id": payload.session_id,
+            "scope": payload.scope,
+            "message_id": payload.message_id.strip() or None,
+            "agent_reply": payload.agent_reply.strip(),
+            "tags": tags,
+            "note": payload.note.strip(),
+            "ideal_reply": payload.ideal_reply.strip(),
+        },
+    )
+    if not rows:
+        raise HTTPException(status_code=503, detail="Supabase did not return the saved agent feedback.")
+    return {"feedback": _agent_feedback_out(rows[0])}
 
 
 @router.patch("/brands/{brand_id}/category")

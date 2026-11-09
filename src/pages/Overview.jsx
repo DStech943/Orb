@@ -126,8 +126,8 @@ function useProductDrop(brandName, count) {
 function ProductImage({ product }) {
   const [failed, setFailed] = useState(false)
   useEffect(() => setFailed(false), [product.id, product.imageUrl])
-  if (!product.imageUrl || failed) return <div className="grid aspect-square place-items-center rounded-lg border border-ink/15 bg-peach text-2xl font-extrabold text-ink">{String(product.title || '?').trim().charAt(0).toUpperCase() || '?'}</div>
-  return <img src={product.imageUrl} alt="" onError={() => setFailed(true)} className="aspect-square w-full rounded-lg border border-ink/15 object-cover" />
+  if (!product.imageUrl || failed) return <div className="grid aspect-square place-items-center rounded-2xl bg-primary/10 text-2xl font-extrabold text-primary">{String(product.title || '?').trim().charAt(0).toUpperCase() || '?'}</div>
+  return <img src={product.imageUrl} alt="" onError={() => setFailed(true)} className="aspect-square w-full rounded-2xl object-cover" />
 }
 
 function ProductBlock({ products, productError, loading, brandName, onRetry }) {
@@ -140,10 +140,10 @@ function ProductBlock({ products, productError, loading, brandName, onRetry }) {
     }).slice(0, 4)
   }, [products])
   const drop = useProductDrop(brandName, selected.length)
-  if (loading) return <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-64" />)}</section>
+  if (loading) return <section aria-label="Loading featured products" className="overview-product-wave">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="overview-product-skeleton" />)}</section>
   if (productError) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="font-extrabold">Could not load products</p><Button size="sm" variant="outline" className="mt-4" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
   if (!selected.length) return <Link to="/app/products" className="flex min-h-40 items-center justify-center rounded-xl border-2 border-dashed border-ink/35 bg-white px-5 text-sm font-extrabold transition hover:border-primary hover:text-primary">Add products <span className="ml-1">→</span></Link>
-  return <section aria-label="Featured products" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{selected.map((product, index) => <Link key={product.id} aria-label={`${product.title || 'Product'}${product.price ? `, ${product.price}` : ''}`} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} relative overflow-hidden rounded-xl border-2 border-ink bg-white p-3 shadow-brutal`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, animationDelay: `${index * 90}ms` }}><ProductImage product={product} /><span className="overview-product-price">{product.price || 'Price unavailable'}</span></Link>)}</section>
+  return <section aria-label="Featured products" className="overview-product-wave">{selected.map((product, index) => <Link key={product.id} aria-label={`${product.title || 'Product'}${product.price ? `, ${product.price}` : ''}`} to={`/app/products?product=${encodeURIComponent(product.id)}`} className={`overview-product-card ${drop ? 'overview-product-card--drop' : ''} relative`} style={{ '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, '--wave-y': `${[18, 0, 20, 5][index % 4]}px`, '--float-delay': `${index * -0.8}s`, animationDelay: `${index * 90}ms` }}><span className="overview-product-art"><ProductImage product={product} /></span><span className="overview-product-price">{product.price || 'Price unavailable'}</span></Link>)}</section>
 }
 
 const DAY = 86_400_000
@@ -305,9 +305,8 @@ function BrandOverview({ overview, onRetry }) {
   }, [])
   const extend = (id, newExpiresAt) => setOperations((items) => items.map((operation) => operation.id === id ? { ...operation, expiresAt: newExpiresAt } : operation))
 
-  return <div className="mx-auto max-w-6xl"><header><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p></header>
+  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{!isNewBrand && <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />}</header>
     {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
-      <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />
       <MetricGrid counts={overview.counts} brandName={brandName} status={overview.blockStatus?.metrics} onRetry={onRetry} />
       <div className="grid gap-5 lg:grid-cols-2"><QuickActions overview={overview} now={now} isAdmin={isAdmin} status={overview.blockStatus?.metrics} onRetry={onRetry} /><ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} /></div>
       {!setupHidden && (setupCelebrating ? <section className="rounded-xl border-2 border-ink bg-white p-6 text-center shadow-brutal"><span className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-emerald-500 bg-emerald-50 text-emerald-600"><SpringCheck animated /></span><h2 className="mt-3 text-xl font-extrabold">Setup complete</h2><p className="mt-1 text-sm text-muted">Orb is ready for your team.</p></section> : <SetupChecklist steps={setupSteps} />)}
