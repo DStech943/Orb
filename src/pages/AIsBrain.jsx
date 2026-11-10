@@ -37,7 +37,7 @@ export default function AIsBrain() {
     { id: 'chat', label: `Chat with ${agentName}`, description: `Test ${agentName}'s responses against this brand's approved knowledge.`, Icon: MessageSquareText },
   ]
 
-  return <div className="page-enter mx-auto max-w-6xl">
+  return <div className="page-enter mx-auto max-w-7xl">
     <header className="mb-6">
       <p className="text-xs font-extrabold uppercase tracking-widest text-primary">Knowledge library</p>
       <h2 className="mt-1 text-3xl font-extrabold tracking-tight">AI&apos;s Brain</h2>

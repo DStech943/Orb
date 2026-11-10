@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS cx_copilot.orb_agent_feedback (
   tags jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(tags) = 'array'),
   note text NOT NULL DEFAULT '' CHECK (char_length(note) <= 5000),
   ideal_reply text NOT NULL DEFAULT '' CHECK (char_length(ideal_reply) <= 5000),
-  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'updated_in_knowledge', 'retested')),
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'updated_in_knowledge', 'retested', 'resolved')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
