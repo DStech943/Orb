@@ -211,6 +211,11 @@ class OrbGuideRequest(RequestModel):
     question: str = Field(min_length=1, max_length=1_200)
 
 
+class OrbDraftRequest(RequestModel):
+    target: Literal["faq", "operation", "product"]
+    request: str = Field(min_length=4, max_length=1_200)
+
+
 FLOW_ASSIST_COLUMNS = [
     "Lifecycle stage", "Flow title", "Query category", "Pre-requisites", "Systems used",
     "Checks", "Situation", "Actions", "Level", "Customer message (template)", "Escalate to",
@@ -249,6 +254,12 @@ safe interface action; otherwise leave both empty. Valid actions are open_agent_
 open_create_with_orb, and focus_operational_update. Return JSON exactly in this shape:
 {\"answer\": \"...\", \"navigate_to\": \"/app/... or empty string\", \"action\": \"valid action or empty string\"}.
 Keep the answer under 90 words."""
+
+ORB_DRAFT_SYSTEM = """You turn a workspace member's request into an unsaved, editable support-content draft.
+Preserve only facts explicitly stated in the request. Do not invent ingredients, policies, dates, stock quantities,
+product IDs, or medical claims. Make language clear, customer-ready, and concise. Never say that anything was saved.
+Return JSON only. For target=faq return {"question":"", "answer":"", "category":"Support|Product|Billing"}.
+For target=operation return {"message":""}. For target=product return {"target":"", "description":""}."""
 
 
 def _flow_assist_text(value: Any, limit: int = 2_000) -> str:
@@ -1516,6 +1527,49 @@ async def ask_orb_guide(payload: OrbGuideRequest, request: Request, _: User = De
     if action not in GUIDE_ACTIONS:
         action = ""
     return {"answer": answer, "navigate_to": destination, "action": action}
+
+
+def _orb_draft_fallback(target: str, request: str) -> dict[str, str]:
+    """Keep draft handoffs useful when the optional drafting model is unavailable."""
+    text = " ".join(request.split()).strip().rstrip(".")
+    if target == "faq":
+        statement = re.sub(r"^.*?\b(?:add|create|make)\s+(?:an?\s+)?faq\s*(?:that|saying|for)?\s*", "", text, flags=re.I).strip()
+        subject = re.split(r"\s+(?:is|are|can|will|does|do)\s+", statement, maxsplit=1, flags=re.I)[0].strip(" ,.-")
+        question = f"What should customers know about {subject}?" if subject else "What should customers know about this update?"
+        return {"question": question, "answer": (statement or text).rstrip(".") + ".", "category": "Product"}
+    if target == "product":
+        subject_match = re.match(r"(.+?)\s+(?:is|are)\s+(?:out of stock|back in stock|available again|expected to be back|on pre[ -]?order)", text, flags=re.I)
+        product = subject_match.group(1).strip(" ,.-") if subject_match else ""
+        return {"target": product, "description": text.rstrip(".") + "."}
+    return {"message": text.rstrip(".") + "."}
+
+
+@router.post("/orb-guide/draft")
+async def draft_orb_work(payload: OrbDraftRequest, request: Request, _: User = Depends(current_user)) -> dict[str, str]:
+    """Prepare a review-only structured draft for an Orb guide handoff."""
+    fallback = _orb_draft_fallback(payload.target, payload.request)
+    try:
+        generated = await generate_json(
+            request.app.state.db,
+            request.app.state.settings,
+            ORB_DRAFT_SYSTEM,
+            f"Target: {payload.target}\n\nWorkspace member request:\n{payload.request.strip()}",
+        )
+    except GenerationUnavailable:
+        return fallback
+    if not isinstance(generated, dict):
+        return fallback
+    if payload.target == "faq":
+        question = _flow_assist_text(generated.get("question"), 1_000) or fallback["question"]
+        answer = _flow_assist_text(generated.get("answer"), 5_000) or fallback["answer"]
+        category = _flow_assist_text(generated.get("category"), 80).title()
+        return {"question": question, "answer": answer, "category": category if category in {"Support", "Product", "Billing"} else fallback["category"]}
+    if payload.target == "product":
+        return {
+            "target": _flow_assist_text(generated.get("target"), 240) or fallback["target"],
+            "description": _flow_assist_text(generated.get("description"), 5_000) or fallback["description"],
+        }
+    return {"message": _flow_assist_text(generated.get("message"), 10_000) or fallback["message"]}
 
 
 @router.post("/brands/{brand_id}/agent/chat")

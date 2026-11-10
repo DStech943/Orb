@@ -178,6 +178,8 @@ export const setRemoteBrandAgentConnection = (brandId, connection) =>
   });
 export const askOrbGuide = (payload) =>
   request("/api/orb-guide", { method: "POST", body: JSON.stringify(payload), invalidateCache: false });
+export const draftOrbWork = (payload) =>
+  request("/api/orb-guide/draft", { method: "POST", body: JSON.stringify(payload), invalidateCache: false });
 export const chatWithDeployedAgent = (brandId, payload) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/agent/chat`, {
     method: "POST",
