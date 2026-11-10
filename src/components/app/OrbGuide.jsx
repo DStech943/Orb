@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
-import { activeBrandName, askOrbGuide } from '../../services/orbApi'
+import { activeBrandName, askOrbGuide, draftOrbWork } from '../../services/orbApi'
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, setOrbVoiceWakeEnabled, setOrbVoiceWakeStatus } from '../../lib/orbVoiceWake'
 import { startBrowserDictation } from '../../lib/browserDictation'
 
@@ -425,7 +425,8 @@ export default function OrbGuide() {
       setThinking(true)
       try {
         if (requestedWork.type === 'draft_operation' || requestedWork.type === 'operation') {
-          const message = operationDraftFromRequest(text)
+          const prepared = await draftOrbWork({ target: 'operation', request: operationDraftFromRequest(text) })
+          const message = prepared?.message || operationDraftFromRequest(text)
           const destination = `/app/operations?compose=1&message=${encodeURIComponent(message || text)}`
           lastDestinationRef.current = { destination, destinationLabel: 'Operations' }
           setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Operations with your update drafted and ready to review before sending.', destination, destinationLabel: 'Operations' }])
@@ -433,16 +434,27 @@ export default function OrbGuide() {
           return
         }
         if (requestedWork.type === 'faq') {
-          const faq = faqDraftFromRequest(text)
-          const destination = `/app/brain?tab=faqs&draftQuestion=${encodeURIComponent(faq.question)}&draftAnswer=${encodeURIComponent(faq.answer)}`
+          const fallback = faqDraftFromRequest(text)
+          const prepared = await draftOrbWork({ target: 'faq', request: text })
+          const faq = {
+            question: prepared?.question || fallback.question,
+            answer: prepared?.answer || fallback.answer,
+            category: prepared?.category || 'Product',
+          }
+          const destination = `/app/brain?tab=faqs&draftQuestion=${encodeURIComponent(faq.question)}&draftAnswer=${encodeURIComponent(faq.answer)}&draftCategory=${encodeURIComponent(faq.category)}`
           lastDestinationRef.current = { destination, destinationLabel: 'FAQs' }
           setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening an unsaved FAQ draft for you to review. Nothing will be added until you choose Save.', destination, destinationLabel: 'FAQs' }])
           window.setTimeout(() => navigate(destination), 280)
           return
         }
         if (requestedWork.type === 'product') {
-          const productDraft = productDraftFromRequest(text)
-          const destination = `/app/products?draft=${encodeURIComponent(productDraft.message)}${productDraft.target ? `&target=${encodeURIComponent(productDraft.target)}` : ''}`
+          const fallback = productDraftFromRequest(text)
+          const prepared = await draftOrbWork({ target: 'product', request: text })
+          const productDraft = {
+            target: prepared?.target || fallback.target,
+            description: prepared?.description || fallback.message,
+          }
+          const destination = `/app/products?draft=${encodeURIComponent(productDraft.description)}${productDraft.target ? `&target=${encodeURIComponent(productDraft.target)}` : ''}`
           lastDestinationRef.current = { destination, destinationLabel: 'Products' }
           setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Products with an unsaved update draft. Review the product details and choose the appropriate save action when you are ready.', destination, destinationLabel: 'Products' }])
           window.setTimeout(() => navigate(destination), 280)

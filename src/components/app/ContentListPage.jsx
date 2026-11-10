@@ -345,7 +345,13 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     if (target) setQuery(assistantDraft.target)
     if (product) {
       scrollPosition.current = window.scrollY
-      setSelected(product)
+      const note = String(assistantDraft.message || '').trim()
+      const currentDescription = String(product.description || '').trim()
+      const hasDraft = currentDescription.includes(note)
+      setSelected({
+        ...product,
+        description: note && !hasDraft ? [currentDescription, note].filter(Boolean).join(`${currentDescription ? '\n\n' : ''}`) : currentDescription,
+      })
     }
   }, [assistantDraft, data, isProduct])
   const rows = useMemo(() => {
