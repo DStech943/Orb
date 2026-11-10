@@ -299,7 +299,50 @@ function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loa
   </div>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, initialDraft = null, assistantDraft = null }) {
+const productMatchesAssistantDraft = (product = {}, draft = {}) => {
+  const target = String(draft.target || '').trim().toLowerCase()
+  const productName = String(product.name || product.title || '').trim().toLowerCase()
+  return Boolean(target && productName && productName.includes(target))
+}
+
+const assistantDraftTokens = (value = '') => new Set(String(value).toLowerCase().match(/[a-z0-9]{3,}/g) || [])
+const textMetafieldTypes = new Set(['single_line_text_field', 'multi_line_text_field', 'rich_text_field', 'list.single_line_text_field', 'list.multi_line_text_field'])
+
+function ProductMetafieldDraftReview({ product, draft, onApply }) {
+  const [showAll, setShowAll] = useState(false)
+  useEffect(() => { setShowAll(false) }, [product.id, draft.message])
+  const candidates = useMemo(() => {
+    const intent = assistantDraftTokens(`${draft.fieldHint || ''} ${draft.message || ''}`)
+    const availabilityIntent = /\b(?:availability|stock|restock|preorder|pre-order|back in stock|out of stock)\b/i.test(`${draft.fieldHint || ''} ${draft.message || ''}`)
+    return (Array.isArray(product.metafields) ? product.metafields : []).map((field, index) => {
+      const label = `${field.definition?.name || ''} ${field.namespace || ''} ${field.key || ''} ${field.description || ''}`.toLowerCase()
+      const fieldTokens = assistantDraftTokens(label)
+      let score = [...intent].reduce((total, token) => total + (fieldTokens.has(token) ? 3 : 0), 0)
+      if (availabilityIntent && /(?:availability|stock|restock|pre[ _-]?order|back[ _-]?in)/i.test(label)) score += 12
+      if (draft.fieldHint && label.includes(String(draft.fieldHint).toLowerCase())) score += 8
+      const type = String(field.type || '').toLowerCase()
+      return { field, index, score, editable: textMetafieldTypes.has(type), label: metafieldDisplayName(field) }
+    }).sort((left, right) => right.score - left.score || left.label.localeCompare(right.label))
+  }, [draft.fieldHint, draft.message, product.metafields])
+  const related = candidates.filter((candidate) => candidate.score > 0)
+  const displayed = showAll ? candidates : related
+  const fieldCount = candidates.length
+  return <section className="rounded-2xl border border-primary/25 bg-primary/5 p-5 shadow-sm">
+    <p className="text-xs font-extrabold uppercase tracking-widest text-primary">Orb draft review</p>
+    <h2 className="mt-1 text-lg font-extrabold text-ink">Choose where this product update belongs</h2>
+    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{draft.message}</p>
+    <p className="mt-3 text-xs leading-5 text-slate-600">Orb checked {fieldCount} {product._orbMetafieldsLive ? 'live' : 'synced'} Shopify {fieldCount === 1 ? 'metafield' : 'metafields'} on this product. {related.length ? `${related.length} look${related.length === 1 ? 's' : ''} related to ${draft.fieldHint || 'this update'}.` : 'None are an obvious text match, so choose a field manually if appropriate.'} Adding a draft below does not save anything to Shopify.</p>
+    {displayed.length ? <div className="mt-4 grid gap-2">
+      {displayed.map(({ field, index, editable, label }) => <div key={field.id || `${field.namespace}-${field.key}-${index}`} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/15 bg-white px-3 py-3">
+        <div className="min-w-0"><p className="font-bold text-ink">{label}</p><p className="mt-0.5 truncate text-xs text-slate-500">{field.namespace || 'custom'}.{field.key || 'untitled'} · {field.type || 'unknown type'}</p>{field.value ? <p className="mt-1 line-clamp-2 text-xs text-slate-600">Current: {metafieldPreview(field)}</p> : null}</div>
+        <Button type="button" variant="outline" size="sm" disabled={!editable} title={editable ? 'Add this as an editable draft' : 'This Shopify field cannot safely receive a text draft'} onClick={() => onApply(index)}>{editable ? 'Add draft here' : 'Not a text field'}</Button>
+      </div>)}
+    </div> : <p className="mt-4 rounded-xl border border-dashed border-primary/30 bg-white/70 p-3 text-sm text-slate-600">{fieldCount ? 'No fields are an obvious match. You can still inspect every synced Shopify field below.' : 'This product has no synced Shopify metafields yet. Sync Products before choosing a metafield, or add a field manually below.'}</p>}
+    {candidates.length > related.length ? <button type="button" onClick={() => setShowAll((current) => !current)} className="mt-3 text-sm font-bold text-primary hover:underline">{showAll ? 'Show related fields only' : `Show all ${fieldCount} Shopify fields`}</button> : null}
+  </section>
+}
+
+export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, initialDraft = null, assistantDraft = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isProduct = kind === 'product'
@@ -345,15 +388,20 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     if (target) setQuery(assistantDraft.target)
     if (product) {
       scrollPosition.current = window.scrollY
-      const note = String(assistantDraft.message || '').trim()
-      const currentDescription = String(product.description || '').trim()
-      const hasDraft = currentDescription.includes(note)
-      setSelected({
-        ...product,
-        description: note && !hasDraft ? [currentDescription, note].filter(Boolean).join(`${currentDescription ? '\n\n' : ''}`) : currentDescription,
-      })
+      setSelected(product)
+      if (!loadProductMetafields) return undefined
+      let active = true
+      Promise.resolve(loadProductMetafields(product))
+        .then((result) => {
+          const metafields = Array.isArray(result?.metafields) ? result.metafields : null
+          if (active && metafields) setSelected((current) => current?.id === product.id ? { ...current, metafields, _orbMetafieldsLive: true } : current)
+        })
+        .catch(() => {
+          // The review still works from the last successful product sync.
+        })
+      return () => { active = false }
     }
-  }, [assistantDraft, data, isProduct])
+  }, [assistantDraft, data, isProduct, loadProductMetafields])
   const rows = useMemo(() => {
     const filtered = data.filter((item) => {
       const text = [item.title, item.question, item.name, item.description, item.category].filter(Boolean).join(' ').toLowerCase()
@@ -463,6 +511,20 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       showToast(`${savedCount} metafield${savedCount === 1 ? '' : 's'} saved${deletedCount ? `, ${deletedCount} deleted` : ''} in Shopify.`)
     } catch (saveError) { showToast(saveError.message || 'Could not save metafields to Shopify.') } finally { setSavingShopify(false) }
   }
+  const applyAssistantDraftToMetafield = (fieldIndex) => {
+    setSelected((current) => {
+      if (!current) return current
+      const fields = Array.isArray(current.metafields) ? current.metafields : []
+      const field = fields[fieldIndex]
+      if (!field) return current
+      return {
+        ...current,
+        metafields: fields.map((item, index) => index === fieldIndex ? { ...item, value: metafieldValueFromText(item, assistantDraft?.message || '') } : item),
+      }
+    })
+    const field = selected?.metafields?.[fieldIndex]
+    if (field) showToast(`Draft added to ${metafieldDisplayName(field)}. It has not been saved to Shopify.`)
+  }
 
   const columns = isSop
     ? [{ key: 'title', label: 'Title / situation', render: (item) => <div><strong>{item.title}</strong><p className="text-xs text-muted">{item.situation}</p></div> }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated', render: (item) => <div className="whitespace-nowrap"><p className="text-sm font-medium text-ink">{formatUpdatedAt(item.updated)}</p><p className="mt-0.5 text-xs text-muted">by {updatedByLabel(item)}</p></div> }]
@@ -474,7 +536,8 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   if (error) return <KnowledgeAccessState error={error} title={title} onRetry={reload} />
 
   const selectableColumns = isProduct ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]
-  const productEditor = <ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} loadThemeTemplates={loadThemeTemplates} saveVariantMetafields={saveVariantMetafields} />
+  const matchingAssistantDraft = isProduct && selected && assistantDraft?.message && productMatchesAssistantDraft(selected, assistantDraft)
+  const productEditor = <>{matchingAssistantDraft ? <ProductMetafieldDraftReview product={selected} draft={assistantDraft} onApply={applyAssistantDraftToMetafield} /> : null}<ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} loadThemeTemplates={loadThemeTemplates} saveVariantMetafields={saveVariantMetafields} /></>
   const footer = selected && <div className="flex flex-wrap gap-2">{isProduct && saveProductMetafields && <Button variant="purple" onClick={saveMetafieldsToShopify} disabled={savingShopify}>{savingShopify ? 'Saving to Shopify…' : 'Save metafields to Shopify'}</Button>}<Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : 'Save'}</Button>{!isProduct && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}<Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button></div>
 
   return <div className="page-enter mx-auto max-w-7xl">
@@ -487,7 +550,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         <Button onClick={() => navigate('/app?generate=1')}><Plus size={16} />Generate more</Button>
       </div>
     </div>
-    {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Review the matching product and use a Save action only when you approve the update.</p></section>}
+    {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Open the matching product and choose the Shopify metafield that should receive this editable draft.</p></section>}
     <section className="mt-6 rounded-lg border-2 border-ink bg-white p-4 shadow-brutal">
       <div className={`grid gap-3 ${isProduct ? 'md:grid-cols-[1fr_150px_190px]' : 'md:grid-cols-[1fr_150px_150px]'}`}>
         <label className="flex items-center gap-2 rounded-md border-2 border-ink px-3 py-2"><Search size={16} /><input className="min-w-0 flex-1 outline-none" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>

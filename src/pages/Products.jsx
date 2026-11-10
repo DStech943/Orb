@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import ContentListPage from '../components/app/ContentListPage'
-import { deleteProduct, listProducts, loadProductThemeTemplates, loadProductVariantMetafields, saveProduct, saveProductMetafieldsToShopify, saveVariantMetafieldsToShopify, syncProductsForActiveBrand } from '../services/generation'
+import { deleteProduct, listProducts, loadProductMetafields, loadProductThemeTemplates, loadProductVariantMetafields, saveProduct, saveProductMetafieldsToShopify, saveVariantMetafieldsToShopify, syncProductsForActiveBrand } from '../services/generation'
 import { activeBrandName, getShopifyCredentialStatus, hasOrbApi } from '../services/orbApi'
 
 export default function Products() {
   const [search] = useSearchParams()
   const [brandName, setBrandName] = useState(() => activeBrandName())
   const [shopifyConnected, setShopifyConnected] = useState(false)
-  const assistantDraft = useMemo(() => ({ message: search.get('draft') || '', target: search.get('target') || '' }), [search])
+  const assistantDraft = useMemo(() => ({ message: search.get('draft') || '', target: search.get('target') || '', fieldHint: search.get('field') || '' }), [search])
 
   useEffect(() => {
     let active = true
@@ -26,5 +26,5 @@ export default function Products() {
     return () => { active = false; window.removeEventListener('orb:brand-changed', checkConnection) }
   }, [])
 
-  return <ContentListPage kind="product" list={listProducts} update={saveProduct} remove={deleteProduct} assistantDraft={assistantDraft.message ? assistantDraft : null} syncProducts={shopifyConnected ? () => syncProductsForActiveBrand(brandName) : null} saveProductMetafields={shopifyConnected ? (product) => saveProductMetafieldsToShopify(product, brandName) : null} saveVariantMetafields={shopifyConnected ? (product, variant) => saveVariantMetafieldsToShopify(product, variant, brandName) : null} loadVariantMetafields={shopifyConnected ? (product, variantId) => loadProductVariantMetafields(product, brandName, variantId) : null} loadThemeTemplates={shopifyConnected ? () => loadProductThemeTemplates(brandName) : null} />
+  return <ContentListPage kind="product" list={listProducts} update={saveProduct} remove={deleteProduct} assistantDraft={assistantDraft.message ? assistantDraft : null} syncProducts={shopifyConnected ? () => syncProductsForActiveBrand(brandName) : null} saveProductMetafields={shopifyConnected ? (product) => saveProductMetafieldsToShopify(product, brandName) : null} saveVariantMetafields={shopifyConnected ? (product, variant) => saveVariantMetafieldsToShopify(product, variant, brandName) : null} loadProductMetafields={shopifyConnected ? (product) => loadProductMetafields(product, brandName) : null} loadVariantMetafields={shopifyConnected ? (product, variantId) => loadProductVariantMetafields(product, brandName, variantId) : null} loadThemeTemplates={shopifyConnected ? () => loadProductThemeTemplates(brandName) : null} />
 }

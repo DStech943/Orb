@@ -477,6 +477,10 @@ export const getShopifyProductTemplates = ({ brandName }) =>
   request(
     `/api/shopify/products/theme-templates?brand_name=${encodeURIComponent(brandName)}`,
   );
+export const getShopifyProductMetafields = ({ brandName, productId }) =>
+  request(
+    `/api/shopify/products/${encodeURIComponent(productId)}/metafields?brand_name=${encodeURIComponent(brandName)}`,
+  );
 export const getShopifyVariantMetafields = ({
   brandName,
   productId,

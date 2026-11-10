@@ -570,6 +570,88 @@ async def product_theme_templates(
     return {"templates": templates}
 
 
+@router.get("/products/{product_id}/metafields")
+async def product_metafields(
+    product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160), user: User = Depends(current_user),
+) -> dict:
+    """Read live product metafields and their definitions without changing Shopify."""
+    brand = await _remote_brand_by_name(request, brand_name)
+    rows = await _supabase_service_rows(request, "orb_products", {
+        "select": "external_id,provider",
+        "id": f"eq.{product_id}",
+        "brand_id": f"eq.{brand['id']}",
+        "provider": "eq.shopify_admin",
+        "limit": "1",
+    })
+    if not rows:
+        raise HTTPException(status_code=404, detail="This Shopify product is no longer available in Orb. Sync Products and try again.")
+    domain, access_token, _source = await _resolve_credentials(request, brand_name, True, user)
+    if not domain or not access_token:
+        raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
+    query = """
+    query OrbProductMetafields($id: ID!) {
+      metafieldDefinitions(first: 100, ownerType: PRODUCT, pinnedStatus: PINNED) {
+        nodes { id name namespace key description pinnedPosition type { name } }
+      }
+      allProductMetafieldDefinitions: metafieldDefinitions(first: 100, ownerType: PRODUCT) {
+        nodes { id name namespace key description pinnedPosition type { name } }
+      }
+      node(id: $id) {
+        ... on Product {
+          id
+          metafields(first: 100) {
+            nodes { id namespace key type value description definition { name pinnedPosition } }
+          }
+          metafieldDefinitions(first: 100, pinnedStatus: PINNED) {
+            nodes { id name namespace key description pinnedPosition type { name } }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = await _admin_query(
+            request.app.state.settings, query, {"id": rows[0]["external_id"]},
+            domain=admin_domain(domain), access_token=access_token,
+        )
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    product = (data.get("node") or {}) if isinstance(data, dict) else {}
+    if not isinstance(product, dict) or str(product.get("id") or "") != str(rows[0]["external_id"]):
+        raise HTTPException(status_code=404, detail="This Shopify product no longer belongs to the selected brand.")
+    values_by_key = {
+        (str(field.get("namespace") or ""), str(field.get("key") or "")): field
+        for field in ((product.get("metafields") or {}).get("nodes") or []) if isinstance(field, dict)
+    }
+    definitions = (product.get("metafieldDefinitions") or {}).get("nodes") or []
+    if not definitions:
+        definitions = (data.get("metafieldDefinitions") or {}).get("nodes") or []
+    if not definitions:
+        definitions = (data.get("allProductMetafieldDefinitions") or {}).get("nodes") or []
+    fields: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for definition in definitions:
+        if not isinstance(definition, dict):
+            continue
+        namespace = str(definition.get("namespace") or "")
+        key = str(definition.get("key") or "")
+        if not namespace or not key:
+            continue
+        value = values_by_key.get((namespace, key), {})
+        field_type = definition.get("type") if isinstance(definition.get("type"), dict) else {}
+        fields.append({
+            "id": value.get("id"), "namespace": namespace, "key": key,
+            "type": str(value.get("type") or field_type.get("name") or "single_line_text_field"),
+            "value": str(value.get("value") or ""),
+            "description": definition.get("description") or value.get("description") or "",
+            "is_set": bool(value.get("id")),
+            "definition": {"id": definition.get("id"), "name": definition.get("name"), "pinnedPosition": definition.get("pinnedPosition")},
+        })
+        seen.add((namespace, key))
+    fields.extend(field for key, field in values_by_key.items() if key not in seen)
+    return {"metafields": fields}
+
+
 @router.get("/products/{product_id}/variant-metafields")
 async def product_variant_metafields(
     product_id: str, request: Request, brand_name: str = Query(min_length=1, max_length=160),
