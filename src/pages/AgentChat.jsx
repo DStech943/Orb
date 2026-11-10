@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowUp,
   Eraser,
@@ -30,6 +31,7 @@ const prompts = [
   "Do you have this product in stock?",
 ];
 const feedbackTags = ["Wrong info", "Tone", "Too long", "Missing SOP", "Should escalate"];
+const FULLSCREEN_DEFAULT_KEY = "orb:agent-chat:open-fullscreen-by-default";
 
 const newSessionId = () => {
   if (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -119,7 +121,12 @@ export default function AgentChat({ embedded = false }) {
   const [idealReply, setIdealReply] = useState("");
   const [overallNote, setOverallNote] = useState("");
   const [savingFeedback, setSavingFeedback] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [openFullscreenByDefault, setOpenFullscreenByDefault] = useState(
+    () => typeof window !== "undefined" && window.localStorage.getItem(FULLSCREEN_DEFAULT_KEY) === "true",
+  );
+  const [isFullscreen, setIsFullscreen] = useState(
+    () => typeof window !== "undefined" && window.localStorage.getItem(FULLSCREEN_DEFAULT_KEY) === "true",
+  );
   const messagesRef = useRef(null);
   const activeBrand = brands.find((brand) => brand.id === brandId) || brands[0];
   const configuredAgentName = String(activeBrand?.ai_agent_name || "").trim();
@@ -220,6 +227,11 @@ export default function AgentChat({ embedded = false }) {
     };
   }, [isFullscreen]);
 
+  const setFullscreenDefault = (enabled) => {
+    setOpenFullscreenByDefault(enabled);
+    window.localStorage.setItem(FULLSCREEN_DEFAULT_KEY, String(enabled));
+  };
+
   const clearChat = async () => {
     if (activeBrand?.id && sessionId && hasBrandAgentApi) {
       try {
@@ -311,15 +323,15 @@ export default function AgentChat({ embedded = false }) {
 
   const toggleFeedbackTag = (tag) => setSelectedTags((tags) => tags.includes(tag) ? tags.filter((item) => item !== tag) : [...tags, tag]);
 
-  return (
+  const chatWorkspace = (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[70] h-[100dvh] min-h-0 max-w-none bg-peach p-4 sm:p-6" : `mx-auto ${embedded ? "h-[calc(100dvh-13rem)] min-h-[42rem] max-w-7xl" : "h-[calc(100dvh-8rem)] min-h-[42rem] max-w-6xl"}`}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[100] h-[100dvh] w-screen min-h-0 max-w-none overflow-hidden bg-[#E6E9EF]" : `mx-auto ${embedded ? "h-[calc(100dvh-13rem)] min-h-[42rem] max-w-7xl" : "h-[calc(100dvh-8rem)] min-h-[42rem] max-w-6xl"}`}`}
       role={isFullscreen ? "dialog" : undefined}
       aria-modal={isFullscreen || undefined}
       aria-label={isFullscreen ? `${title} full screen` : undefined}
     >
-      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-4" : "mb-5"}`}>
-        <div>
+      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-0 border-b border-slate-200 bg-white px-4 py-3" : "mb-5"}`}>
+        {!isFullscreen && <div>
           <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
             Agent tester
           </p>
@@ -330,18 +342,25 @@ export default function AgentChat({ embedded = false }) {
             Send a test conversation directly to this brand’s deployed support
             agent.
           </p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsFullscreen((open) => !open)}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-primary"
-            aria-label={isFullscreen ? "Exit full screen" : "Open chat full screen"}
-            title={isFullscreen ? "Exit full screen (Esc)" : "Open chat full screen"}
-          >
-            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            <span className="hidden sm:inline">{isFullscreen ? "Exit full screen" : "Full screen"}</span>
-          </button>
+        </div>}
+        <div className="ml-auto flex items-start gap-2">
+          <div className="flex flex-col items-end">
+            <button
+              type="button"
+              onClick={() => setIsFullscreen((open) => !open)}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-primary"
+              aria-label={isFullscreen ? "Exit full screen" : "Open chat full screen"}
+              title={isFullscreen ? "Exit full screen (Esc)" : "Open chat full screen"}
+            >
+              {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              <span className="hidden sm:inline">{isFullscreen ? "Exit full screen" : "Full screen"}</span>
+            </button>
+            <p className="mt-1 text-right text-[10px] font-medium text-slate-500">Press Esc to return to the smaller view.</p>
+            <label className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-[10px] font-medium text-slate-600">
+              <input type="checkbox" checked={openFullscreenByDefault} onChange={(event) => setFullscreenDefault(event.target.checked)} className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary" />
+              Open full screen by default
+            </label>
+          </div>
           <button
             type="button"
             onClick={clearChat}
@@ -353,7 +372,7 @@ export default function AgentChat({ embedded = false }) {
           </button>
         </div>
       </div>
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex-row">
+      <section className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-white lg:flex-row ${isFullscreen ? "rounded-none border-0 shadow-none" : "rounded-2xl border border-slate-200 shadow-sm"}`}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-slate-200">
           <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
             <AgentOrb className="h-10 w-10 shadow-sm" />
@@ -636,4 +655,5 @@ export default function AgentChat({ embedded = false }) {
       </section>
     </div>
   );
+  return isFullscreen && typeof document !== "undefined" ? createPortal(chatWorkspace, document.body) : chatWorkspace;
 }

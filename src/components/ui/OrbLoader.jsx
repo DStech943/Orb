@@ -17,7 +17,7 @@ const facts = [
 
 export default function OrbLoader({ label = 'Orb is getting things ready', compact = false, className = '' }) {
   const [factIndex, setFactIndex] = useState(() => Math.floor(Math.random() * facts.length))
-  const orbBackground = compact ? '#ffffff' : '#FDEFE8'
+  const orbBackground = compact ? '#ffffff' : '#E6E9EF'
   useEffect(() => {
     const interval = window.setInterval(() => setFactIndex((index) => {
       if (facts.length < 2) return index

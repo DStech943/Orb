@@ -259,7 +259,10 @@ ORB_DRAFT_SYSTEM = """You turn a workspace member's request into an unsaved, edi
 Preserve only facts explicitly stated in the request. Do not invent ingredients, policies, dates, stock quantities,
 product IDs, or medical claims. Make language clear, customer-ready, and concise. Never say that anything was saved.
 Return JSON only. For target=faq return {"question":"", "answer":"", "category":"Support|Product|Billing"}.
-For target=operation return {"message":""}. For target=product return {"target":"", "description":""}."""
+For target=operation return {"message":""}. For target=product return {"target":"", "description":"", "field_hint":""}.
+For product, field_hint is a short lower-case concept (for example availability, preorder, ingredients,
+allergens, directions, or benefits) describing the Shopify metafield that may be relevant. It is only a hint:
+never invent a metafield name or claim that one exists."""
 
 
 def _flow_assist_text(value: Any, limit: int = 2_000) -> str:
@@ -1540,7 +1543,20 @@ def _orb_draft_fallback(target: str, request: str) -> dict[str, str]:
     if target == "product":
         subject_match = re.match(r"(.+?)\s+(?:is|are)\s+(?:out of stock|back in stock|available again|expected to be back|on pre[ -]?order)", text, flags=re.I)
         product = subject_match.group(1).strip(" ,.-") if subject_match else ""
-        return {"target": product, "description": text.rstrip(".") + "."}
+        normalized = text.lower()
+        if re.search(r"\b(?:out of stock|back in stock|restock|available again|availability)\b", normalized):
+            hint = "availability"
+        elif re.search(r"\bpre[ -]?order\b", normalized):
+            hint = "preorder"
+        elif re.search(r"\b(?:ingredient|contains|formulated)\b", normalized):
+            hint = "ingredients"
+        elif re.search(r"\b(?:allerg(?:y|en)|free from)\b", normalized):
+            hint = "allergens"
+        elif re.search(r"\b(?:how to use|directions|usage)\b", normalized):
+            hint = "directions"
+        else:
+            hint = ""
+        return {"target": product, "description": text.rstrip(".") + ".", "field_hint": hint}
     return {"message": text.rstrip(".") + "."}
 
 
@@ -1568,6 +1584,7 @@ async def draft_orb_work(payload: OrbDraftRequest, request: Request, _: User = D
         return {
             "target": _flow_assist_text(generated.get("target"), 240) or fallback["target"],
             "description": _flow_assist_text(generated.get("description"), 5_000) or fallback["description"],
+            "field_hint": _flow_assist_text(generated.get("field_hint"), 80).lower() or fallback["field_hint"],
         }
     return {"message": _flow_assist_text(generated.get("message"), 10_000) or fallback["message"]}
 

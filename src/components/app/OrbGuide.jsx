@@ -453,10 +453,11 @@ export default function OrbGuide() {
           const productDraft = {
             target: prepared?.target || fallback.target,
             description: prepared?.description || fallback.message,
+            fieldHint: prepared?.field_hint || '',
           }
-          const destination = `/app/products?draft=${encodeURIComponent(productDraft.description)}${productDraft.target ? `&target=${encodeURIComponent(productDraft.target)}` : ''}`
+          const destination = `/app/products?draft=${encodeURIComponent(productDraft.description)}${productDraft.target ? `&target=${encodeURIComponent(productDraft.target)}` : ''}${productDraft.fieldHint ? `&field=${encodeURIComponent(productDraft.fieldHint)}` : ''}`
           lastDestinationRef.current = { destination, destinationLabel: 'Products' }
-          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Products with an unsaved update draft. Review the product details and choose the appropriate save action when you are ready.', destination, destinationLabel: 'Products' }])
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening Products so you can choose the relevant Shopify field for this unsaved draft. Nothing will be added or saved until you approve it.', destination, destinationLabel: 'Products' }])
           window.setTimeout(() => navigate(destination), 280)
           return
         }

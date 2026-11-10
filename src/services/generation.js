@@ -1,5 +1,5 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { activeBrandName, deleteKnowledge, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
+import { activeBrandName, deleteKnowledge, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
 const KEY = 'orb_generation_data_v1'
 const KNOWLEDGE_CACHE_MS = 20_000
 const knowledgeCache = new Map()
@@ -96,6 +96,10 @@ export async function syncProductsForActiveBrand(brandName) { if (!hasOrbApi) th
 export async function loadProductVariantMetafields(product, brandName, variantId) {
   if (!hasOrbApi || !brandName || !product?.id || !variantId) throw new Error('Choose a connected Shopify variant first.')
   return getShopifyVariantMetafields({ brandName, productId: product.id, variantId })
+}
+export async function loadProductMetafields(product, brandName) {
+  if (!hasOrbApi || !brandName || !product?.id) throw new Error('Choose a connected Shopify product first.')
+  return getShopifyProductMetafields({ brandName, productId: product.id })
 }
 export async function loadProductThemeTemplates(brandName) {
   if (!hasOrbApi || !brandName) throw new Error('Choose a connected Shopify brand first.')
