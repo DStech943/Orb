@@ -195,6 +195,10 @@ class AgentFeedbackCreate(RequestModel):
     ideal_reply: str = Field(default="", max_length=5_000)
 
 
+class AgentFeedbackStatusPatch(RequestModel):
+    status: Literal["open", "updated_in_knowledge", "retested", "resolved"]
+
+
 class ManualFaqCreate(RequestModel):
     brand_name: str = Field(min_length=1, max_length=160)
     question: str = Field(min_length=6, max_length=1_000)
@@ -1568,6 +1572,7 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
         "note": str(row.get("note") or ""),
         "ideal_reply": str(row.get("ideal_reply") or ""),
         "status": str(row.get("status") or "open"),
+        "submitted_by": str(row.get("submitted_by") or ""),
         "created_at": row.get("created_at"),
     }
 
@@ -1576,21 +1581,28 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
 async def list_agent_feedback(
     brand_id: str,
     request: Request,
-    session_id: str = Query(pattern=r"^[A-Za-z0-9_-]{8,64}$"),
+    session_id: str | None = Query(default=None, pattern=r"^[A-Za-z0-9_-]{8,64}$"),
     limit: int = Query(default=100, ge=1, le=500),
-    _: User = Depends(current_user),
+    user: User = Depends(current_user),
 ) -> dict[str, list[dict[str, Any]]]:
+    # A tester can only see feedback from the chat session they are in. The
+    # admin review queue deliberately omits session_id and can see the full
+    # selected-brand history.
+    if not session_id:
+        await _admin(request, user)
     brand = await _remote_brand(request, brand_id)
+    params = {
+        "select": "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at",
+        "brand_id": f"eq.{brand['id']}",
+        "order": "created_at.desc" if not session_id else "created_at.asc",
+        "limit": str(limit),
+    }
+    if session_id:
+        params["session_id"] = f"eq.{session_id}"
     rows = await _supabase_rows(
         request,
         "orb_agent_feedback",
-        {
-            "select": "id,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at",
-            "brand_id": f"eq.{brand['id']}",
-            "session_id": f"eq.{session_id}",
-            "order": "created_at.asc",
-            "limit": str(limit),
-        },
+        params,
     )
     return {"feedback": [_agent_feedback_out(row) for row in rows]}
 
@@ -1626,6 +1638,30 @@ async def create_agent_feedback(
     )
     if not rows:
         raise HTTPException(status_code=503, detail="Supabase did not return the saved agent feedback.")
+    return {"feedback": _agent_feedback_out(rows[0])}
+
+
+@router.patch("/brands/{brand_id}/agent-feedback/{feedback_id}")
+async def update_agent_feedback_status(
+    brand_id: str,
+    feedback_id: str,
+    payload: AgentFeedbackStatusPatch,
+    request: Request,
+    _: User = Depends(_admin),
+) -> dict[str, Any]:
+    brand = await _remote_brand(request, brand_id)
+    rows = await _supabase_write(
+        request,
+        "PATCH",
+        "orb_agent_feedback",
+        params={
+            "id": f"eq.{feedback_id}",
+            "brand_id": f"eq.{brand['id']}",
+        },
+        payload={"status": payload.status},
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Feedback item not found.")
     return {"feedback": _agent_feedback_out(rows[0])}
 
 

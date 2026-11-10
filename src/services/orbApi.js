@@ -205,12 +205,17 @@ export const clearBrandChatHistory = (brandId, sessionId) =>
     { method: "DELETE" },
   );
 export const listBrandAgentFeedback = (brandId, sessionId) =>
-  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback?session_id=${encodeURIComponent(sessionId)}`, {
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`, {
     cacheTtl: 0,
   });
 export const createBrandAgentFeedback = (brandId, payload) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback`, {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+export const updateBrandAgentFeedback = (brandId, feedbackId, payload) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback/${encodeURIComponent(feedbackId)}`, {
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 export const syncBrandAgentSettings = (brandId, payload) =>

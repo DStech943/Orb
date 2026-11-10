@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Mail, Mic, MicOff, Plus, Save, Trash2, Upload } from "lucide-react";
+import { Check, Mail, Mic, MicOff, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import Avatar from "../components/ui/Avatar";
 import Button from "../components/ui/Button";
@@ -26,7 +26,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, ORB_VOICE_WAKE_STATUS_EVENT, setOrbVoiceWakeEnabled, supportsOrbVoiceWake } from "../lib/orbVoiceWake";
 import { listBrands, invalidateBrandCache } from "../services/brands";
-import { getRemoteBrandAgentConnection, setRemoteBrandAgentConnection } from "../services/orbApi";
+import { getRemoteBrandAgentConnection, listBrandAgentFeedback, setRemoteBrandAgentConnection, updateBrandAgentFeedback } from "../services/orbApi";
 
 const tabs = [
   { id: "profile", label: "Profile" },
@@ -44,6 +44,10 @@ const setupGuideSteps = [
   "Create your first flow",
   "Connect Shopify when your brand uses it",
 ];
+const feedbackDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown date" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+};
 
 export default function Settings() {
   const { user } = useAuth();
@@ -98,9 +102,15 @@ export default function Settings() {
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentSaving, setAgentSaving] = useState(false);
   const [agentError, setAgentError] = useState("");
+  const [feedbackBrands, setFeedbackBrands] = useState([]);
+  const [feedbackBrandId, setFeedbackBrandId] = useState("");
+  const [feedbackItems, setFeedbackItems] = useState([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackUpdatingId, setFeedbackUpdatingId] = useState("");
   const products = useAsync(listProducts, []);
   const sources = useAsync(listSources, []);
-  const visibleTabs = user?.role === "admin" ? [...tabs, { id: "agents", label: "AI agents" }] : tabs;
+  const visibleTabs = user?.role === "admin" ? [...tabs, { id: "agents", label: "AI agents" }, { id: "feedback", label: "AI feedback" }] : tabs;
   useEffect(() => {
     const warn = (event) => {
       if (dirty) {
@@ -161,6 +171,38 @@ export default function Settings() {
       .finally(() => !cancelled && setAgentLoading(false));
     return () => { cancelled = true; };
   }, [active, agentBrandId, user?.role]);
+  useEffect(() => {
+    if (active !== "feedback" || user?.role !== "admin") return undefined;
+    let cancelled = false;
+    setFeedbackLoading(true);
+    setFeedbackError("");
+    listBrands()
+      .then((brands) => {
+        if (cancelled) return;
+        const next = Array.isArray(brands) ? brands : [];
+        setFeedbackBrands(next);
+        setFeedbackBrandId((current) => current || next[0]?.id || "");
+      })
+      .catch((error) => !cancelled && setFeedbackError(error.message || "Could not load brands."))
+      .finally(() => !cancelled && setFeedbackLoading(false));
+    return () => { cancelled = true; };
+  }, [active, user?.role]);
+  const loadFeedback = async (brandId = feedbackBrandId) => {
+    if (!brandId) return;
+    setFeedbackLoading(true);
+    setFeedbackError("");
+    try {
+      const result = await listBrandAgentFeedback(brandId);
+      setFeedbackItems(Array.isArray(result?.feedback) ? result.feedback : []);
+    } catch (error) {
+      setFeedbackError(error.message || "Could not load AI feedback.");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (active === "feedback" && feedbackBrandId && user?.role === "admin") loadFeedback(feedbackBrandId);
+  }, [active, feedbackBrandId, user?.role]);
   const tabChange = (next) => {
     if (dirty && !window.confirm("You have unsaved changes. Leave this tab?"))
       return;
@@ -202,6 +244,19 @@ export default function Settings() {
       setAgentError(error.message || "Could not save this agent connection.");
     } finally {
       setAgentSaving(false);
+    }
+  };
+  const updateFeedbackStatus = async (item, status) => {
+    if (!feedbackBrandId || feedbackUpdatingId) return;
+    setFeedbackUpdatingId(item.id);
+    try {
+      const result = await updateBrandAgentFeedback(feedbackBrandId, item.id, { status });
+      if (result?.feedback) setFeedbackItems((items) => items.map((current) => current.id === item.id ? result.feedback : current));
+      showToast(status === "resolved" ? "Feedback marked resolved." : "Feedback reopened.");
+    } catch (error) {
+      showToast(error.message || "Could not update feedback.", "error");
+    } finally {
+      setFeedbackUpdatingId("");
     }
   };
   const add = async (source) => {
@@ -637,6 +692,46 @@ export default function Settings() {
                   </Button>
                 </div>
               )}
+            </div>
+          )}
+          {active === "feedback" && user?.role === "admin" && (
+            <div className="grid max-w-4xl gap-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-extrabold">AI feedback</h3>
+                  <p className="mt-1 text-sm text-muted">Review feedback collected while teams test each brand’s AI. Resolving an item does not change the live agent.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => loadFeedback()} disabled={!feedbackBrandId || feedbackLoading}>
+                  <RefreshCw size={15} className={feedbackLoading ? "animate-spin" : ""} /> Refresh
+                </Button>
+              </div>
+              <Select label="Review feedback for" value={feedbackBrandId} disabled={feedbackLoading && !feedbackBrandId} onChange={(event) => setFeedbackBrandId(event.target.value)}>
+                {!feedbackBrands.length && <option value="">No brands available</option>}
+                {feedbackBrands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+              </Select>
+              {feedbackError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{feedbackError}</p>}
+              {feedbackLoading && !feedbackItems.length ? <p className="rounded-lg border border-ink/10 bg-slate-50 p-4 text-sm text-muted">Loading feedback…</p> : feedbackItems.length ? (
+                <div className="grid gap-3">
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted">{feedbackItems.filter((item) => item.status !== "resolved").length} open of {feedbackItems.length} total</p>
+                  {feedbackItems.map((item) => {
+                    const resolved = item.status === "resolved";
+                    return <article key={item.id} className={`rounded-xl border p-4 ${resolved ? "border-emerald-200 bg-emerald-50/40" : "border-ink/15 bg-white"}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${resolved ? "bg-emerald-100 text-emerald-700" : "bg-primary-tint text-primary"}`}>{resolved ? "Resolved" : item.status.replaceAll("_", " ")}</span><span className="text-xs text-muted">{item.scope === "reply" ? "Reply feedback" : "Conversation feedback"} · {feedbackDate(item.created_at)}</span></div>
+                          {item.tags?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.tags.map((tag) => <span key={tag} className="rounded-full border border-ink/10 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{tag}</span>)}</div>}
+                        </div>
+                        <button type="button" onClick={() => updateFeedbackStatus(item, resolved ? "open" : "resolved")} disabled={Boolean(feedbackUpdatingId)} className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-extrabold transition disabled:opacity-50 ${resolved ? "border-slate-300 bg-white text-slate-700 hover:border-primary hover:text-primary" : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}>
+                          {resolved ? "Reopen" : <><Check size={14} /> Mark resolved</>}
+                        </button>
+                      </div>
+                      {item.note && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.note}</p>}
+                      {item.agent_reply && <details className="mt-3 rounded-lg border border-ink/10 bg-slate-50 px-3 py-2"><summary className="cursor-pointer text-xs font-bold text-slate-700">View AI reply</summary><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{item.agent_reply}</p></details>}
+                      {item.ideal_reply && <div className="mt-3 rounded-lg border border-primary/15 bg-primary-tint/25 px-3 py-2"><p className="text-[10px] font-extrabold uppercase tracking-wide text-primary">Suggested reply</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.ideal_reply}</p></div>}
+                    </article>;
+                  })}
+                </div>
+              ) : !feedbackLoading && feedbackBrandId ? <p className="rounded-lg border border-dashed border-ink/20 bg-white p-5 text-sm text-muted">No feedback has been submitted for this brand yet.</p> : null}
             </div>
           )}
           {active === "billing" && (

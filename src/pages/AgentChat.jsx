@@ -3,7 +3,9 @@ import {
   ArrowUp,
   Eraser,
   Loader2,
+  Maximize2,
   MessageCircleMore,
+  Minimize2,
   ThumbsUp,
   X,
 } from "lucide-react";
@@ -117,6 +119,7 @@ export default function AgentChat({ embedded = false }) {
   const [idealReply, setIdealReply] = useState("");
   const [overallNote, setOverallNote] = useState("");
   const [savingFeedback, setSavingFeedback] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const messagesRef = useRef(null);
   const activeBrand = brands.find((brand) => brand.id === brandId) || brands[0];
   const configuredAgentName = String(activeBrand?.ai_agent_name || "").trim();
@@ -202,6 +205,20 @@ export default function AgentChat({ embedded = false }) {
       behavior: "smooth",
     });
   }, [messages, sending]);
+
+  useEffect(() => {
+    if (!isFullscreen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setIsFullscreen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isFullscreen]);
 
   const clearChat = async () => {
     if (activeBrand?.id && sessionId && hasBrandAgentApi) {
@@ -296,9 +313,12 @@ export default function AgentChat({ embedded = false }) {
 
   return (
     <div
-      className={`mx-auto flex max-w-5xl flex-col ${embedded ? "h-[calc(100dvh-15rem)] min-h-[38rem]" : "h-[calc(100dvh-8rem)] min-h-[38rem]"}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[70] h-[100dvh] min-h-0 max-w-none bg-peach p-4 sm:p-6" : `mx-auto ${embedded ? "h-[calc(100dvh-13rem)] min-h-[42rem] max-w-7xl" : "h-[calc(100dvh-8rem)] min-h-[42rem] max-w-6xl"}`}`}
+      role={isFullscreen ? "dialog" : undefined}
+      aria-modal={isFullscreen || undefined}
+      aria-label={isFullscreen ? `${title} full screen` : undefined}
     >
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-4" : "mb-5"}`}>
         <div>
           <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
             Agent tester
@@ -312,6 +332,16 @@ export default function AgentChat({ embedded = false }) {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsFullscreen((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-primary"
+            aria-label={isFullscreen ? "Exit full screen" : "Open chat full screen"}
+            title={isFullscreen ? "Exit full screen (Esc)" : "Open chat full screen"}
+          >
+            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            <span className="hidden sm:inline">{isFullscreen ? "Exit full screen" : "Full screen"}</span>
+          </button>
           <button
             type="button"
             onClick={clearChat}
@@ -341,7 +371,7 @@ export default function AgentChat({ embedded = false }) {
 
           <div
             ref={messagesRef}
-            className="min-h-0 flex-1 overflow-y-auto bg-[#f8f9fb] p-5 sm:p-6"
+            className="min-h-0 flex-1 overflow-y-auto bg-[#f8f9fb] p-6 sm:p-7"
           >
             {!messages.length && !sending && (
               <div className="grid min-h-full place-items-center">
@@ -378,7 +408,7 @@ export default function AgentChat({ embedded = false }) {
                   className={`chat-message-enter flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[72%] px-4 py-3 text-sm leading-6 shadow-sm sm:max-w-[64%] ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
+                    className={`max-w-[78%] px-4 py-3 text-[15px] leading-6 shadow-sm sm:max-w-[68%] ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
                   >
                     <p className="whitespace-pre-wrap">{message.text}</p>
                     <p
@@ -429,7 +459,7 @@ export default function AgentChat({ embedded = false }) {
                       ? `Message ${agentName}…`
                       : "Choose a brand to start testing"
                 }
-                className="block min-h-12 w-full resize-none bg-transparent px-0 py-0 text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+                className="block min-h-14 w-full resize-none bg-transparent px-0 py-0 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
                 <p className="text-[10px] text-slate-400">
@@ -459,7 +489,7 @@ export default function AgentChat({ embedded = false }) {
             )}
           </form>
         </div>
-        <aside className="w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-slate-50/70 p-4 lg:w-80 lg:border-l lg:border-t-0">
+        <aside className={`w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-slate-50/70 p-5 lg:border-l lg:border-t-0 ${isFullscreen ? "lg:w-[23rem]" : "lg:w-[21rem]"}`}>
           <div>
             <h2 className="text-sm font-extrabold text-slate-900">Feedback</h2>
             <p className="mt-1 text-xs leading-5 text-slate-500">
