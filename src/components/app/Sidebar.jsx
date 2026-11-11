@@ -39,7 +39,7 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
   const links = [
     { to: '/app', label: 'Overview', icon: LayoutGrid, end: true },
     { to: '/app/workspace', label: 'Brand workspace', icon: BriefcaseBusiness },
-    { to: '/app/client-chat', label: 'Client Chatspace', icon: MessageSquare },
+    { to: '/app/client-chat', label: 'Chatspace', icon: MessageSquare },
     { to: '/app/operations', label: 'Operations', icon: ClipboardPenLine },
     { to: '/app/brain', label: "AI's Brain", icon: BrainCircuit, count: 'brain' },
     { to: '/app/chat', label: `Chat with ${agentName}`, icon: Bot },

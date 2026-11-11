@@ -1,67 +1,26 @@
 /**
- * Client Chat Service
- * Supports Supabase Postgres storage with fallback to partitioned localStorage.
+ * Chatspace Service
+ * Supports Supabase Postgres real-time and persistence with local offline cache.
  * Features:
  *  - Sent / Read / Failed delivery statuses
  *  - Timestamps
  *  - Quoted replies (replyToId & replyToSnippet)
  *  - 4 Preset Emoji Reactions (👍, ❤️, 🚀, 👀)
+ *  - Clean real-time messaging
  */
 
 import { supabase } from '../lib/supabase'
 import { activeBrandName } from './orbApi'
 
-const STORAGE_PREFIX = 'orb_client_chat_'
+const STORAGE_PREFIX = 'orb_chatspace_'
 
 export const PRESET_REACTIONS = ['👍', '❤️', '🚀', '👀']
-
-const getDefaultMessages = (brandName, clientName = 'Client') => [
-  {
-    id: '11111111-1111-4111-8111-111111111111',
-    sender: {
-      id: 'orb-team-1',
-      name: 'Orb Operations',
-      role: 'team',
-      avatar: null,
-      initials: 'OO',
-    },
-    content: `Hi ${clientName}! Welcome to your brand chatspace for ${brandName || 'your brand'}. You can request adjustments to SOPs, report edge-case questions, or coordinate with our team here.`,
-    createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
-    status: 'read',
-    replyToId: null,
-    replyToSnippet: null,
-    reactions: { '👍': [clientName] },
-    updateProposal: null,
-  },
-  {
-    id: '22222222-2222-4222-8222-222222222222',
-    sender: {
-      id: 'orb-team-2',
-      name: 'Sarah (Support Lead)',
-      role: 'team',
-      avatar: null,
-      initials: 'SL',
-    },
-    content: `Whenever you post an update, our team reviews it and applies it directly to your live AI agent, Shopify catalog sync, or knowledge base.`,
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-    status: 'read',
-    replyToId: '11111111-1111-4111-8111-111111111111',
-    replyToSnippet: `Hi ${clientName}! Welcome to your brand chatspace...`,
-    reactions: { '🚀': ['Sarah (Support Lead)'] },
-    updateProposal: {
-      type: 'status_check',
-      title: 'Catalog Synced',
-      details: 'All brand knowledge is currently up to date.',
-      state: 'completed',
-    },
-  },
-]
 
 export const getClientChatMessages = async (brandName = activeBrandName(), currentUser) => {
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
 
-  // 1. Try Supabase Postgres if configured
+  // 1. Try Supabase Postgres
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -71,8 +30,8 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
         .eq('brand_name', brand)
         .order('created_at', { ascending: true })
 
-      if (!error && Array.isArray(data) && data.length > 0) {
-        return data.map((row) => ({
+      if (!error && Array.isArray(data)) {
+        const mapped = data.map((row) => ({
           id: row.id,
           sender: {
             id: row.sender_id || 'unknown',
@@ -91,40 +50,36 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
           replyToId: row.reply_to_id || null,
           replyToSnippet: row.reply_to_snippet || null,
           reactions: row.reactions || {},
-          updateProposal: row.update_proposal || null,
           createdAt: row.created_at,
         }))
+        try {
+          window.localStorage.setItem(key, JSON.stringify(mapped))
+        } catch {}
+        return mapped
       }
     } catch {
-      // Fallback to local storage if table is not yet migrated in Supabase
+      // Fallback to local storage
     }
   }
 
-  // 2. Local Storage Fallback
+  // 2. Local Storage
   try {
     const raw = window.localStorage.getItem(key)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      if (Array.isArray(parsed)) return parsed
     }
   } catch {
     // ignore
   }
 
-  const initial = getDefaultMessages(brandName, currentUser?.name || 'there')
-  try {
-    window.localStorage.setItem(key, JSON.stringify(initial))
-  } catch {
-    // ignore
-  }
-  return initial
+  return []
 }
 
 export const sendClientChatMessage = async ({
   brandName = activeBrandName(),
   content,
   currentUser,
-  updateType = 'general',
   replyTo = null,
 }) => {
   if (!content || !content.trim()) throw new Error('Message cannot be empty')
@@ -157,15 +112,9 @@ export const sendClientChatMessage = async ({
     replyToId: replyTo?.id || null,
     replyToSnippet: replyTo?.content ? replyTo.content.slice(0, 75) + (replyTo.content.length > 75 ? '...' : '') : null,
     reactions: {},
-    updateProposal: updateType !== 'general' ? {
-      type: updateType,
-      title: updateType === 'sop_update' ? 'SOP Modification Request' : 'Operations Update Request',
-      details: content.trim(),
-      state: 'pending',
-    } : null,
   }
 
-  // Try writing to Supabase Postgres
+  // Write to Supabase Postgres
   if (supabase) {
     try {
       await supabase
@@ -183,15 +132,14 @@ export const sendClientChatMessage = async ({
           reply_to_id: newMessage.replyToId,
           reply_to_snippet: newMessage.replyToSnippet,
           reactions: {},
-          update_proposal: newMessage.updateProposal,
           created_at: newMessage.createdAt,
         })
-    } catch {
-      // Local fallback
+    } catch (e) {
+      console.warn('Could not insert to Supabase orb_client_chat_messages:', e)
     }
   }
 
-  // Always update local cache for instant zero-latency UI
+  // Update local cache
   let list = []
   try {
     const raw = window.localStorage.getItem(key)
@@ -203,11 +151,11 @@ export const sendClientChatMessage = async ({
   const updatedList = [...list, newMessage]
   try {
     window.localStorage.setItem(key, JSON.stringify(updatedList))
-  } catch {
-    // ignore
-  }
+  } catch {}
 
-  // Simulate automated status transition: sent -> read after 1s
+  window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
+
+  // Mark sent message as read after acknowledgment
   setTimeout(() => {
     try {
       const rawNow = window.localStorage.getItem(key)
@@ -217,48 +165,8 @@ export const sendClientChatMessage = async ({
         window.localStorage.setItem(key, JSON.stringify(markedRead))
         window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, 1000)
-
-  // Automated Orb Team reply after 1.8 seconds
-  setTimeout(() => {
-    try {
-      const rawNow = window.localStorage.getItem(key)
-      const parsedNow = rawNow ? JSON.parse(rawNow) : updatedList
-      const replyId = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `ack-${Date.now()}`
-
-      const replyMsg = {
-        id: replyId,
-        sender: {
-          id: 'orb-ops-bot',
-          name: 'Orb Operations',
-          role: 'team',
-          avatar: null,
-          initials: 'OO',
-        },
-        content: `Got your request regarding "${content.trim().slice(0, 60)}${content.trim().length > 60 ? '...' : ''}". We are preparing the changes for ${brand}.`,
-        createdAt: new Date().toISOString(),
-        status: 'read',
-        replyToId: generatedId,
-        replyToSnippet: content.trim().slice(0, 75),
-        reactions: { '👀': ['Orb Operations'] },
-        updateProposal: {
-          type: 'queue_logged',
-          title: 'Update Logged to Queue',
-          details: 'Queued for immediate review & sync.',
-          state: 'in_progress',
-        },
-      }
-      window.localStorage.setItem(key, JSON.stringify([...parsedNow, replyMsg]))
-      window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
-    } catch {
-      // ignore
-    }
-  }, 1800)
 
   return newMessage
 }
@@ -286,11 +194,9 @@ export const toggleMessageReaction = async ({
     const userList = currentReactions[emoji] || []
 
     if (userList.includes(userName)) {
-      // remove
       currentReactions[emoji] = userList.filter((u) => u !== userName)
       if (currentReactions[emoji].length === 0) delete currentReactions[emoji]
     } else {
-      // add
       currentReactions[emoji] = [...userList, userName]
     }
     return { ...msg, reactions: currentReactions }
@@ -299,9 +205,7 @@ export const toggleMessageReaction = async ({
   try {
     window.localStorage.setItem(key, JSON.stringify(updated))
     window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
-  } catch {
-    // ignore
-  }
+  } catch {}
 
   // Update Supabase if available
   if (supabase) {
@@ -314,9 +218,7 @@ export const toggleMessageReaction = async ({
           .update({ reactions: target.reactions })
           .eq('id', messageId)
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   return updated
@@ -337,27 +239,30 @@ export const updateMessageStatus = async ({
     const updated = messages.map((msg) => (msg.id === messageId ? { ...msg, status } : msg))
     window.localStorage.setItem(key, JSON.stringify(updated))
     window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
+  } catch {}
+}
+
+export const subscribeToChatMessages = (brandName, onNewMessage) => {
+  if (!supabase || !brandName) return null
+  try {
+    const channel = supabase
+      .channel(`chatspace:${brandName}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'cx_copilot',
+          table: 'orb_client_chat_messages',
+          filter: `brand_name=eq.${brandName}`,
+        },
+        (payload) => {
+          onNewMessage?.(payload)
+        }
+      )
+      .subscribe()
+    return channel
   } catch {
-    // ignore
+    return null
   }
 }
 
-export const clearClientChatMessages = async (brandName = activeBrandName()) => {
-  const brand = brandName || 'default_brand'
-  const key = `${STORAGE_PREFIX}${brand}`
-  window.localStorage.removeItem(key)
-
-  if (supabase) {
-    try {
-      await supabase
-        .schema('cx_copilot')
-        .from('orb_client_chat_messages')
-        .delete()
-        .eq('brand_name', brand)
-    } catch {
-      // ignore
-    }
-  }
-
-  window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
-}
