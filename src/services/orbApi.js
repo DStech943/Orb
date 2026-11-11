@@ -538,10 +538,9 @@ export const getBrandMastersheetUrl = async (brandName = activeBrandName()) => {
     // Graceful fallback
   }
 
-  // 2. Local fallback if configured during current workspace session
+  // 2. Brand-scoped local fallback if configured during current workspace session
   try {
-    const local = window.localStorage.getItem(`orb:mastersheet_url:${brandName}`) ||
-      window.localStorage.getItem("orb:mastersheet_url");
+    const local = window.localStorage.getItem(`orb:mastersheet_url:${brandName}`);
     if (local) return local;
   } catch {
     // Ignore storage errors
@@ -624,11 +623,10 @@ export const saveBrandMastersheetConfig = async ({
     console.warn("Could not save mastersheet config to Supabase/Railway vault:", err);
   }
 
-  // Also persist in local cache and emit event
+  // Also persist in brand-scoped local cache and emit event
   try {
     if (cleanUrl) {
       window.localStorage.setItem(`orb:mastersheet_url:${brandName}`, cleanUrl);
-      window.localStorage.setItem("orb:mastersheet_url", cleanUrl);
     } else {
       window.localStorage.removeItem(`orb:mastersheet_url:${brandName}`);
     }

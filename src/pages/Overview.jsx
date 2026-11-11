@@ -388,8 +388,11 @@ function MastersheetBanner({ brandName }) {
 
     fetchUrl()
     const handleUpdate = (e) => {
-      if (e.detail?.url) setLiveUrl(e.detail.url)
-      else fetchUrl()
+      // Only react if event is for this brand or general update
+      if (!e.detail?.brandName || e.detail.brandName.toLowerCase() === (brandName || '').toLowerCase()) {
+        if (e.detail?.url !== undefined) setLiveUrl(e.detail.url)
+        else fetchUrl()
+      }
     }
     window.addEventListener('orb:mastersheet-updated', handleUpdate)
     return () => {
