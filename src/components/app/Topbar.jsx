@@ -22,7 +22,7 @@ import { useToast } from "../../context/ToastContext";
 const titles = {
   "/app": "Overview",
   "/app/workspace": "Brand workspace",
-  "/app/client-chat": "Client Chatspace",
+  "/app/client-chat": "Chatspace",
   "/app/chat": "Chat with Agent",
   "/app/operations": "Operations",
   "/app/brain": "AI's Brain",
