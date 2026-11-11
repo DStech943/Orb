@@ -512,3 +512,129 @@ export const applyAssistantAvailabilityUpdate = (message, brandName = activeBran
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, message }),
   });
+
+export const getBrandMastersheetUrl = async (brandName = activeBrandName()) => {
+  if (!brandName) return null;
+  // 1. Check brand profile settings via backend REST or Supabase
+  try {
+    if (supabase) {
+      const { data, error } = await supabase
+        .schema("cx_copilot")
+        .from("brands")
+        .select("id, name, platform_config")
+        .ilike("name", brandName)
+        .limit(1);
+
+      if (!error && data?.[0]?.platform_config) {
+        const config = typeof data[0].platform_config === "string"
+          ? JSON.parse(data[0].platform_config)
+          : data[0].platform_config;
+        if (config?.mastersheet_url || config?.sheets_mastersheet_url) {
+          return config.mastersheet_url || config.sheets_mastersheet_url;
+        }
+      }
+    }
+  } catch {
+    // Graceful fallback
+  }
+
+  // 2. Local fallback if configured during current workspace session
+  try {
+    const local = window.localStorage.getItem(`orb:mastersheet_url:${brandName}`) ||
+      window.localStorage.getItem("orb:mastersheet_url");
+    if (local) return local;
+  } catch {
+    // Ignore storage errors
+  }
+
+  return null;
+};
+
+export const saveBrandMastersheetConfig = async ({
+  brandName = activeBrandName(),
+  brandId,
+  mastersheetUrl,
+}) => {
+  const cleanUrl = String(mastersheetUrl || "").trim();
+  // 1. Try to save to Supabase / Railway platform_config
+  let persistedRemotely = false;
+  try {
+    if (supabase && (brandId || brandName)) {
+      // Find brand ID if not provided
+      let targetBrandId = brandId;
+      if (!targetBrandId) {
+        const { data: brandData } = await supabase
+          .schema("cx_copilot")
+          .from("brands")
+          .select("id, platform_config")
+          .ilike("name", brandName)
+          .limit(1);
+        if (brandData?.[0]) {
+          targetBrandId = brandData[0].id;
+          const currentConfig = typeof brandData[0].platform_config === "string"
+            ? JSON.parse(brandData[0].platform_config)
+            : (brandData[0].platform_config || {});
+          
+          const updatedConfig = {
+            ...currentConfig,
+            mastersheet_url: cleanUrl,
+            sheets_mastersheet_url: cleanUrl,
+            sheets_connected: Boolean(cleanUrl),
+            updated_at: new Date().toISOString(),
+          };
+
+          const { error: updateError } = await supabase
+            .schema("cx_copilot")
+            .from("brands")
+            .update({ platform_config: updatedConfig })
+            .eq("id", targetBrandId);
+
+          if (!updateError) persistedRemotely = true;
+        }
+      } else {
+        const { data: brandData } = await supabase
+          .schema("cx_copilot")
+          .from("brands")
+          .select("platform_config")
+          .eq("id", targetBrandId)
+          .limit(1);
+        
+        const currentConfig = typeof brandData?.[0]?.platform_config === "string"
+          ? JSON.parse(brandData[0].platform_config)
+          : (brandData?.[0]?.platform_config || {});
+
+        const updatedConfig = {
+          ...currentConfig,
+          mastersheet_url: cleanUrl,
+          sheets_mastersheet_url: cleanUrl,
+          sheets_connected: Boolean(cleanUrl),
+          updated_at: new Date().toISOString(),
+        };
+
+        const { error: updateError } = await supabase
+          .schema("cx_copilot")
+          .from("brands")
+          .update({ platform_config: updatedConfig })
+          .eq("id", targetBrandId);
+
+        if (!updateError) persistedRemotely = true;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not save mastersheet config to Supabase/Railway vault:", err);
+  }
+
+  // Also persist in local cache and emit event
+  try {
+    if (cleanUrl) {
+      window.localStorage.setItem(`orb:mastersheet_url:${brandName}`, cleanUrl);
+      window.localStorage.setItem("orb:mastersheet_url", cleanUrl);
+    } else {
+      window.localStorage.removeItem(`orb:mastersheet_url:${brandName}`);
+    }
+    window.dispatchEvent(new CustomEvent("orb:mastersheet-updated", { detail: { brandName, url: cleanUrl } }));
+  } catch {}
+
+  return { success: true, url: cleanUrl, persistedRemotely };
+};
+

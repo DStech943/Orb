@@ -1,7 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, CheckCircle2, KeyRound, Link2, Loader2, Search, Store, Wrench } from "lucide-react";
+import { Boxes, CheckCircle2, FileSpreadsheet, KeyRound, Link2, Loader2, Search, Store, Wrench } from "lucide-react";
 import Modal from "../components/ui/Modal";
-import { activeBrandName, getShopifyCredentialStatus, hasOrbApi, importShopifySource, listRemoteBrands } from "../services/orbApi";
+import {
+  activeBrandName,
+  getBrandMastersheetUrl,
+  getShopifyCredentialStatus,
+  hasOrbApi,
+  importShopifySource,
+  listRemoteBrands,
+  saveBrandMastersheetConfig,
+} from "../services/orbApi";
 import { useToast } from "../context/ToastContext";
 
 const categoryMeta = {
@@ -89,6 +97,7 @@ const tools = [
   { id: "ccavenue", name: "CCAvenue", category: "payments", description: "Connect CCAvenue for payment and refund data.", mark: "CC" },
   { id: "easebuzz", name: "Easebuzz", category: "payments", description: "Connect Easebuzz for payment and refund events.", mark: "E" },
 
+  { id: "sheets", name: "Google Sheets", category: "automation", description: "Connect your Brand Mastersheet for live inventory, orders, and support operations.", mark: "GS", colourLogo: true, accent: "bg-[#0F9D58] text-white" },
   { id: "custom-webhook", name: "Custom Webhook", category: "automation", description: "Connect a custom app using webhook events.", mark: "<>" },
 ];
 
@@ -266,19 +275,215 @@ function ShopifySetupModal({ open, onClose, brandName, brandId, onInstalled }) {
   )
 }
 
+function SheetsSetupModal({ open, onClose, brandName, brandId, onInstalled }) {
+  const [url, setUrl] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [configuredUrl, setConfiguredUrl] = useState('')
+
+  useEffect(() => {
+    if (!open) return undefined
+    let active = true
+    setError('')
+    setLoading(true)
+    getBrandMastersheetUrl(brandName)
+      .then((existingUrl) => {
+        if (!active) return
+        if (existingUrl) {
+          setUrl(existingUrl)
+          setConfiguredUrl(existingUrl)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, brandName])
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    const trimmed = url.trim()
+    if (!trimmed) {
+      setError('Enter a valid Google Sheets URL.')
+      return
+    }
+    if (!trimmed.startsWith('https://docs.google.com/spreadsheets/')) {
+      setError('Please provide a valid Google Sheets link (starting with https://docs.google.com/spreadsheets/...).')
+      return
+    }
+
+    try {
+      setSaving(true)
+      await saveBrandMastersheetConfig({
+        brandName,
+        brandId,
+        mastersheetUrl: trimmed,
+      })
+      onInstalled(trimmed)
+      onClose()
+    } catch (cause) {
+      setError(cause.message || 'Could not save Google Sheets configuration.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Configure Google Sheets / Mastersheet">
+      <form onSubmit={submit} className="space-y-4">
+        <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3">
+          <div className="flex items-center gap-2 text-sm font-extrabold text-emerald-950">
+            <FileSpreadsheet size={16} className="text-emerald-700" />
+            {brandName || 'Choose a brand'}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-emerald-900">
+            Connect your Brand Mastersheet for live operations, restocks, and support tracking.
+            This URL will be stored securely in Railway / Vault backend settings for this brand.
+          </p>
+          {loading && (
+            <p className="mt-2 text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
+              <Loader2 size={13} className="animate-spin" /> Fetching current configuration from Vault…
+            </p>
+          )}
+          {!loading && configuredUrl && (
+            <p className="mt-2 text-xs font-semibold text-emerald-800">
+              ● Connected: Currently points to configured Mastersheet.
+            </p>
+          )}
+        </div>
+
+        <label className="grid gap-1.5 text-sm font-bold">
+          Google Sheet URL / Mastersheet Link
+          <input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            disabled={saving}
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+            className="rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-emerald-600 disabled:bg-slate-100"
+          />
+        </label>
+        <p className="text-xs leading-5 text-slate-500">
+          Make sure view or edit permissions are granted to your workspace operators or service account.
+        </p>
+
+        {error && <p role="alert" className="text-sm font-semibold text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || loading}
+            className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-extrabold text-white hover:bg-emerald-700 transition disabled:opacity-60"
+          >
+            {saving && <Loader2 size={15} className="animate-spin" />}
+            {configuredUrl ? 'Update Vault Config' : 'Save & Connect'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export default function Tools() {
   const { showToast } = useToast();
   const [selected, setSelected] = useState("all");
   const [query, setQuery] = useState("");
   const [shopifyOpen, setShopifyOpen] = useState(false);
+  const [sheetsOpen, setSheetsOpen] = useState(false);
   const [brandName, setBrandName] = useState(() => activeBrandName());
   const [brandId, setBrandId] = useState(() => window.localStorage.getItem('orb_selected_brand') || '');
   const [installedIds, setInstalledIds] = useState(() => new Set());
-  useEffect(() => { const syncBrand = async () => { const nextName = activeBrandName(), storedId = window.localStorage.getItem('orb_selected_brand') || ''; setBrandName(nextName); setBrandId(storedId); if (!storedId && nextName && hasOrbApi) { try { const result = await listRemoteBrands(); const match = result?.brands?.find((brand) => brand.name === nextName); if (match?.id) setBrandId(match.id) } catch {} } }; syncBrand(); window.addEventListener('orb:brand-changed', syncBrand); return () => window.removeEventListener('orb:brand-changed', syncBrand) }, []);
-  useEffect(() => { try { setInstalledIds(new Set(JSON.parse(window.localStorage.getItem(`orb_installed_tools:${brandName || 'unassigned'}`) || '[]'))) } catch { setInstalledIds(new Set()) } }, [brandName]);
+
+  useEffect(() => {
+    const syncBrand = async () => {
+      const nextName = activeBrandName()
+      const storedId = window.localStorage.getItem('orb_selected_brand') || ''
+      setBrandName(nextName)
+      setBrandId(storedId)
+      if (!storedId && nextName && hasOrbApi) {
+        try {
+          const result = await listRemoteBrands()
+          const match = result?.brands?.find((brand) => brand.name === nextName)
+          if (match?.id) setBrandId(match.id)
+        } catch {}
+      }
+    }
+    syncBrand()
+    window.addEventListener('orb:brand-changed', syncBrand)
+    return () => window.removeEventListener('orb:brand-changed', syncBrand)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const checkInstalled = async () => {
+      let baseSet = new Set()
+      try {
+        baseSet = new Set(JSON.parse(window.localStorage.getItem(`orb_installed_tools:${brandName || 'unassigned'}`) || '[]'))
+      } catch {}
+
+      // Check if sheets mastersheet is connected via backend or local config
+      try {
+        const mastersheetUrl = await getBrandMastersheetUrl(brandName)
+        if (mastersheetUrl && active) {
+          baseSet.add('sheets')
+        }
+      } catch {}
+
+      if (active) setInstalledIds(baseSet)
+    }
+
+    checkInstalled()
+    const handleUpdate = () => checkInstalled()
+    window.addEventListener('orb:mastersheet-updated', handleUpdate)
+    return () => {
+      active = false
+      window.removeEventListener('orb:mastersheet-updated', handleUpdate)
+    }
+  }, [brandName])
+
   const workspaceTools = useMemo(() => tools.map((tool) => ({ ...tool, installed: installedIds.has(tool.id) })), [installedIds]);
-  const openTool = (tool) => { if (tool.id === 'shopify') setShopifyOpen(true); else showToast(`${tool.name} setup is coming soon.`) };
-  const markShopifyInstalled = (domain) => { setInstalledIds((current) => { const next = new Set(current); next.add('shopify'); window.localStorage.setItem(`orb_installed_tools:${brandName || 'unassigned'}`, JSON.stringify([...next])); return next }); showToast(`Shopify import started for ${domain}.`) };
+
+  const openTool = (tool) => {
+    if (tool.id === 'shopify') {
+      setShopifyOpen(true);
+    } else if (tool.id === 'sheets') {
+      setSheetsOpen(true);
+    } else {
+      showToast(`${tool.name} setup is coming soon.`);
+    }
+  };
+
+  const markShopifyInstalled = (domain) => {
+    setInstalledIds((current) => {
+      const next = new Set(current);
+      next.add('shopify');
+      window.localStorage.setItem(`orb_installed_tools:${brandName || 'unassigned'}`, JSON.stringify([...next]));
+      return next;
+    });
+    showToast(`Shopify import started for ${domain}.`);
+  };
+
+  const markSheetsInstalled = (url) => {
+    setInstalledIds((current) => {
+      const next = new Set(current);
+      next.add('sheets');
+      window.localStorage.setItem(`orb_installed_tools:${brandName || 'unassigned'}`, JSON.stringify([...next]));
+      return next;
+    });
+    showToast(`Google Sheets Mastersheet configured in Vault.`);
+  };
   const category = categories.find((item) => item.id === selected) || categories[0];
   const visibleTools = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -356,6 +561,7 @@ export default function Tools() {
         )}
       </section>
       <ShopifySetupModal open={shopifyOpen} onClose={() => setShopifyOpen(false)} brandName={brandName} brandId={brandId} onInstalled={markShopifyInstalled} />
+      <SheetsSetupModal open={sheetsOpen} onClose={() => setSheetsOpen(false)} brandName={brandName} brandId={brandId} onInstalled={markSheetsInstalled} />
     </div>
   );
 }

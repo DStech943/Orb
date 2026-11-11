@@ -345,9 +345,11 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
 export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, initialDraft = null, assistantDraft = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
+  const isFaq = kind === 'faq'
   const isProduct = kind === 'product'
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
+  const isReadOnly = (isSop || isFaq) && !isAdmin
   const { showToast } = useToast()
   const [brandVersion, setBrandVersion] = useState(0)
   const [query, setQuery] = useState('')
@@ -535,19 +537,40 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   if (loading) return <OrbLoader label={`Loading ${title}`} />
   if (error) return <KnowledgeAccessState error={error} title={title} onRetry={reload} />
 
-  const selectableColumns = isProduct ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]
+  const selectableColumns = isProduct || isReadOnly ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]
   const matchingAssistantDraft = isProduct && selected && assistantDraft?.message && productMatchesAssistantDraft(selected, assistantDraft)
   const productEditor = <>{matchingAssistantDraft ? <ProductMetafieldDraftReview product={selected} draft={assistantDraft} onApply={applyAssistantDraftToMetafield} /> : null}<ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} loadThemeTemplates={loadThemeTemplates} saveVariantMetafields={saveVariantMetafields} /></>
-  const footer = selected && <div className="flex flex-wrap gap-2">{isProduct && saveProductMetafields && <Button variant="purple" onClick={saveMetafieldsToShopify} disabled={savingShopify}>{savingShopify ? 'Saving to Shopify…' : 'Save metafields to Shopify'}</Button>}<Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : 'Save'}</Button>{!isProduct && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}<Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button></div>
+  const footer = selected && (
+    isReadOnly ? (
+      <div className="flex flex-wrap items-center justify-between w-full">
+        <span className="text-xs text-slate-500 italic">Read-only view for brand clients</span>
+        <Button variant="outline" onClick={() => setSelected(null)}>Close</Button>
+      </div>
+    ) : (
+      <div className="flex flex-wrap gap-2">
+        {isProduct && saveProductMetafields && <Button variant="purple" onClick={saveMetafieldsToShopify} disabled={savingShopify}>{savingShopify ? 'Saving to Shopify…' : 'Save metafields to Shopify'}</Button>}
+        <Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : 'Save'}</Button>
+        {!isProduct && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}
+        <Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button>
+      </div>
+    )
+  )
 
   return <div className="page-enter mx-auto max-w-7xl">
     <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className="text-xs font-extrabold uppercase tracking-widest text-purple">Knowledge library</p><div className="mt-1 flex flex-wrap items-center gap-2"><h2 className="text-3xl font-extrabold tracking-tight">{title}</h2>{!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-1 text-xs font-extrabold text-primary">{data.length} {title.toLowerCase()}</span>}</div></div>
+      <div>
+        <p className="text-xs font-extrabold uppercase tracking-widest text-purple">Knowledge library</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <h2 className="text-3xl font-extrabold tracking-tight">{title}</h2>
+          {!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-1 text-xs font-extrabold text-primary">{data.length} {title.toLowerCase()}</span>}
+          {isReadOnly && <span className="rounded-full bg-slate-100 border border-slate-200 px-2.5 py-0.5 text-[11px] font-bold text-slate-600">Read-Only</span>}
+        </div>
+      </div>
       <div className="flex flex-wrap gap-2">
-        {!isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
-        {!isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to Qdrant'}</Button>}
+        {!isReadOnly && !isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
+        {!isReadOnly && !isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to Qdrant'}</Button>}
         {isProduct && syncProducts && <Button variant="outline" onClick={sync} disabled={syncing}><RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Sync'}</Button>}
-        <Button onClick={() => navigate('/app?generate=1')}><Plus size={16} />Generate more</Button>
+        {!isReadOnly && <Button onClick={() => navigate('/app?generate=1')}><Plus size={16} />Generate more</Button>}
       </div>
     </div>
     {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Open the matching product and choose the Shopify metafield that should receive this editable draft.</p></section>}
@@ -557,10 +580,10 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}>{isProduct ? <><option>All</option><option>Active</option><option>Draft</option></> : <><option>All</option><option>Draft</option><option>Approved</option></>}</Select>
         {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
       </div>
-      {!isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
-      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action="Generate content" onAction={() => navigate('/app?generate=1')} />}</div>
+      {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
+      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? "Generate content" : undefined} onAction={!isReadOnly ? () => navigate('/app?generate=1') : undefined} />}</div>
     </section>
-    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={setSelected} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
     <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />
     <ConfirmDialog open={confirmApproveAll} onClose={() => setConfirmApproveAll(false)} onConfirm={() => { setConfirmApproveAll(false); approve(draftIds) }} title="Approve all drafts?" description={`${draftIds.length} ${draftIds.length === 1 ? 'draft will' : 'drafts will'} be marked approved and become available to Create with Orb.`} confirmLabel="Approve all" />
   </div>

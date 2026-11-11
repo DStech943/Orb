@@ -109,9 +109,17 @@ async function fetchViaApi(brandName, user) {
     const pl = p?.payload ?? {}
     const sh = pl.shopify ?? pl.structured?.shopify_admin ?? {}
     const firstImage = (...candidates) => candidates.flat(Infinity).find((image) => typeof image === 'string' && image.trim()) ?? null
+    const variants = Array.isArray(sh.variants) ? sh.variants : Array.isArray(pl.variants) ? pl.variants : []
+    const totalInventory = variants.reduce((acc, v) => acc + (Number(v?.inventoryQuantity ?? v?.inventory_quantity) || 0), 0)
+    const isOutOfStock = variants.length > 0 ? totalInventory <= 0 : Boolean(pl.out_of_stock || sh.out_of_stock)
+
     return {
       id: p.id,
       title: pl.title ?? pl.name ?? sh.title ?? 'Untitled product',
+      status: pl.status ?? sh.status ?? 'active',
+      isOutOfStock,
+      totalInventory,
+      outOfStockSince: pl.out_of_stock_since ?? pl.outOfStockSince ?? (isOutOfStock ? (pl.updated_at ?? pl.created_at ?? null) : null),
       imageUrl: firstImage(
         pl.featured_image?.url, pl.featured_image?.src, pl.featuredImage?.url, pl.featuredImage?.src,
         pl.image?.url, pl.image?.src, pl.images?.map((image) => image?.url ?? image?.src),
@@ -328,9 +336,9 @@ export const MOCK_STATES = import.meta.env.DEV
           flows: { published: 1, drafts: 0, approved: 0 },
         },
         products: [
-          { id: 'p1', title: 'Rose Lip Balm', imageUrl: null, price: '₹299', coverage: null },
-          { id: 'p2', title: 'Velvet Serum',  imageUrl: null, price: '₹899', coverage: null },
-          { id: 'p3', title: 'Glow Toner',    imageUrl: null, price: '₹449', coverage: null },
+          { id: 'p1', title: 'Rose Lip Balm', imageUrl: null, price: '₹299', coverage: null, status: 'active', isOutOfStock: false },
+          { id: 'p2', title: 'Velvet Serum',  imageUrl: null, price: '₹899', coverage: null, status: 'active', isOutOfStock: true, outOfStockSince: new Date(Date.now() - 86400000 * 3).toISOString() },
+          { id: 'p3', title: 'Glow Toner',    imageUrl: null, price: '₹449', coverage: null, status: 'active', isOutOfStock: true, outOfStockSince: new Date(Date.now() - 86400000 * 7).toISOString() },
         ],
         operations: [
           {
