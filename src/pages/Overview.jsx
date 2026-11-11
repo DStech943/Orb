@@ -1,11 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, Check, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Check,
+  ExternalLink,
+  FileSpreadsheet,
+  PackageX,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
 import { MOCK_STATES, useOverview } from '../services/overview'
-import { extendOperation } from '../services/orbApi'
+import { extendOperation, getBrandMastersheetUrl } from '../services/orbApi'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
@@ -254,27 +265,192 @@ const countdown = (value, now) => {
   return { label: `expires in ${days} day${days === 1 ? '' : 's'}`, urgent: days <= 3, expired: false }
 }
 
-function QuickActions({ overview, now, isAdmin, status, onRetry }) {
-  if (status === 'loading') return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><Skeleton className="h-5 w-28" /><Skeleton className="mt-5 h-12" /><Skeleton className="mt-3 h-12" /></section>
-  if (status === 'error') return <InlineBlockError label="quick actions" onRetry={onRetry} />
-  const drafts = Object.values(overview.counts || {}).reduce((total, item) => total + Number(item?.drafts || 0), 0)
-  const approved = Object.values(overview.counts || {}).reduce((total, item) => total + Number(item?.approved || 0), 0)
-  const expiring = (overview.operations || []).find((operation) => {
-    const state = countdown(operation.expiresAt, now)
-    return !state.expired && state.urgent && operation.expiresAt
+const formatDaysAgo = (dateValue) => {
+  if (!dateValue) return null
+  const date = new Date(dateValue)
+  if (Number.isNaN(date.getTime())) return null
+  const diffDays = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays <= 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return `${diffDays} days ago`
+}
+
+function OutOfStockProducts({ products = [], status, onRetry }) {
+  if (status === 'loading') {
+    return (
+      <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
+        <Skeleton className="h-5 w-36" />
+        <Skeleton className="mt-5 h-12" />
+        <Skeleton className="mt-3 h-12" />
+      </section>
+    )
+  }
+  if (status === 'error') {
+    return <InlineBlockError label="out of stock products" onRetry={onRetry} />
+  }
+
+  // Filter for active products that are currently out of stock
+  const outOfStockItems = (products || []).filter((product) => {
+    const isActive = String(product?.status || 'active').toLowerCase() === 'active'
+    return isActive && Boolean(product.isOutOfStock)
   })
-  const syncedAt = overview.flags?.lastSyncedAt ? new Date(overview.flags.lastSyncedAt) : null
-  const daysOld = syncedAt && !Number.isNaN(syncedAt.getTime()) ? Math.floor((now - syncedAt.getTime()) / DAY) : null
-  const actions = [
-    overview.flags?.failedPages > 0 && isAdmin && { label: `Fix ${overview.flags.failedPages} failed pages`, to: '/app/workspace?tab=source' },
-    expiring && isAdmin && { label: `Extend ${expiring.title}`, to: '/app/operations' },
-    drafts > 0 && { label: `Review ${drafts} drafts`, to: '/app/brain?tab=sops&status=draft' },
-    approved > 0 && isAdmin && { label: `Publish ${approved} approved items`, to: '/app/brain?tab=sops' },
-    daysOld !== null && daysOld > 14 && isAdmin && { label: `Re-sync website (${daysOld} days old)`, to: '/app/workspace?tab=source' },
-    overview.flags?.sourceCount === 0 && isAdmin && { label: 'Add a source', to: '/app/workspace?tab=source' },
-    overview.flags?.sourceCount > 0 && isAdmin && { label: 'Update knowledge source', to: '/app/workspace?tab=source' },
-  ].filter(Boolean).slice(0, 4)
-  return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Quick actions</p>{actions.length ? <div className="mt-3 divide-y divide-ink/10">{actions.map((action) => <Link key={action.label} to={action.to} className="flex items-center justify-between gap-3 py-3 text-sm font-bold transition hover:text-primary"><span>{action.label}</span><ArrowUpRight size={16} className="shrink-0" /></Link>)}</div> : <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted"><Check size={17} className="text-emerald-600" />Nothing needs attention.</div>}</section>
+
+  return (
+    <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
+            Out of stock products
+          </p>
+          <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 border border-rose-200">
+            {outOfStockItems.length}
+          </span>
+        </div>
+        <Link to="/app/products" className="text-xs font-extrabold text-primary hover:underline">
+          View catalog
+        </Link>
+      </div>
+
+      {outOfStockItems.length > 0 ? (
+        <div className="mt-3 divide-y divide-ink/10">
+          {outOfStockItems.slice(0, 5).map((item) => {
+            const timeAgo = formatDaysAgo(item.outOfStockSince)
+            return (
+              <div key={item.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0 flex items-center gap-3">
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt={item.title}
+                      className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 object-cover bg-slate-50"
+                    />
+                  ) : (
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-100 text-slate-400">
+                      <PackageX size={18} />
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-extrabold text-ink">
+                      {item.title}
+                    </p>
+                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
+                      {item.price && <span>{item.price}</span>}
+                      {timeAgo && (
+                        <>
+                          <span>•</span>
+                          <span className="text-rose-600 font-semibold">
+                            Out of stock: {timeAgo}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <Link
+                  to={`/app/products?product=${encodeURIComponent(item.id)}`}
+                  className="shrink-0 text-xs font-bold text-slate-500 hover:text-primary transition"
+                  title="Inspect product"
+                >
+                  <ArrowUpRight size={15} />
+                </Link>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted">
+          <Check size={17} className="text-emerald-600" />
+          All active products have available inventory.
+        </div>
+      )}
+    </section>
+  )
+}
+
+function MastersheetBanner({ brandName }) {
+  const [liveUrl, setLiveUrl] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const fetchUrl = async () => {
+      setLoading(true)
+      try {
+        const url = await getBrandMastersheetUrl(brandName)
+        if (active) setLiveUrl(url)
+      } catch {
+        if (active) setLiveUrl(null)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    fetchUrl()
+    const handleUpdate = (e) => {
+      if (e.detail?.url) setLiveUrl(e.detail.url)
+      else fetchUrl()
+    }
+    window.addEventListener('orb:mastersheet-updated', handleUpdate)
+    return () => {
+      active = false
+      window.removeEventListener('orb:mastersheet-updated', handleUpdate)
+    }
+  }, [brandName])
+
+  const targetUrl = liveUrl || 'https://docs.google.com/spreadsheets/'
+  const isConfigured = Boolean(liveUrl)
+
+  return (
+    <section className="rounded-xl border-2 border-ink bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-5 shadow-brutal">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="grid h-11 w-11 place-items-center rounded-xl border border-emerald-300 bg-emerald-100 text-emerald-800 shadow-2xs">
+            <FileSpreadsheet size={22} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-extrabold text-ink tracking-tight">
+                Brand Mastersheet
+              </h3>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold border ${
+                isConfigured
+                  ? 'bg-emerald-100/80 text-emerald-800 border-emerald-300'
+                  : 'bg-amber-100 text-amber-800 border-amber-300'
+              }`}>
+                {loading ? 'Checking...' : isConfigured ? 'Vault Configured' : 'Needs Setup'}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-slate-600 max-w-xl">
+              {isConfigured
+                ? `Central master inventory, operations, and support tracking spreadsheet for ${brandName}.`
+                : `Connect ${brandName}'s Google Sheets Mastersheet in Tools to link live inventory and orders.`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          {!isConfigured && (
+            <Link
+              to="/app/tools"
+              className="inline-flex items-center gap-1.5 rounded-md border-2 border-ink bg-white px-3 py-2 text-xs font-bold text-ink shadow-brutal hover:bg-slate-50 transition"
+            >
+              <span>Configure in Tools</span>
+            </Link>
+          )}
+          <a
+            href={targetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="interactive-brutal inline-flex items-center gap-2 rounded-md border-2 border-ink bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-brutal hover:bg-emerald-700 transition"
+          >
+            <span>Open Mastersheet</span>
+            <ExternalLink size={14} />
+          </a>
+        </div>
+      </div>
+    </section>
+  )
 }
 
 function ExtendOperationModal({ operation, onClose, onSaved }) {
@@ -396,8 +572,12 @@ function BrandOverview({ overview, onRetry }) {
 
   return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{!isNewBrand && <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />}</header>
     {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
+      <MastersheetBanner brandName={brandName} />
       <MetricGrid counts={overview.counts} brandName={brandName} status={overview.blockStatus?.metrics} onRetry={onRetry} />
-      <div className="grid gap-5 lg:grid-cols-2"><QuickActions overview={overview} now={now} isAdmin={isAdmin} status={overview.blockStatus?.metrics} onRetry={onRetry} /><ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} /></div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <OutOfStockProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />
+        <ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} />
+      </div>
       {!setupHidden && (setupCelebrating ? <section className="rounded-xl border-2 border-ink bg-white p-6 text-center shadow-brutal"><span className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-emerald-500 bg-emerald-50 text-emerald-600"><SpringCheck animated /></span><h2 className="mt-3 text-xl font-extrabold">Setup complete</h2><p className="mt-1 text-sm text-muted">Orb is ready for your team.</p></section> : <SetupChecklist steps={setupSteps} />)}
     </main>}
   </div>
