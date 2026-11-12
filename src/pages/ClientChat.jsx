@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
-  AtSign,
   Check,
   CheckCheck,
   CornerDownRight,
@@ -35,6 +34,7 @@ const PRESET_MENTIONS = [
   { id: 'orb-ops', handle: 'Orb Operations', label: '@Orb Operations', role: 'Orb Ops', description: 'Orb operations & catalog sync team', icon: '🛡️' },
   { id: 'support-team', handle: 'Support Team', label: '@Support Team', role: 'Customer Support', description: 'Customer support leads', icon: '💬' },
   { id: 'client', handle: 'Client', label: '@Client', role: 'Brand Team', description: 'Brand owners & client team members', icon: '👤' },
+  { id: 'parthavi', handle: 'Parthavi Gaikwad', label: '@Parthavi Gaikwad', role: 'Orb Team', description: 'Orb team specialist', icon: '👤' },
 ]
 
 export default function ClientChat() {
@@ -154,6 +154,37 @@ export default function ClientChat() {
     )
   }, [mentionTargets, mentionMenuOpen, mentionQuery])
 
+  // Build comprehensive mention regex supporting full names (e.g. @Parthavi Gaikwad)
+  const buildMentionRegex = useMemo(() => {
+    return (explicitMentions = []) => {
+      const allKnown = new Set([
+        ...PRESET_MENTIONS.map((m) => m.handle),
+        ...mentionTargets.map((m) => m.handle),
+        ...(Array.isArray(explicitMentions) ? explicitMentions : []),
+      ])
+
+      const sortedKnown = Array.from(allKnown)
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length)
+        .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+
+      const knownPattern = sortedKnown.length > 0 ? `@(?:${sortedKnown.join('|')})` : ''
+
+      // Multi-word capitalized names: @FirstName LastName (e.g. @Parthavi Gaikwad)
+      const capitalizedMultiWord = `@[A-Z][a-zA-Z0-9_]*(?:\\s+[A-Z][a-zA-Z0-9_]*)+`
+
+      // Names with parenthetical roles: @Name (Role) (e.g. @Sarah (Support Lead))
+      const withParentheses = `@[a-zA-Z0-9_]+(?:\\s+[a-zA-Z0-9_]+)*\\s*\\([^\\)]+\\)`
+
+      // Single word mentions: @all, @team, etc.
+      const singleWord = `@[a-zA-Z0-9_]+`
+
+      const patterns = [knownPattern, withParentheses, capitalizedMultiWord, singleWord].filter(Boolean)
+
+      return new RegExp(`(${patterns.join('|')})`, 'gi')
+    }
+  }, [mentionTargets])
+
   useEffect(() => {
     const closeMenu = () => {
       setContextMenu(null)
@@ -257,8 +288,10 @@ export default function ClientChat() {
     const currentReply = replyingTo
     const mediaToSend = [...attachedFiles]
 
-    // Extract any @mentions from the text
-    const mentionMatches = (text.match(/@([a-zA-Z0-9_]+(?:\s\([a-zA-Z0-9_\s]+\))?)/g) || []).map((m) => m.slice(1))
+    // Extract any @mentions from the text using our comprehensive mention regex
+    const mentionRegex = buildMentionRegex()
+    const matches = text.match(mentionRegex) || []
+    const mentionMatches = matches.map((m) => m.replace(/^@/, '').trim()).filter(Boolean)
 
     setInputMessage('')
     setReplyingTo(null)
@@ -367,10 +400,9 @@ export default function ClientChat() {
     )
   }
 
-  const renderMessageContent = (content, fromClient) => {
+  const renderMessageContent = (content, fromClient, explicitMentions = []) => {
     if (!content) return null
-    // Matches @all, @team, @Orb Operations, @Support Team, @Client, or any @Username
-    const mentionRegex = /(@all|@team|@Orb Operations|@Support Team|@Client|@[a-zA-Z0-9_]+(?:\s\([a-zA-Z0-9_\s]+\))?)/gi
+    const mentionRegex = buildMentionRegex(explicitMentions)
     const parts = content.split(mentionRegex)
 
     return (
@@ -405,7 +437,7 @@ export default function ClientChat() {
             <span className="grid h-11 w-11 place-items-center rounded-xl bg-purple/10 text-purple font-extrabold shadow-sm">
               <MessageSquare size={20} />
             </span>
-            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
+            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-blue-500" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -414,10 +446,6 @@ export default function ClientChat() {
               </h2>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
                 {brandName}
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live WebSocket
               </span>
             </div>
             <p className="text-xs text-muted">
@@ -539,7 +567,7 @@ export default function ClientChat() {
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
-                      {renderMessageContent(msg.content, fromClient)}
+                      {renderMessageContent(msg.content, fromClient, msg.mentions)}
 
                       {/* Attached Media Grid */}
                       {Array.isArray(msg.media) && msg.media.length > 0 && (
@@ -802,23 +830,6 @@ export default function ClientChat() {
 
         {/* Input box */}
         <form onSubmit={handleSend} className="relative flex items-end gap-2">
-          {/* Quick Mention button */}
-          <button
-            type="button"
-            onClick={() => {
-              setMentionMenuOpen(true)
-              setMentionQuery('')
-              setMentionCursorIndex(inputMessage.length)
-              setMentionSelectedIndex(0)
-              inputRef.current?.focus()
-            }}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-2xs hover:border-purple/40 hover:bg-slate-50 hover:text-purple transition"
-            title="Mention people or teams (@all, @team, @Orb Operations)"
-            aria-label="Mention"
-          >
-            <AtSign size={18} />
-          </button>
-
           {/* Attach file button */}
           <button
             type="button"
