@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowDown,
+  ArrowUp,
   Check,
   CheckCheck,
+  ChevronDown,
+  ChevronUp,
   CornerDownRight,
   FileText,
   Image as ImageIcon,
@@ -58,6 +61,7 @@ export default function ClientChat() {
   const [uploading, setUploading] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [showScrollBottom, setShowScrollBottom] = useState(false)
 
   const fileInputRef = useRef(null)
@@ -92,17 +96,37 @@ export default function ClientChat() {
     }
   }
 
-  const displayedMessages = useMemo(() => {
-    const q = (searchQuery || '').trim().toLowerCase()
-    if (!q) return messages
+  // Always show all messages — search just highlights & scrolls, never filters
+  const displayedMessages = messages
 
-    return messages.filter((m) => {
-      const content = (m.content || '').toLowerCase()
-      const senderName = (m.sender?.name || '').toLowerCase()
-      const mediaMatch = Array.isArray(m.media) && m.media.some((f) => (f.name || '').toLowerCase().includes(q))
-      return content.includes(q) || senderName.includes(q) || mediaMatch
-    })
+  // Compute which message IDs match the current search query
+  const searchMatchIds = useMemo(() => {
+    const q = (searchQuery || '').trim().toLowerCase()
+    if (!q) return []
+    return messages
+      .filter((m) => {
+        const content = (m.content || '').toLowerCase()
+        const senderName = (m.sender?.name || '').toLowerCase()
+        const mediaMatch = Array.isArray(m.media) && m.media.some((f) => (f.name || '').toLowerCase().includes(q))
+        return content.includes(q) || senderName.includes(q) || mediaMatch
+      })
+      .map((m) => m.id)
   }, [messages, searchQuery])
+
+  // Reset active index when query or match list changes
+  useEffect(() => { setSearchActiveIndex(0) }, [searchQuery, searchMatchIds.length])
+
+  // Scroll to the active match
+  useEffect(() => {
+    if (!searchMatchIds.length) return
+    const id = searchMatchIds[searchActiveIndex]
+    if (!id) return
+    const el = document.querySelector(`[data-msg-id="${id}"]`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [searchActiveIndex, searchMatchIds])
+
+  const goToNextMatch = () => setSearchActiveIndex((i) => (i + 1) % searchMatchIds.length)
+  const goToPrevMatch = () => setSearchActiveIndex((i) => (i - 1 + searchMatchIds.length) % searchMatchIds.length)
 
   useEffect(() => {
     if (!loading && messages.length > 0) {
@@ -558,7 +582,7 @@ export default function ClientChat() {
 
         <div className="flex items-center gap-2">
           {searchOpen ? (
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 shadow-2xs animate-in fade-in slide-in-from-right-3 duration-200">
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 shadow-2xs animate-in fade-in slide-in-from-right-3 duration-200">
               <Search size={14} className="text-slate-400 shrink-0" />
               <input
                 ref={searchInputRef}
@@ -566,36 +590,54 @@ export default function ClientChat() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setSearchOpen(false)
-                    setSearchQuery('')
-                  }
+                  if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') }
+                  if (e.key === 'Enter') { if (e.shiftKey) goToPrevMatch(); else goToNextMatch() }
                 }}
-                placeholder="Search messages, senders..."
-                className="w-44 sm:w-64 bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none"
+                placeholder="Search messages..."
+                className="w-36 sm:w-52 bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none"
                 autoFocus
               />
-              {searchQuery && (
-                <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                  {displayedMessages.length} match{displayedMessages.length === 1 ? '' : 'es'}
+              {searchQuery && searchMatchIds.length > 0 && (
+                <span className="shrink-0 rounded bg-purple/10 px-1.5 py-0.5 text-[10px] font-bold text-purple">
+                  {searchActiveIndex + 1}/{searchMatchIds.length}
                 </span>
+              )}
+              {searchQuery && searchMatchIds.length === 0 && (
+                <span className="shrink-0 text-[10px] font-bold text-slate-400">No matches</span>
+              )}
+              {searchQuery && searchMatchIds.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={goToPrevMatch}
+                    className="rounded p-0.5 text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition"
+                    title="Previous match (Shift+Enter)"
+                  >
+                    <ChevronUp size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToNextMatch}
+                    className="rounded p-0.5 text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition"
+                    title="Next match (Enter)"
+                  >
+                    <ChevronDown size={14} />
+                  </button>
+                </>
               )}
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="rounded p-0.5 text-slate-400 hover:text-slate-700"
-                  title="Clear search"
+                  className="rounded p-0.5 text-slate-400 hover:text-slate-700 transition"
+                  title="Clear"
                 >
                   <X size={12} />
                 </button>
               )}
               <button
                 type="button"
-                onClick={() => {
-                  setSearchOpen(false)
-                  setSearchQuery('')
-                }}
+                onClick={() => { setSearchOpen(false); setSearchQuery('') }}
                 className="rounded p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition"
                 title="Close search (Esc)"
               >
@@ -641,21 +683,6 @@ export default function ClientChat() {
               Start chatting with our team to request changes, tweaks, or updates for {brandName}.
             </p>
           </div>
-        ) : displayedMessages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <Search size={32} className="text-slate-300 mb-2" />
-            <p className="text-sm font-bold text-ink">No matching messages</p>
-            <p className="text-xs text-muted mt-1 max-w-sm">
-              We couldn't find any messages matching &quot;{searchQuery}&quot;.
-            </p>
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-purple shadow-2xs hover:bg-slate-50 transition"
-            >
-              Clear search filter
-            </button>
-          </div>
         ) : (
           <AnimatePresence initial={false}>
             {displayedMessages.map((msg, index) => {
@@ -681,6 +708,7 @@ export default function ClientChat() {
               return (
                 <motion.div
                   key={msg.id || index}
+                  data-msg-id={msg.id}
                   layout="position"
                   initial={{ opacity: 0, y: 16, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -691,7 +719,13 @@ export default function ClientChat() {
                   }}
                   className={`group relative flex gap-3.5 transition-all duration-300 ease-out ${
                     fromClient ? 'flex-row-reverse justify-start' : 'flex-row justify-start'
-                  } ${isJustSent ? 'translate-y-2 opacity-90 scale-[0.99]' : 'translate-y-0 opacity-100 scale-100'}`}
+                  } ${isJustSent ? 'translate-y-2 opacity-90 scale-[0.99]' : 'translate-y-0 opacity-100 scale-100'} ${
+                    searchMatchIds.includes(msg.id)
+                      ? searchMatchIds[searchActiveIndex] === msg.id
+                        ? 'ring-2 ring-amber-400 ring-offset-2 rounded-2xl'
+                        : 'ring-1 ring-amber-200 ring-offset-1 rounded-2xl'
+                      : ''
+                  }`}
                 >
                   {/* Profile Pic / Avatar */}
                 <div className="shrink-0 pt-0.5">

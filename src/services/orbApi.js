@@ -280,6 +280,15 @@ export const createAssistantFaq = ({ question, answer, category = "Customer supp
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, question, answer, category }),
   });
+export const createManualSop = ({ title, situation, checkFirst, whatToDo, whatToSay, escalateTo, category = "Support" }, brandName = activeBrandName()) =>
+  request("/api/knowledge/sops/manual", {
+    method: "POST",
+    body: JSON.stringify({
+      brand_name: brandName, title, situation: situation || title,
+      check_first: checkFirst || "", what_to_do: whatToDo || "",
+      what_to_say: whatToSay || "", escalate_to: escalateTo || "", category,
+    }),
+  });
 export const createSopFromFlow = (flow, brandName = activeBrandName()) =>
   request("/api/knowledge/sops/from-flow", {
     method: "POST",

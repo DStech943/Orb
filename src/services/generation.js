@@ -1,5 +1,5 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { activeBrandName, deleteKnowledge, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge } from './orbApi'
+import { activeBrandName, deleteKnowledge, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createAssistantFaq, createManualSop } from './orbApi'
 const KEY = 'orb_generation_data_v1'
 const KNOWLEDGE_CACHE_MS = 20_000
 const knowledgeCache = new Map()
@@ -85,6 +85,12 @@ const productPayload = (product) => {
 }
 export async function listSops() { if (hasOrbApi) { const result = await cachedKnowledge('sops'); return result ? result.points.map((record) => mapSopWithPayload(record, result.source === 'qdrant' ? 'Qdrant' : undefined)) : [] } await wait(); return read().sops || [] }
 export async function updateSop(sop) { if (hasOrbApi) { await updateKnowledge('sops', sop.id, sopPayload(sop)); invalidateKnowledgeCache('sops'); return sop } await wait(); const data = read(); data.sops = data.sops.map((item) => item.id === sop.id ? { ...item, ...sop, updated: 'Just now' } : item); write(data); return sop }
+export async function createManualSopEntry(sop) {
+  if (!hasOrbApi) throw new Error('Connect the Orb API to create SOPs.')
+  const result = await createManualSop({ title: sop.title || 'Untitled SOP', situation: sop.situation, checkFirst: sop.checkFirst, whatToDo: sop.whatToDo, whatToSay: sop.whatToSay, escalateTo: sop.escalateTo, category: sop.category || 'Support' })
+  invalidateKnowledgeCache('sops')
+  return result?.point ? mapSopWithPayload(result.point) : sop
+}
 export async function publishApprovedSops() { if (!hasOrbApi) return { published: 0 }; const result = await publishApprovedKnowledge('sops'); invalidateKnowledgeCache('sops'); return result }
 export async function deleteSop(id) { if (hasOrbApi) { const result = await deleteKnowledge('sops', id); invalidateKnowledgeCache('sops'); return result } await wait(); const data = read(); data.sops = data.sops.filter((item) => item.id !== id); write(data) }
 export async function listFaqs() { if (hasOrbApi) { const result = await cachedKnowledge('faqs'); return result ? result.points.map((record) => mapFaq({ ...record, source: result.source === 'qdrant' ? 'Qdrant' : undefined })) : [] } await wait(); return read().faqs || [] }

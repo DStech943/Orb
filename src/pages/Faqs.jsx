@@ -18,5 +18,7 @@ export default function Faqs() {
     ? createAssistantFaq({ ...faq, id: undefined }, activeBrandName())
     : updateFaq(faq)
 
-  return <ContentListPage kind="faq" list={listFaqs} update={saveFaq} remove={deleteFaq} publishApproved={publishApprovedFaqs} initialDraft={initialDraft} />
+  const createFaq = (faq) => createAssistantFaq({ question: faq.question, answer: faq.answer, category: faq.category || 'Support' }, activeBrandName())
+
+  return <ContentListPage kind="faq" list={listFaqs} update={saveFaq} remove={deleteFaq} publishApproved={publishApprovedFaqs} initialDraft={initialDraft} createItem={createFaq} />
 }
