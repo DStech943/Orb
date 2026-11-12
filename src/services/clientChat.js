@@ -11,7 +11,7 @@
  */
 
 import { supabase } from '../lib/supabase'
-import { activeBrandName } from './orbApi'
+import { activeBrandId, activeBrandName } from './orbApi'
 
 const STORAGE_PREFIX = 'orb_chatspace_'
 export const CHATSPACE_BUCKET = 'orb_chatspace_attachments'
@@ -202,9 +202,11 @@ class ChatspaceWebSocketClient {
       const existsIndex = list.findIndex((m) => m.id === data.id)
       const formatted = {
         id: data.id,
+        brandId: data.brandId || data.brand_id || null,
         sender: data.sender,
         content: data.content,
         media: data.media || [],
+        mentions: data.mentions || [],
         status: data.status || 'read',
         replyToId: data.replyToId || null,
         replyToSnippet: data.replyToSnippet || null,
@@ -272,6 +274,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
       if (!error && Array.isArray(data)) {
         const mapped = data.map((row) => ({
           id: row.id,
+          brandId: row.brand_id || null,
           sender: {
             id: row.sender_id || 'unknown',
             name: row.sender_name,
@@ -286,6 +289,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
           },
           content: row.content,
           media: Array.isArray(row.media) ? row.media : typeof row.media === 'string' ? JSON.parse(row.media) : [],
+          mentions: Array.isArray(row.mentions) ? row.mentions : [],
           status: row.status || 'read',
           replyToId: row.reply_to_id || null,
           replyToSnippet: row.reply_to_snippet || null,
@@ -318,8 +322,10 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
 
 export const sendClientChatMessage = async ({
   brandName = activeBrandName(),
+  brandId = activeBrandId(),
   content,
   media = [],
+  mentions = [],
   currentUser,
   replyTo = null,
 }) => {
@@ -328,6 +334,20 @@ export const sendClientChatMessage = async ({
   }
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
+
+  // Resolve brand_id if not explicitly provided
+  let effectiveBrandId = brandId || activeBrandId() || null
+  if (!effectiveBrandId && supabase && brand) {
+    try {
+      const { data } = await supabase
+        .schema('cx_copilot')
+        .from('brands')
+        .select('id')
+        .ilike('name', brand)
+        .limit(1)
+      if (data?.[0]?.id) effectiveBrandId = data[0].id
+    } catch {}
+  }
 
   const userSender = {
     id: currentUser?.id || `usr-${Date.now()}`,
@@ -348,9 +368,11 @@ export const sendClientChatMessage = async ({
 
   const newMessage = {
     id: generatedId,
+    brandId: effectiveBrandId,
     sender: userSender,
     content: (content || '').trim(),
     media: media || [],
+    mentions: mentions || [],
     createdAt: new Date().toISOString(),
     status: 'sent',
     replyToId: replyTo?.id || null,
@@ -363,29 +385,41 @@ export const sendClientChatMessage = async ({
     type: 'chat_message',
     ...newMessage,
     brandName: brand,
+    brandId: effectiveBrandId,
   })
 
   // 2. Write to Supabase Postgres as persistent store
   if (supabase) {
+    const payload = {
+      id: generatedId,
+      brand_id: effectiveBrandId,
+      brand_name: brand,
+      sender_id: currentUser?.id || null,
+      sender_name: userSender.name,
+      sender_role: userSender.role,
+      sender_avatar: userSender.avatar,
+      content: newMessage.content,
+      media: newMessage.media,
+      mentions: newMessage.mentions,
+      status: 'sent',
+      reply_to_id: newMessage.replyToId,
+      reply_to_snippet: newMessage.replyToSnippet,
+      reactions: {},
+      created_at: newMessage.createdAt,
+    }
     try {
-      await supabase
+      const { error } = await supabase
         .schema('cx_copilot')
         .from('orb_client_chat_messages')
-        .insert({
-          id: generatedId,
-          brand_name: brand,
-          sender_id: currentUser?.id || null,
-          sender_name: userSender.name,
-          sender_role: userSender.role,
-          sender_avatar: userSender.avatar,
-          content: newMessage.content,
-          media: newMessage.media,
-          status: 'sent',
-          reply_to_id: newMessage.replyToId,
-          reply_to_snippet: newMessage.replyToSnippet,
-          reactions: {},
-          created_at: newMessage.createdAt,
-        })
+        .insert(payload)
+      if (error) {
+        // Fallback without mentions column if it hasn't been migrated yet
+        const { mentions, ...fallbackPayload } = payload
+        await supabase
+          .schema('cx_copilot')
+          .from('orb_client_chat_messages')
+          .insert(fallbackPayload)
+      }
     } catch (e) {
       console.warn('Could not insert to Supabase orb_client_chat_messages:', e)
     }
@@ -506,6 +540,31 @@ export const updateMessageStatus = async ({
     messageId,
     status,
   })
+}
+
+export const getUnreadChatCount = (brandName = activeBrandName(), currentUserId) => {
+  const brand = brandName || 'default_brand'
+  const key = `${STORAGE_PREFIX}${brand}`
+  const lastReadTime = window.localStorage.getItem(`orb_chatspace_last_read:${brand}`) || '0'
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return 0
+    const list = JSON.parse(raw)
+    if (!Array.isArray(list)) return 0
+    return list.filter((m) => {
+      const isFromMe = m.sender?.id === currentUserId || m.sender?.role === 'client'
+      const isNewerThanRead = new Date(m.createdAt).getTime() > Number(lastReadTime)
+      return !isFromMe && isNewerThanRead
+    }).length
+  } catch {
+    return 0
+  }
+}
+
+export const markChatspaceAsRead = (brandName = activeBrandName()) => {
+  const brand = brandName || 'default_brand'
+  window.localStorage.setItem(`orb_chatspace_last_read:${brand}`, String(Date.now()))
+  window.dispatchEvent(new CustomEvent('orb:chatspace-unread-changed', { detail: { brand, count: 0 } }))
 }
 
 export const subscribeToChatMessages = (brandName, onNewMessage) => {

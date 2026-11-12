@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
+  AtSign,
   Check,
   CheckCheck,
   CornerDownRight,
@@ -21,11 +22,20 @@ import { activeBrandName } from '../services/orbApi'
 import {
   PRESET_REACTIONS,
   getClientChatMessages,
+  markChatspaceAsRead,
   sendClientChatMessage,
   subscribeToChatMessages,
   toggleMessageReaction,
   uploadChatspaceMedia,
 } from '../services/clientChat'
+
+const PRESET_MENTIONS = [
+  { id: 'all', handle: 'all', label: '@all', role: 'Channel', description: 'Notify everyone in this brand chatspace', icon: '📢' },
+  { id: 'team', handle: 'team', label: '@team', role: 'Orb Team', description: 'Notify all Orb operations & engineering specialists', icon: '👥' },
+  { id: 'orb-ops', handle: 'Orb Operations', label: '@Orb Operations', role: 'Orb Ops', description: 'Orb operations & catalog sync team', icon: '🛡️' },
+  { id: 'support-team', handle: 'Support Team', label: '@Support Team', role: 'Customer Support', description: 'Customer support leads', icon: '💬' },
+  { id: 'client', handle: 'Client', label: '@Client', role: 'Brand Team', description: 'Brand owners & client team members', icon: '👤' },
+]
 
 export default function ClientChat() {
   const { user } = useAuth()
@@ -91,10 +101,64 @@ export default function ClientChat() {
     }
   }, [brandName, user])
 
+  // Mark chat as read when viewing this brand space or when messages update
+  useEffect(() => {
+    markChatspaceAsRead(brandName)
+  }, [brandName, messages.length])
+
+  useEffect(() => {
+    const onFocus = () => markChatspaceAsRead(brandName)
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [brandName])
+
+  // Dynamic mention targets combining presets + actual participants
+  const mentionTargets = useMemo(() => {
+    const list = [...PRESET_MENTIONS]
+    const seenNames = new Set(list.map((m) => m.handle.toLowerCase()))
+
+    messages.forEach((m) => {
+      const name = m.sender?.name?.trim()
+      if (name && !seenNames.has(name.toLowerCase()) && name !== 'You' && name !== currentUserName) {
+        seenNames.add(name.toLowerCase())
+        list.push({
+          id: `member-${name}`,
+          handle: name,
+          label: `@${name}`,
+          role: m.sender.role === 'team' ? 'Orb Team' : 'Member',
+          description: `Direct message to ${name}`,
+          avatar: m.sender.avatar,
+          initials: m.sender.initials || name.slice(0, 2).toUpperCase(),
+        })
+      }
+    })
+
+    return list
+  }, [messages, currentUserName])
+
+  const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionCursorIndex, setMentionCursorIndex] = useState(0)
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0)
+
+  const filteredMentions = useMemo(() => {
+    if (!mentionMenuOpen) return []
+    const q = (mentionQuery || '').toLowerCase().trim()
+    if (!q) return mentionTargets
+    return mentionTargets.filter(
+      (m) =>
+        m.handle.toLowerCase().includes(q) ||
+        m.label.toLowerCase().includes(q) ||
+        m.role?.toLowerCase().includes(q) ||
+        m.description?.toLowerCase().includes(q)
+    )
+  }, [mentionTargets, mentionMenuOpen, mentionQuery])
+
   useEffect(() => {
     const closeMenu = () => {
       setContextMenu(null)
       setReactionMenuMsgId(null)
+      setMentionMenuOpen(false)
     }
     window.addEventListener('click', closeMenu)
     window.addEventListener('keydown', (e) => {
@@ -146,6 +210,45 @@ export default function ClientChat() {
     setAttachedFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove))
   }
 
+  const handleInputChange = (e) => {
+    const val = e.target.value
+    setInputMessage(val)
+
+    const cursorPos = e.target.selectionStart || val.length
+    const textBeforeCursor = val.slice(0, cursorPos)
+    const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\s]*)$/)
+
+    if (match) {
+      const query = match[1]
+      if (!query.includes('\n') && query.length <= 25) {
+        setMentionMenuOpen(true)
+        setMentionQuery(query)
+        setMentionCursorIndex(cursorPos - query.length - 1)
+        setMentionSelectedIndex(0)
+        return
+      }
+    }
+    setMentionMenuOpen(false)
+  }
+
+  const insertMention = (target) => {
+    if (!target) return
+    const beforeAt = inputMessage.slice(0, mentionCursorIndex)
+    const afterCursor = inputMessage.slice(inputRef.current?.selectionStart || inputMessage.length)
+    const replacement = `@${target.handle} `
+    const newText = `${beforeAt}${replacement}${afterCursor}`
+    setInputMessage(newText)
+    setMentionMenuOpen(false)
+
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus()
+        const newCursorPos = beforeAt.length + replacement.length
+        inputRef.current.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    }, 10)
+  }
+
   const handleSend = async (e) => {
     e?.preventDefault()
     if ((!inputMessage.trim() && attachedFiles.length === 0) || sending) return
@@ -154,16 +257,21 @@ export default function ClientChat() {
     const currentReply = replyingTo
     const mediaToSend = [...attachedFiles]
 
+    // Extract any @mentions from the text
+    const mentionMatches = (text.match(/@([a-zA-Z0-9_]+(?:\s\([a-zA-Z0-9_\s]+\))?)/g) || []).map((m) => m.slice(1))
+
     setInputMessage('')
     setReplyingTo(null)
     setAttachedFiles([])
     setSending(true)
+    setMentionMenuOpen(false)
 
     try {
       const sent = await sendClientChatMessage({
         brandName,
         content: text,
         media: mediaToSend,
+        mentions: mentionMatches,
         currentUser: user,
         replyTo: currentReply,
       })
@@ -184,6 +292,29 @@ export default function ClientChat() {
   }
 
   const handleKeyDown = (e) => {
+    if (mentionMenuOpen && filteredMentions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionSelectedIndex((prev) => (prev + 1) % filteredMentions.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionSelectedIndex((prev) => (prev - 1 + filteredMentions.length) % filteredMentions.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertMention(filteredMentions[mentionSelectedIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionMenuOpen(false)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -233,6 +364,35 @@ export default function ClientChat() {
       <span className="flex items-center gap-0.5 text-slate-400 font-medium" title="Sent">
         <Check size={12} /> Sent
       </span>
+    )
+  }
+
+  const renderMessageContent = (content, fromClient) => {
+    if (!content) return null
+    // Matches @all, @team, @Orb Operations, @Support Team, @Client, or any @Username
+    const mentionRegex = /(@all|@team|@Orb Operations|@Support Team|@Client|@[a-zA-Z0-9_]+(?:\s\([a-zA-Z0-9_\s]+\))?)/gi
+    const parts = content.split(mentionRegex)
+
+    return (
+      <p className="whitespace-pre-wrap leading-relaxed">
+        {parts.map((part, i) => {
+          if (part && part.startsWith('@')) {
+            return (
+              <span
+                key={i}
+                className={`inline-flex items-center font-bold px-1.5 py-0.5 rounded text-xs mx-0.5 shadow-2xs ${
+                  fromClient
+                    ? 'bg-white/20 text-white border border-white/30'
+                    : 'bg-purple/10 text-purple border border-purple/20'
+                }`}
+              >
+                {part}
+              </span>
+            )
+          }
+          return part
+        })}
+      </p>
     )
   }
 
@@ -379,7 +539,7 @@ export default function ClientChat() {
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
-                      {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
+                      {renderMessageContent(msg.content, fromClient)}
 
                       {/* Attached Media Grid */}
                       {Array.isArray(msg.media) && msg.media.length > 0 && (
@@ -544,7 +704,54 @@ export default function ClientChat() {
       )}
 
       {/* Composer Area */}
-      <div className="border-t border-slate-200 bg-white p-4">
+      <div className="border-t border-slate-200 bg-white p-4 relative">
+        {/* Mention Suggestions Floating Popup */}
+        {mentionMenuOpen && filteredMentions.length > 0 && (
+          <div className="absolute bottom-full left-4 right-4 mb-2 z-30 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl animate-in fade-in zoom-in-95">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
+              <span>Mention people or teams</span>
+              <span>↑↓ to navigate • Enter to select</span>
+            </div>
+            <div className="mt-1 space-y-0.5">
+              {filteredMentions.map((item, idx) => {
+                const isSelected = idx === mentionSelectedIndex
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onMouseEnter={() => setMentionSelectedIndex(idx)}
+                    onClick={() => insertMention(item)}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition ${
+                      isSelected ? 'bg-purple/10 text-purple font-semibold' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {item.avatar ? (
+                      <img src={item.avatar} alt={item.handle} className="h-6 w-6 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <span className="grid h-6 w-6 place-items-center rounded-lg bg-slate-100 text-xs shrink-0">
+                        {item.icon || item.initials || '@'}
+                      </span>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold">{item.label}</span>
+                        {item.role && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.2 text-[9px] font-bold text-slate-500">
+                            {item.role}
+                          </span>
+                        )}
+                      </div>
+                      {item.description && (
+                        <p className="truncate text-[10px] text-slate-400 font-normal">{item.description}</p>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Attachment preview bar if attachments exist */}
         {attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
@@ -595,6 +802,23 @@ export default function ClientChat() {
 
         {/* Input box */}
         <form onSubmit={handleSend} className="relative flex items-end gap-2">
+          {/* Quick Mention button */}
+          <button
+            type="button"
+            onClick={() => {
+              setMentionMenuOpen(true)
+              setMentionQuery('')
+              setMentionCursorIndex(inputMessage.length)
+              setMentionSelectedIndex(0)
+              inputRef.current?.focus()
+            }}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-2xs hover:border-purple/40 hover:bg-slate-50 hover:text-purple transition"
+            title="Mention people or teams (@all, @team, @Orb Operations)"
+            aria-label="Mention"
+          >
+            <AtSign size={18} />
+          </button>
+
           {/* Attach file button */}
           <button
             type="button"
@@ -611,12 +835,12 @@ export default function ClientChat() {
             ref={inputRef}
             rows={2}
             value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={
               replyingTo
                 ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
-                : `Message our team about ${brandName}... (paste text, attach images or docs)`
+                : `Message our team about ${brandName}... (@ to mention, paste text, attach files)`
             }
             className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-purple focus:outline-none focus:ring-2 focus:ring-purple/10"
           />
@@ -631,7 +855,7 @@ export default function ClientChat() {
           </button>
         </form>
         <div className="flex justify-between items-center mt-1.5 px-1 text-[11px] text-slate-400">
-          <span>Press Enter to send, Shift + Enter for new line • Attachments stored in Supabase</span>
+          <span>Type @ to mention teams or members • Press Enter to send • Files stored in Supabase</span>
           <span>Right-click any message to react or reply</span>
         </div>
       </div>

@@ -125,9 +125,11 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
 
             if action == "chat_message":
                 msg_id = str(data.get("id") or uuid4())
+                brand_id = data.get("brandId") or data.get("brand_id")
                 sender = data.get("sender") or {}
                 content = str(data.get("content") or "").strip()
                 media = data.get("media") or []
+                mentions = data.get("mentions") or []
                 if not content and not media:
                     continue
 
@@ -141,16 +143,31 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
                 if pool is not None:
                     try:
                         async with pool.acquire() as conn:
+                            # Auto-resolve brand_id from cx_copilot.brands if missing
+                            actual_brand_id = brand_id
+                            if not actual_brand_id:
+                                try:
+                                    resolved = await conn.fetchval(
+                                        "SELECT id FROM cx_copilot.brands WHERE lower(name) = lower($1) LIMIT 1",
+                                        brand_name.strip()
+                                    )
+                                    if resolved:
+                                        actual_brand_id = str(resolved)
+                                except Exception:
+                                    pass
+
                             await conn.execute("""
                                 INSERT INTO cx_copilot.orb_client_chat_messages
-                                  (id, brand_name, sender_id, sender_name, sender_role, sender_avatar, content, media, status, reply_to_id, reply_to_snippet, reactions, created_at)
-                                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::uuid, $11, $12::jsonb, $13::timestamptz)
+                                  (id, brand_id, brand_name, sender_id, sender_name, sender_role, sender_avatar, content, media, status, reply_to_id, reply_to_snippet, reactions, created_at)
+                                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::uuid, $12, $13::jsonb, $14::timestamptz)
                                 ON CONFLICT (id) DO UPDATE SET
+                                  brand_id=COALESCE(EXCLUDED.brand_id, cx_copilot.orb_client_chat_messages.brand_id),
                                   media=EXCLUDED.media,
                                   reactions=EXCLUDED.reactions,
                                   status=EXCLUDED.status,
                                   updated_at=now();
-                            """, msg_id, brand_name, str(sender.get("id") or ""), str(sender.get("name") or "User"),
+                            """, msg_id, actual_brand_id if actual_brand_id else None, brand_name,
+                                str(sender.get("id") or ""), str(sender.get("name") or "User"),
                                 str(sender.get("role") or "client"), sender.get("avatar"), content, json.dumps(media),
                                 status_val, reply_to_id if reply_to_id else None, reply_to_snippet,
                                 json.dumps(reactions), datetime.fromisoformat(created_at.replace("Z", "+00:00")))
@@ -161,10 +178,12 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
                 broadcast_payload = {
                     "type": "chat_message",
                     "id": msg_id,
+                    "brandId": actual_brand_id if 'actual_brand_id' in locals() else brand_id,
                     "brand": brand_name,
                     "sender": sender,
                     "content": content,
                     "media": media,
+                    "mentions": mentions,
                     "status": status_val,
                     "replyToId": reply_to_id,
                     "replyToSnippet": reply_to_snippet,
