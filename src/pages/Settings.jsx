@@ -321,7 +321,7 @@ export default function Settings() {
           {active === "profile" && (
             <div className="grid max-w-xl gap-4">
               <div className="flex items-center gap-4">
-                <Avatar name={profile.name} src={user?.avatar} className="h-14 w-14" />
+                <Avatar name={profile.name} src={user?.avatar} sources={user?.avatarSources} className="h-14 w-14" />
                 <p className="text-sm text-muted">
                   Your profile photo is synced from your Orb account when one is available.
                 </p>

@@ -12,7 +12,7 @@
 
 import { supabase } from '../lib/supabase'
 import { activeBrandId, activeBrandName } from './orbApi'
-import { avatarUrlFromKey } from './avatar'
+import { avatarUrlFromKey, avatarUrlsFromKey } from './avatar'
 
 const STORAGE_PREFIX = 'orb_chatspace_'
 export const CHATSPACE_BUCKET = 'orb_chatspace_attachments'
@@ -204,7 +204,7 @@ class ChatspaceWebSocketClient {
       const formatted = {
         id: data.id,
         brandId: data.brandId || data.brand_id || null,
-        sender: { ...data.sender, avatar: avatarUrlFromKey(data.sender?.avatar) },
+        sender: { ...data.sender, avatar: avatarUrlFromKey(data.sender?.avatar), avatarSources: avatarUrlsFromKey(data.sender?.avatar) },
         content: data.content,
         media: data.media || [],
         mentions: data.mentions || [],
@@ -281,6 +281,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
             name: row.sender_name,
             role: row.sender_role,
             avatar: avatarUrlFromKey(row.sender_avatar),
+            avatarSources: avatarUrlsFromKey(row.sender_avatar),
             initials: (row.sender_name || 'U')
               .split(' ')
               .map((n) => n[0])
@@ -354,7 +355,8 @@ export const sendClientChatMessage = async ({
     id: currentUser?.id || `usr-${Date.now()}`,
     name: currentUser?.name || currentUser?.email?.split('@')[0] || 'Client User',
     role: currentUser?.role || 'client',
-    avatar: currentUser?.avatar || null,
+    avatar: avatarUrlFromKey(currentUser?.avatarKey || currentUser?.avatar),
+    avatarSources: avatarUrlsFromKey(currentUser?.avatarKey || currentUser?.avatar),
     initials: (currentUser?.name || 'CU')
       .split(' ')
       .map((n) => n[0])
@@ -398,7 +400,7 @@ export const sendClientChatMessage = async ({
       sender_id: currentUser?.id || null,
       sender_name: userSender.name,
       sender_role: userSender.role,
-      sender_avatar: userSender.avatar,
+      sender_avatar: currentUser?.avatarKey || userSender.avatar,
       content: newMessage.content,
       media: newMessage.media,
       mentions: newMessage.mentions,

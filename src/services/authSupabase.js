@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabase";
-import { avatarUrlFromKey } from "./avatar";
+import { avatarUrlFromKey, avatarUrlsFromKey } from "./avatar";
 
 function requireSupabase() {
   if (!supabase)
@@ -43,6 +43,7 @@ async function appUser(authUser) {
     role: data?.role || "client",
     avatarKey,
     avatar: avatarUrlFromKey(avatarKey),
+    avatarSources: avatarUrlsFromKey(avatarKey),
     provider: authUser.app_metadata?.provider || "email",
     profilePending: Boolean(error),
   };
