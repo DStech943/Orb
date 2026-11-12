@@ -764,29 +764,31 @@ export default function ClientChat() {
                         Orb Team
                       </span>
                     )}
-                    {isMentionedToMe && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-extrabold text-blue-700 border border-blue-200">
-                        <span>@</span> Mentioned you
-                      </span>
-                    )}
+
                   </div>
 
                   {/* Quoted Reply Snippet if present */}
                   {msg.replyToSnippet && (
                     <div
-                      className={`flex items-center gap-1.5 mb-1.5 rounded-lg px-2.5 py-1 text-[11px] border border-slate-200/80 bg-slate-100/80 text-slate-600 max-w-full truncate ${
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        const target = document.querySelector(`[data-msg-id="${msg.replyToId}"]`)
+                        if (target) {
+                          target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          target.classList.add('ring-2', 'ring-purple/50', 'rounded-2xl')
+                          setTimeout(() => target.classList.remove('ring-2', 'ring-purple/50', 'rounded-2xl'), 1200)
+                        }
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click() }}
+                      className={`flex cursor-pointer items-center gap-1.5 mb-1.5 rounded-lg px-2.5 py-1 text-[11px] border border-slate-200/80 bg-slate-100/80 text-slate-600 max-w-full truncate hover:bg-slate-200/70 hover:border-slate-300 transition-colors ${
                         fromClient ? 'rounded-tr-xs' : 'rounded-tl-xs'
                       }`}
-                      title={`Replying to message ID: ${msg.replyToId}`}
+                      title="Click to jump to original message"
                     >
                       <Quote size={11} className="text-purple shrink-0" />
                       <span className="font-semibold text-slate-500 shrink-0">Replying:</span>
                       <span className="truncate italic">"{msg.replyToSnippet}"</span>
-                      {msg.replyToId && (
-                        <span className="text-[9px] text-slate-400 ml-1 shrink-0">
-                          (#{msg.replyToId.slice(0, 6)})
-                        </span>
-                      )}
                     </div>
                   )}
 
@@ -799,8 +801,6 @@ export default function ClientChat() {
                       className={`cursor-context-menu select-text rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-2xs transition-all ${
                         fromClient
                           ? 'rounded-tr-xs bg-primary text-white selection:bg-white/20'
-                          : isMentionedToMe
-                          ? 'rounded-tl-xs border-2 border-blue-400 bg-blue-50/50 text-slate-900 ring-2 ring-blue-100'
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
