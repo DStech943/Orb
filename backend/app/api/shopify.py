@@ -842,7 +842,7 @@ async def save_shopify_product_metafields(
     mutation OrbDeleteProductMetafields($metafields: [MetafieldIdentifierInput!]!) {
       metafieldsDelete(metafields: $metafields) {
         deletedMetafields { ownerId namespace key }
-        userErrors { field message code }
+        userErrors { field message }
       }
     }
     """
