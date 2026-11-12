@@ -22,6 +22,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import Avatar from '../components/ui/Avatar'
 import { activeBrandName } from '../services/orbApi'
 import {
   PRESET_REACTIONS,
@@ -729,24 +730,7 @@ export default function ClientChat() {
                 >
                   {/* Profile Pic / Avatar */}
                 <div className="shrink-0 pt-6">
-                  {msg.sender.avatar ? (
-                    <img
-                      src={msg.sender.avatar}
-                      alt={msg.sender.name}
-                      className="h-9 w-9 rounded-full object-cover border border-slate-200 shadow-2xs"
-                    />
-                  ) : (
-                    <div
-                      className={`grid h-9 w-9 place-items-center rounded-xl text-xs font-extrabold text-white shadow-2xs ${
-                        fromClient
-                          ? 'bg-purple border border-purple/80'
-                          : 'bg-slate-800 border border-slate-700'
-                      }`}
-                      title={msg.sender.name}
-                    >
-                      {msg.sender.initials || msg.sender.name?.slice(0, 2).toUpperCase() || 'U'}
-                    </div>
-                  )}
+                  <Avatar name={msg.sender.name} src={msg.sender.avatar} sources={msg.sender.avatarSources} className="rounded-full border border-slate-200 shadow-2xs" fallbackClassName={fromClient ? 'bg-purple border-purple/80' : 'bg-slate-800 border-slate-700'} />
                 </div>
 
                 {/* Message Bubble + Actions */}
