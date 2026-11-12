@@ -4,7 +4,11 @@ import {
   Check,
   CheckCheck,
   CornerDownRight,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
   MessageSquare,
+  Paperclip,
   Quote,
   RefreshCw,
   Send,
@@ -20,6 +24,7 @@ import {
   sendClientChatMessage,
   subscribeToChatMessages,
   toggleMessageReaction,
+  uploadChatspaceMedia,
 } from '../services/clientChat'
 
 export default function ClientChat() {
@@ -35,6 +40,11 @@ export default function ClientChat() {
   const [replyingTo, setReplyingTo] = useState(null)
   const [justSentId, setJustSentId] = useState(null)
   const [reactionMenuMsgId, setReactionMenuMsgId] = useState(null)
+  const [contextMenu, setContextMenu] = useState(null) // { x, y, message }
+  const [wsConnected, setWsConnected] = useState(false)
+  const [attachedFiles, setAttachedFiles] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef(null)
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -58,40 +68,102 @@ export default function ClientChat() {
     const onBrandChanged = () => {
       loadMessages()
     }
+    const onWsStatus = (e) => {
+      if (e.detail?.connected !== undefined) {
+        setWsConnected(Boolean(e.detail.connected))
+      }
+    }
 
     window.addEventListener('orb:client-chat-updated', handleUpdate)
     window.addEventListener('orb:brand-changed', onBrandChanged)
+    window.addEventListener('orb:chatspace-ws-status', onWsStatus)
 
-    // Realtime subscription via Supabase Postgres
-    const channel = subscribeToChatMessages(brandName, () => {
+    // Realtime WebSocket & database sync
+    const unsubscribe = subscribeToChatMessages(brandName, () => {
       loadMessages()
     })
 
     return () => {
       window.removeEventListener('orb:client-chat-updated', handleUpdate)
       window.removeEventListener('orb:brand-changed', onBrandChanged)
-      if (channel) channel.unsubscribe?.()
+      window.removeEventListener('orb:chatspace-ws-status', onWsStatus)
+      if (typeof unsubscribe === 'function') unsubscribe()
     }
   }, [brandName, user])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, sending])
+    const closeMenu = () => {
+      setContextMenu(null)
+      setReactionMenuMsgId(null)
+    }
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeMenu()
+    })
+    return () => {
+      window.removeEventListener('click', closeMenu)
+    }
+  }, [])
+
+  const handleContextMenu = (e, msg) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Clamp coordinates so menu stays visible inside viewport
+    const menuWidth = 190
+    const menuHeight = 120
+    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10)
+    const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10)
+    setContextMenu({ x, y, message: msg })
+    setReactionMenuMsgId(null)
+  }
+
+  const handleFileUpload = async (event) => {
+    const files = Array.from(event.target.files || [])
+    if (!files.length) return
+
+    setUploading(true)
+    try {
+      const uploadedList = []
+      for (const file of files) {
+        if (file.size > 20 * 1024 * 1024) {
+          showToast(`File "${file.name}" exceeds 20MB limit`, 'error')
+          continue
+        }
+        const uploaded = await uploadChatspaceMedia(file, brandName)
+        uploadedList.push(uploaded)
+      }
+      setAttachedFiles((prev) => [...prev, ...uploadedList])
+      showToast(`${uploadedList.length} attachment${uploadedList.length === 1 ? '' : 's'} added`)
+    } catch (err) {
+      showToast(err.message || 'Failed to upload attachment', 'error')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const removeAttachment = (indexToRemove) => {
+    setAttachedFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove))
+  }
 
   const handleSend = async (e) => {
     e?.preventDefault()
-    if (!inputMessage.trim() || sending) return
+    if ((!inputMessage.trim() && attachedFiles.length === 0) || sending) return
 
     const text = inputMessage
     const currentReply = replyingTo
+    const mediaToSend = [...attachedFiles]
+
     setInputMessage('')
     setReplyingTo(null)
+    setAttachedFiles([])
     setSending(true)
 
     try {
       const sent = await sendClientChatMessage({
         brandName,
         content: text,
+        media: mediaToSend,
         currentUser: user,
         replyTo: currentReply,
       })
@@ -101,6 +173,7 @@ export default function ClientChat() {
       showToast(err.message || 'Failed to send message', 'error')
       setInputMessage(text)
       setReplyingTo(currentReply)
+      setAttachedFiles(mediaToSend)
     } finally {
       setSending(false)
       setTimeout(() => {
@@ -181,6 +254,10 @@ export default function ClientChat() {
               </h2>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
                 {brandName}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-200">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live WebSocket
               </span>
             </div>
             <p className="text-xs text-muted">
@@ -291,53 +368,100 @@ export default function ClientChat() {
                   )}
 
                   {/* Message Bubble */}
-                  <div className="relative group/bubble">
+                  <div
+                    className="relative group/bubble"
+                    onContextMenu={(e) => handleContextMenu(e, msg)}
+                  >
                     <div
-                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-2xs transition-all ${
+                      className={`cursor-context-menu select-text rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-2xs transition-all ${
                         fromClient
                           ? 'rounded-tr-xs bg-primary text-white selection:bg-white/20'
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
+
+                      {/* Attached Media Grid */}
+                      {Array.isArray(msg.media) && msg.media.length > 0 && (
+                        <div className={`grid gap-2 ${msg.content ? 'mt-2.5' : ''} ${msg.media.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                          {msg.media.map((file, fIdx) => (
+                            <div key={file.id || fIdx} className="overflow-hidden rounded-xl border border-black/10 bg-black/5">
+                              {file.isImage || file.type?.startsWith('image/') ? (
+                                <a
+                                  href={file.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block overflow-hidden group/img relative"
+                                >
+                                  <img
+                                    src={file.url}
+                                    alt={file.name || 'Attachment'}
+                                    className="max-h-56 w-full object-cover transition-transform duration-200 group-hover/img:scale-105"
+                                  />
+                                </a>
+                              ) : (
+                                <a
+                                  href={file.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  download={file.name}
+                                  className="flex items-center gap-2.5 p-2.5 hover:bg-black/10 transition"
+                                >
+                                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/80 text-ink shadow-2xs">
+                                    <FileText size={16} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-bold leading-tight">{file.name}</p>
+                                    <p className="text-[10px] opacity-70">
+                                      {file.size ? `${(file.size / 1024).toFixed(1)} KB` : 'File'}
+                                    </p>
+                                  </div>
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Floating Hover Action Bar (Reply & Reaction) */}
+                    {/* Integrated Quick Action Button on Hover (Clean & Accessible) */}
                     <div
-                      className={`absolute top-1 hidden group-hover/bubble:flex items-center gap-1 bg-white border border-slate-200 shadow-md rounded-lg p-1 z-10 ${
-                        fromClient ? '-left-20' : '-right-20'
-                      }`}
+                      className={`absolute -top-3.5 ${
+                        fromClient ? 'left-2' : 'right-2'
+                      } hidden group-hover/bubble:flex items-center gap-0.5 bg-white border border-slate-200 shadow-md rounded-full px-1.5 py-0.5 z-10 animate-in fade-in zoom-in-95`}
                     >
                       {/* React Button */}
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={(e) => {
+                          e.stopPropagation()
                           setReactionMenuMsgId(reactionMenuMsgId === msg.id ? null : msg.id)
-                        }
-                        className="p-1 rounded text-slate-500 hover:bg-slate-100 hover:text-purple"
+                        }}
+                        className="p-1 rounded-full text-slate-500 hover:bg-slate-100 hover:text-purple transition"
                         title="React with emoji"
                       >
-                        <Smile size={14} />
+                        <Smile size={13} />
                       </button>
 
                       {/* Quote Reply Button */}
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation()
                           setReplyingTo(msg)
                           inputRef.current?.focus()
                         }}
-                        className="p-1 rounded text-slate-500 hover:bg-slate-100 hover:text-purple"
+                        className="p-1 rounded-full text-slate-500 hover:bg-slate-100 hover:text-purple transition"
                         title="Quote reply"
                       >
-                        <CornerDownRight size={14} />
+                        <CornerDownRight size={13} />
                       </button>
                     </div>
 
-                    {/* Emoji Picker Popup (4 Set Emojis: 👍, ❤️, 🚀, 👀) */}
+                    {/* Emoji Picker Popup */}
                     {reactionMenuMsgId === msg.id && (
                       <div
-                        className={`absolute -top-10 flex items-center gap-1.5 bg-white border border-slate-200 shadow-lg rounded-full px-2.5 py-1 z-20 animate-in fade-in zoom-in-95 ${
+                        className={`absolute -top-11 flex items-center gap-1.5 bg-white border border-slate-200 shadow-lg rounded-full px-2.5 py-1 z-20 animate-in fade-in zoom-in-95 ${
                           fromClient ? 'right-0' : 'left-0'
                         }`}
                       >
@@ -345,7 +469,10 @@ export default function ClientChat() {
                           <button
                             key={emoji}
                             type="button"
-                            onClick={() => handleReact(msg.id, emoji)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleReact(msg.id, emoji)
+                            }}
                             className="text-base hover:scale-125 transition-transform px-1 py-0.5 rounded-full hover:bg-slate-100"
                           >
                             {emoji}
@@ -418,8 +545,68 @@ export default function ClientChat() {
 
       {/* Composer Area */}
       <div className="border-t border-slate-200 bg-white p-4">
+        {/* Attachment preview bar if attachments exist */}
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {attachedFiles.map((file, idx) => (
+              <div
+                key={file.id || idx}
+                className="group relative flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 pr-7 text-xs shadow-2xs"
+              >
+                {file.isImage || file.type?.startsWith('image/') ? (
+                  <img
+                    src={file.url}
+                    alt={file.name}
+                    className="h-8 w-8 rounded-lg object-cover border border-slate-200"
+                  />
+                ) : (
+                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-white text-slate-700 border border-slate-200">
+                    <FileText size={16} />
+                  </div>
+                )}
+                <div className="max-w-[140px] truncate">
+                  <p className="truncate font-semibold text-slate-800">{file.name}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {file.size ? `${(file.size / 1024).toFixed(1)} KB` : 'Attached'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(idx)}
+                  className="absolute right-1.5 top-2 rounded-full p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  title="Remove attachment"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf,.doc,.docx,.txt,.csv"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
+
         {/* Input box */}
-        <form onSubmit={handleSend} className="relative flex items-center gap-2">
+        <form onSubmit={handleSend} className="relative flex items-end gap-2">
+          {/* Attach file button */}
+          <button
+            type="button"
+            disabled={uploading || sending}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-2xs hover:border-purple/40 hover:bg-slate-50 hover:text-purple transition disabled:opacity-40"
+            title="Attach image or document (Supabase Storage)"
+            aria-label="Attach file"
+          >
+            {uploading ? <Loader2 size={18} className="animate-spin text-purple" /> : <Paperclip size={18} />}
+          </button>
+
           <textarea
             ref={inputRef}
             rows={2}
@@ -429,24 +616,82 @@ export default function ClientChat() {
             placeholder={
               replyingTo
                 ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
-                : `Message our team about ${brandName}...`
+                : `Message our team about ${brandName}... (paste text, attach images or docs)`
             }
-            className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm focus:border-purple focus:outline-none focus:ring-2 focus:ring-purple/10"
+            className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-purple focus:outline-none focus:ring-2 focus:ring-purple/10"
           />
+
           <button
             type="submit"
-            disabled={!inputMessage.trim() || sending}
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm transition hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={(!inputMessage.trim() && attachedFiles.length === 0) || sending || uploading}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm transition hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Send message"
           >
             <Send size={18} className={sending ? 'translate-x-1 opacity-50' : ''} />
           </button>
         </form>
         <div className="flex justify-between items-center mt-1.5 px-1 text-[11px] text-slate-400">
-          <span>Press Enter to send, Shift + Enter for new line</span>
-          <span>Status shows delivery & read states in real-time</span>
+          <span>Press Enter to send, Shift + Enter for new line • Attachments stored in Supabase</span>
+          <span>Right-click any message to react or reply</span>
         </div>
       </div>
+
+      {/* Right-Click Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[200px] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl animate-in fade-in zoom-in-95"
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Reaction Quick Bar inside Context Menu */}
+          <div className="flex items-center justify-between border-b border-slate-100 px-2 py-1.5 mb-1">
+            <span className="text-[11px] font-bold text-slate-400">React:</span>
+            <div className="flex items-center gap-1">
+              {PRESET_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => {
+                    handleReact(contextMenu.message.id, emoji)
+                    setContextMenu(null)
+                  }}
+                  className="rounded-full p-1 text-base hover:scale-125 transition-transform hover:bg-slate-100"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Reply Option */}
+          <button
+            type="button"
+            onClick={() => {
+              setReplyingTo(contextMenu.message)
+              setContextMenu(null)
+              inputRef.current?.focus()
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-purple/10 hover:text-purple transition"
+          >
+            <CornerDownRight size={14} className="text-purple" />
+            <span>Reply to message</span>
+          </button>
+
+          {/* Copy Text Option */}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard?.writeText(contextMenu.message.content)
+              showToast('Copied to clipboard')
+              setContextMenu(null)
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
+          >
+            <Quote size={14} className="text-slate-400" />
+            <span>Copy message</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

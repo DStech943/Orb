@@ -13,6 +13,7 @@ from app.api.message_templates import router as message_templates_router
 from app.api.knowledge import router as knowledge_router
 from app.api.pipelines import router as pipelines_router
 from app.api.shopify import router as shopify_router
+from app.api.chatspace import router as chatspace_router
 from app.config import get_settings
 from app.db import create_pool
 from app.scraper.fetcher import Fetcher
@@ -58,6 +59,7 @@ app.include_router(message_templates_router)
 app.include_router(knowledge_router)
 app.include_router(pipelines_router)
 app.include_router(shopify_router)
+app.include_router(chatspace_router)
 
 
 @app.get("/healthz")

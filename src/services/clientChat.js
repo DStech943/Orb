@@ -1,24 +1,263 @@
 /**
  * Chatspace Service
- * Supports Supabase Postgres real-time and persistence with local offline cache.
+ * Supports Real-time WebSocket connection to Railway / FastAPI backend,
+ * with Supabase Postgres persistence and local caching.
  * Features:
+ *  - Real-time WebSocket bi-directional delivery
  *  - Sent / Read / Failed delivery statuses
  *  - Timestamps
  *  - Quoted replies (replyToId & replyToSnippet)
  *  - 4 Preset Emoji Reactions (👍, ❤️, 🚀, 👀)
- *  - Clean real-time messaging
  */
 
 import { supabase } from '../lib/supabase'
 import { activeBrandName } from './orbApi'
 
 const STORAGE_PREFIX = 'orb_chatspace_'
+export const CHATSPACE_BUCKET = 'orb_chatspace_attachments'
 
 export const PRESET_REACTIONS = ['👍', '❤️', '🚀', '👀']
+
+/**
+ * Upload a media file (image, document, PDF) to Supabase Storage bucket.
+ * Falls back to Base64 data URL for offline / local mode.
+ */
+export const uploadChatspaceMedia = async (file, brandName = activeBrandName()) => {
+  if (!file) throw new Error('No file provided')
+
+  const brand = (brandName || 'default_brand').replace(/[^a-zA-Z0-9-_]/g, '_').toLowerCase()
+  const ext = file.name?.split('.').pop() || 'bin'
+  const uniqueName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`
+  const filePath = `${brand}/${uniqueName}`
+
+  // 1. Try Supabase Storage bucket
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.storage
+        .from(CHATSPACE_BUCKET)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+        })
+
+      if (!error && data?.path) {
+        const { data: publicUrlData } = supabase.storage
+          .from(CHATSPACE_BUCKET)
+          .getPublicUrl(data.path)
+
+        return {
+          id: uniqueName,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          url: publicUrlData?.publicUrl,
+          path: data.path,
+          bucket: CHATSPACE_BUCKET,
+          isImage: file.type?.startsWith('image/'),
+        }
+      }
+    } catch (err) {
+      console.warn('Could not upload to Supabase storage bucket:', err)
+    }
+  }
+
+  // 2. Client-side base64 fallback (for preview & offline resiliency)
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      resolve({
+        id: uniqueName,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        url: reader.result,
+        path: filePath,
+        bucket: 'local',
+        isImage: file.type?.startsWith('image/'),
+      })
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+/**
+ * Determine the WebSocket URL corresponding to the current API or local environment
+ */
+export const getChatspaceWebSocketUrl = (brandName = activeBrandName()) => {
+  const configuredApiUrl = import.meta.env.VITE_ORB_API_URL
+  const safeBrand = encodeURIComponent(brandName || 'default_brand')
+
+  if (configuredApiUrl) {
+    const wsUrl = configuredApiUrl.replace(/^http/, 'ws').replace(/\/$/, '')
+    return `${wsUrl}/ws/chatspace/${safeBrand}`
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  // When running Vite dev server locally on port 5173, backend is on 8000
+  if (import.meta.env.DEV && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    return `ws://127.0.0.1:8000/ws/chatspace/${safeBrand}`
+  }
+
+  return `${protocol}//${window.location.host}/ws/chatspace/${safeBrand}`
+}
+
+// WebSocket Connection Singleton per brand
+class ChatspaceWebSocketClient {
+  constructor() {
+    this.ws = null
+    this.brandName = null
+    this.listeners = new Set()
+    this.reconnectTimer = null
+    this.heartbeatTimer = null
+  }
+
+  connect(brandName) {
+    if (!brandName) return
+    if (this.brandName === brandName && this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return
+    }
+
+    this.disconnect()
+    this.brandName = brandName
+    const url = getChatspaceWebSocketUrl(brandName)
+
+    try {
+      this.ws = new WebSocket(url)
+
+      this.ws.onopen = () => {
+        // Start heartbeat ping every 25s
+        clearInterval(this.heartbeatTimer)
+        this.heartbeatTimer = setInterval(() => {
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'ping' }))
+          }
+        }, 25000)
+        this.notifyStatus(true)
+      }
+
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          this.handleIncoming(data)
+        } catch {}
+      }
+
+      this.ws.onclose = () => {
+        clearInterval(this.heartbeatTimer)
+        this.notifyStatus(false)
+        // Automatic reconnection attempt after 3s
+        clearTimeout(this.reconnectTimer)
+        this.reconnectTimer = setTimeout(() => {
+          if (this.brandName === brandName) {
+            this.connect(brandName)
+          }
+        }, 3000)
+      }
+
+      this.ws.onerror = () => {
+        this.notifyStatus(false)
+      }
+    } catch {
+      this.notifyStatus(false)
+    }
+  }
+
+  disconnect() {
+    clearTimeout(this.reconnectTimer)
+    clearInterval(this.heartbeatTimer)
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.onmessage = null
+      this.ws.close()
+      this.ws = null
+    }
+    this.notifyStatus(false)
+  }
+
+  notifyStatus(connected) {
+    window.dispatchEvent(
+      new CustomEvent('orb:chatspace-ws-status', {
+        detail: { brand: this.brandName, connected },
+      })
+    )
+  }
+
+  handleIncoming(data) {
+    if (!data || data.type === 'pong' || data.type === 'connection_ack') return
+
+    const brand = this.brandName || 'default_brand'
+    const key = `${STORAGE_PREFIX}${brand}`
+
+    let list = []
+    try {
+      const raw = window.localStorage.getItem(key)
+      list = raw ? JSON.parse(raw) : []
+    } catch {
+      list = []
+    }
+
+    if (data.type === 'chat_message') {
+      const existsIndex = list.findIndex((m) => m.id === data.id)
+      const formatted = {
+        id: data.id,
+        sender: data.sender,
+        content: data.content,
+        media: data.media || [],
+        status: data.status || 'read',
+        replyToId: data.replyToId || null,
+        replyToSnippet: data.replyToSnippet || null,
+        reactions: data.reactions || {},
+        createdAt: data.createdAt,
+      }
+
+      if (existsIndex >= 0) {
+        list[existsIndex] = formatted
+      } else {
+        list.push(formatted)
+      }
+      try {
+        window.localStorage.setItem(key, JSON.stringify(list))
+      } catch {}
+    } else if (data.type === 'reaction_update') {
+      list = list.map((m) => (m.id === data.messageId ? { ...m, reactions: data.reactions } : m))
+      try {
+        window.localStorage.setItem(key, JSON.stringify(list))
+      } catch {}
+    } else if (data.type === 'status_update') {
+      list = list.map((m) => (m.id === data.messageId ? { ...m, status: data.status } : m))
+      try {
+        window.localStorage.setItem(key, JSON.stringify(list))
+      } catch {}
+    }
+
+    this.listeners.forEach((fn) => fn(data))
+    window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand, event: data } }))
+  }
+
+  send(payload) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(payload))
+      return true
+    }
+    return false
+  }
+
+  subscribe(callback) {
+    this.listeners.add(callback)
+    return () => this.listeners.delete(callback)
+  }
+}
+
+export const wsClient = new ChatspaceWebSocketClient()
 
 export const getClientChatMessages = async (brandName = activeBrandName(), currentUser) => {
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
+
+  // Ensure WebSocket is connected for active brand
+  wsClient.connect(brand)
 
   // 1. Try Supabase Postgres
   if (supabase) {
@@ -46,6 +285,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
               .toUpperCase(),
           },
           content: row.content,
+          media: Array.isArray(row.media) ? row.media : typeof row.media === 'string' ? JSON.parse(row.media) : [],
           status: row.status || 'read',
           replyToId: row.reply_to_id || null,
           replyToSnippet: row.reply_to_snippet || null,
@@ -79,10 +319,13 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
 export const sendClientChatMessage = async ({
   brandName = activeBrandName(),
   content,
+  media = [],
   currentUser,
   replyTo = null,
 }) => {
-  if (!content || !content.trim()) throw new Error('Message cannot be empty')
+  if ((!content || !content.trim()) && (!media || media.length === 0)) {
+    throw new Error('Message cannot be empty')
+  }
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
 
@@ -106,7 +349,8 @@ export const sendClientChatMessage = async ({
   const newMessage = {
     id: generatedId,
     sender: userSender,
-    content: content.trim(),
+    content: (content || '').trim(),
+    media: media || [],
     createdAt: new Date().toISOString(),
     status: 'sent',
     replyToId: replyTo?.id || null,
@@ -114,7 +358,14 @@ export const sendClientChatMessage = async ({
     reactions: {},
   }
 
-  // Write to Supabase Postgres
+  // 1. Send via WebSocket for real-time instantaneous delivery to all connected clients
+  const sentViaWs = wsClient.send({
+    type: 'chat_message',
+    ...newMessage,
+    brandName: brand,
+  })
+
+  // 2. Write to Supabase Postgres as persistent store
   if (supabase) {
     try {
       await supabase
@@ -128,6 +379,7 @@ export const sendClientChatMessage = async ({
           sender_role: userSender.role,
           sender_avatar: userSender.avatar,
           content: newMessage.content,
+          media: newMessage.media,
           status: 'sent',
           reply_to_id: newMessage.replyToId,
           reply_to_snippet: newMessage.replyToSnippet,
@@ -139,7 +391,7 @@ export const sendClientChatMessage = async ({
     }
   }
 
-  // Update local cache
+  // 3. Update local cache
   let list = []
   try {
     const raw = window.localStorage.getItem(key)
@@ -155,7 +407,7 @@ export const sendClientChatMessage = async ({
 
   window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
 
-  // Mark sent message as read after acknowledgment
+  // Mark sent message as read after short confirmation
   setTimeout(() => {
     try {
       const rawNow = window.localStorage.getItem(key)
@@ -188,6 +440,7 @@ export const toggleMessageReaction = async ({
     return
   }
 
+  let nextReactions = {}
   const updated = messages.map((msg) => {
     if (msg.id !== messageId) return msg
     const currentReactions = { ...(msg.reactions || {}) }
@@ -199,6 +452,7 @@ export const toggleMessageReaction = async ({
     } else {
       currentReactions[emoji] = [...userList, userName]
     }
+    nextReactions = currentReactions
     return { ...msg, reactions: currentReactions }
   })
 
@@ -207,17 +461,22 @@ export const toggleMessageReaction = async ({
     window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
   } catch {}
 
+  // Broadcast reaction over WebSocket
+  wsClient.send({
+    type: 'reaction_toggle',
+    messageId,
+    emoji,
+    reactions: nextReactions,
+  })
+
   // Update Supabase if available
   if (supabase) {
     try {
-      const target = updated.find((m) => m.id === messageId)
-      if (target) {
-        await supabase
-          .schema('cx_copilot')
-          .from('orb_client_chat_messages')
-          .update({ reactions: target.reactions })
-          .eq('id', messageId)
-      }
+      await supabase
+        .schema('cx_copilot')
+        .from('orb_client_chat_messages')
+        .update({ reactions: nextReactions })
+        .eq('id', messageId)
     } catch {}
   }
 
@@ -240,29 +499,50 @@ export const updateMessageStatus = async ({
     window.localStorage.setItem(key, JSON.stringify(updated))
     window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
   } catch {}
+
+  // Broadcast status update over WebSocket
+  wsClient.send({
+    type: 'status_update',
+    messageId,
+    status,
+  })
 }
 
 export const subscribeToChatMessages = (brandName, onNewMessage) => {
-  if (!supabase || !brandName) return null
-  try {
-    const channel = supabase
-      .channel(`chatspace:${brandName}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'cx_copilot',
-          table: 'orb_client_chat_messages',
-          filter: `brand_name=eq.${brandName}`,
-        },
-        (payload) => {
-          onNewMessage?.(payload)
-        }
-      )
-      .subscribe()
-    return channel
-  } catch {
-    return null
+  if (!brandName) return () => {}
+
+  // 1. Connect WebSocket
+  wsClient.connect(brandName)
+  const unsubscribeWs = wsClient.subscribe((data) => {
+    onNewMessage?.(data)
+  })
+
+  // 2. Also listen to Supabase Postgres Realtime if enabled
+  let supabaseChannel = null
+  if (supabase) {
+    try {
+      supabaseChannel = supabase
+        .channel(`chatspace:${brandName}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'cx_copilot',
+            table: 'orb_client_chat_messages',
+            filter: `brand_name=eq.${brandName}`,
+          },
+          (payload) => {
+            onNewMessage?.(payload)
+          }
+        )
+        .subscribe()
+    } catch {}
+  }
+
+  return () => {
+    unsubscribeWs?.()
+    if (supabaseChannel) supabaseChannel.unsubscribe?.()
   }
 }
+
 
