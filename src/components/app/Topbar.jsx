@@ -297,7 +297,7 @@ export default function Topbar({ onMenu }) {
               aria-expanded={open}
               onClick={toggle}
             >
-              <Avatar name={user?.name} />
+              <Avatar name={user?.name} src={user?.avatar} />
               <ChevronDown size={15} />
             </button>
           )}

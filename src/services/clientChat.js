@@ -12,6 +12,7 @@
 
 import { supabase } from '../lib/supabase'
 import { activeBrandId, activeBrandName } from './orbApi'
+import { avatarUrlFromKey } from './avatar'
 
 const STORAGE_PREFIX = 'orb_chatspace_'
 export const CHATSPACE_BUCKET = 'orb_chatspace_attachments'
@@ -203,7 +204,7 @@ class ChatspaceWebSocketClient {
       const formatted = {
         id: data.id,
         brandId: data.brandId || data.brand_id || null,
-        sender: data.sender,
+        sender: { ...data.sender, avatar: avatarUrlFromKey(data.sender?.avatar) },
         content: data.content,
         media: data.media || [],
         mentions: data.mentions || [],
@@ -279,7 +280,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
             id: row.sender_id || 'unknown',
             name: row.sender_name,
             role: row.sender_role,
-            avatar: row.sender_avatar,
+            avatar: avatarUrlFromKey(row.sender_avatar),
             initials: (row.sender_name || 'U')
               .split(' ')
               .map((n) => n[0])

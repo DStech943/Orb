@@ -1,4 +1,5 @@
 import { supabase } from "../lib/supabase";
+import { avatarUrlFromKey } from "./avatar";
 
 function requireSupabase() {
   if (!supabase)
@@ -19,17 +20,29 @@ function fallbackName(user) {
 
 async function appUser(authUser) {
   if (!authUser) return null;
-  const { data, error } = await requireSupabase()
+  const client = requireSupabase();
+  const { data, error } = await client
     .schema("cx_copilot")
     .from("orb_profiles")
     .select("full_name, role")
     .eq("id", authUser.id)
     .maybeSingle();
+  const email = String(authUser.email || "").trim().toLowerCase();
+  let avatarKey = "";
+  if (email) {
+    const [adminResult, assignmentResult] = await Promise.all([
+      client.schema("cx_copilot").from("admins").select("avatar_key").eq("email", email).maybeSingle(),
+      client.schema("cx_copilot").from("brand_assignments").select("avatar_key").eq("email", email).order("is_online", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    avatarKey = String(adminResult.data?.avatar_key || assignmentResult.data?.avatar_key || authUser.user_metadata?.avatar_url || "").trim();
+  }
   return {
     id: authUser.id,
     email: authUser.email || "",
     name: data?.full_name || fallbackName(authUser),
     role: data?.role || "client",
+    avatarKey,
+    avatar: avatarUrlFromKey(avatarKey),
     provider: authUser.app_metadata?.provider || "email",
     profilePending: Boolean(error),
   };

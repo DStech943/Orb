@@ -717,7 +717,7 @@ export default function ClientChat() {
                     duration: 0.28,
                     ease: [0.16, 1, 0.3, 1],
                   }}
-                  className={`group relative flex gap-3.5 transition-all duration-300 ease-out ${
+                  className={`group relative flex items-start gap-3.5 transition-all duration-300 ease-out ${
                     fromClient ? 'flex-row-reverse justify-start' : 'flex-row justify-start'
                   } ${isJustSent ? 'translate-y-2 opacity-90 scale-[0.99]' : 'translate-y-0 opacity-100 scale-100'} ${
                     searchMatchIds.includes(msg.id)
@@ -728,7 +728,7 @@ export default function ClientChat() {
                   }`}
                 >
                   {/* Profile Pic / Avatar */}
-                <div className="shrink-0 pt-0.5">
+                <div className="shrink-0 pt-6">
                   {msg.sender.avatar ? (
                     <img
                       src={msg.sender.avatar}
