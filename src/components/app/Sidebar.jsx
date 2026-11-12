@@ -14,13 +14,17 @@ import {
   X,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../../context/AuthContext'
 import { listBrands } from '../../services/brands'
-import { getUnreadChatCount, markChatspaceAsRead, wsClient } from '../../services/clientChat'
+import { getChatspaceUnreadStatus, getUnreadChatCount, markChatspaceAsRead, wsClient } from '../../services/clientChat'
 import { activeBrandName } from '../../services/orbApi'
 
 export default function Sidebar({ mobile = false, onClose, counts = {} }) {
+  const { user } = useAuth() || {}
   const [agentName, setAgentName] = useState('AI')
   const [chatUnread, setChatUnread] = useState(0)
+  const [chatMentioned, setChatMentioned] = useState(false)
+  const [chatMentionCount, setChatMentionCount] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -47,7 +51,10 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
     const updateUnread = () => {
       const active = activeBrandName()
       if (active) wsClient.connect(active)
-      setChatUnread(getUnreadChatCount(active))
+      const status = getChatspaceUnreadStatus(active, user)
+      setChatUnread(status.unreadCount)
+      setChatMentioned(status.hasMention)
+      setChatMentionCount(status.mentionCount)
     }
     updateUnread()
 
@@ -59,7 +66,7 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
       window.removeEventListener('orb:chatspace-unread-changed', updateUnread)
       window.removeEventListener('orb:brand-changed', updateUnread)
     }
-  }, [])
+  }, [user])
 
   const links = [
     { to: '/app', label: 'Overview', icon: LayoutGrid, end: true },
@@ -96,6 +103,7 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
           const isChatspace = count === 'chatspace'
           const badgeValue = isChatspace ? chatUnread : counts[count]
           const hasUnreadPing = isChatspace && chatUnread > 0
+          const hasTaggedPing = isChatspace && chatMentioned
 
           return (
             <NavLink
@@ -117,21 +125,40 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
                     <span className="relative inline-flex h-2.5 w-2.5 rounded-full border border-white bg-blue-500" />
                   </span>
                 )}
+                {hasTaggedPing && (
+                  <span
+                    className="absolute -bottom-1.5 -left-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-600 text-[9px] font-black text-white ring-2 ring-white shadow-xs animate-bounce"
+                    title="You were tagged in Chatspace"
+                  >
+                    @
+                  </span>
+                )}
               </div>
               <span className="min-w-0 truncate">{label}</span>
-              {badgeValue > 0 && (
-                <span
-                  className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                    isChatspace
-                      ? 'bg-blue-500 text-white'
-                      : isNaN(badgeValue)
-                      ? ''
-                      : 'bg-white/25'
-                  }`}
-                >
-                  {badgeValue}
-                </span>
-              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                {hasTaggedPing && (
+                  <span
+                    className="flex items-center gap-0.5 rounded-full bg-blue-600 px-1.5 py-0.2 text-[10px] font-black text-white shadow-xs"
+                    title="You were tagged in Chatspace"
+                  >
+                    <span>@</span>
+                    {chatMentionCount > 1 && <span>{chatMentionCount}</span>}
+                  </span>
+                )}
+                {badgeValue > 0 && (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      isChatspace
+                        ? 'bg-blue-500 text-white'
+                        : isNaN(badgeValue)
+                        ? ''
+                        : 'bg-white/25'
+                    }`}
+                  >
+                    {badgeValue}
+                  </span>
+                )}
+              </div>
             </NavLink>
           )
         })}

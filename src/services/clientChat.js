@@ -542,23 +542,66 @@ export const updateMessageStatus = async ({
   })
 }
 
-export const getUnreadChatCount = (brandName = activeBrandName(), currentUserId) => {
+export const getChatspaceUnreadStatus = (brandName = activeBrandName(), currentUser) => {
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
   const lastReadTime = window.localStorage.getItem(`orb_chatspace_last_read:${brand}`) || '0'
+  const myId = currentUser?.id
+  const myName = (currentUser?.name || currentUser?.email?.split('@')[0] || '').toLowerCase()
+  const myFirstName = myName ? myName.split(' ')[0] : ''
+
   try {
     const raw = window.localStorage.getItem(key)
-    if (!raw) return 0
+    if (!raw) return { unreadCount: 0, hasMention: false, mentionCount: 0 }
     const list = JSON.parse(raw)
-    if (!Array.isArray(list)) return 0
-    return list.filter((m) => {
-      const isFromMe = m.sender?.id === currentUserId || m.sender?.role === 'client'
-      const isNewerThanRead = new Date(m.createdAt).getTime() > Number(lastReadTime)
-      return !isFromMe && isNewerThanRead
-    }).length
+    if (!Array.isArray(list)) return { unreadCount: 0, hasMention: false, mentionCount: 0 }
+
+    let unreadCount = 0
+    let mentionCount = 0
+
+    list.forEach((m) => {
+      const isFromMe = myId
+        ? m.sender?.id === myId
+        : myName && m.sender?.name
+        ? m.sender.name.toLowerCase() === myName
+        : false
+      const msgTime = new Date(m.createdAt).getTime()
+      const isNewerThanRead = msgTime > Number(lastReadTime)
+
+      if (!isFromMe && isNewerThanRead) {
+        unreadCount += 1
+
+        const mentions = Array.isArray(m.mentions) ? m.mentions.map((x) => String(x).toLowerCase()) : []
+        const content = (m.content || '').toLowerCase()
+
+        const isTagged =
+          mentions.includes('all') ||
+          mentions.includes('team') ||
+          (myName && mentions.some((name) => myName.includes(name) || name.includes(myName))) ||
+          (myFirstName && mentions.some((name) => name === myFirstName)) ||
+          content.includes('@all') ||
+          content.includes('@team') ||
+          (myName && content.includes(`@${myName}`)) ||
+          (myFirstName && content.includes(`@${myFirstName}`))
+
+        if (isTagged) {
+          mentionCount += 1
+        }
+      }
+    })
+
+    return {
+      unreadCount,
+      hasMention: mentionCount > 0,
+      mentionCount,
+    }
   } catch {
-    return 0
+    return { unreadCount: 0, hasMention: false, mentionCount: 0 }
   }
+}
+
+export const getUnreadChatCount = (brandName = activeBrandName(), currentUser) => {
+  return getChatspaceUnreadStatus(brandName, currentUser).unreadCount
 }
 
 export const markChatspaceAsRead = (brandName = activeBrandName()) => {

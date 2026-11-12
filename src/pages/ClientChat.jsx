@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
+  ArrowDown,
   Check,
   CheckCheck,
   CornerDownRight,
@@ -10,11 +11,12 @@ import {
   MessageSquare,
   Paperclip,
   Quote,
-  RefreshCw,
+  Search,
   Send,
   Smile,
   X,
 } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { activeBrandName } from '../services/orbApi'
@@ -54,10 +56,32 @@ export default function ClientChat() {
   const [wsConnected, setWsConnected] = useState(false)
   const [attachedFiles, setAttachedFiles] = useState([])
   const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showScrollBottom, setShowScrollBottom] = useState(false)
 
+  const fileInputRef = useRef(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const scrollContainerRef = useRef(null)
+  const searchInputRef = useRef(null)
+  const isFirstLoad = useRef(true)
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setShowScrollBottom(distanceFromBottom > 160)
+  }
+
+  const scrollToBottom = (smooth = true) => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto',
+      })
+    }
+  }
 
   const loadMessages = async () => {
     try {
@@ -67,6 +91,35 @@ export default function ClientChat() {
       setLoading(false)
     }
   }
+
+  const displayedMessages = useMemo(() => {
+    const q = (searchQuery || '').trim().toLowerCase()
+    if (!q) return messages
+
+    return messages.filter((m) => {
+      const content = (m.content || '').toLowerCase()
+      const senderName = (m.sender?.name || '').toLowerCase()
+      const mediaMatch = Array.isArray(m.media) && m.media.some((f) => (f.name || '').toLowerCase().includes(q))
+      return content.includes(q) || senderName.includes(q) || mediaMatch
+    })
+  }, [messages, searchQuery])
+
+  useEffect(() => {
+    if (!loading && messages.length > 0) {
+      if (isFirstLoad.current) {
+        scrollToBottom(false)
+        isFirstLoad.current = false
+      } else {
+        const el = scrollContainerRef.current
+        if (el) {
+          const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+          if (distanceFromBottom < 220) {
+            scrollToBottom(true)
+          }
+        }
+      }
+    }
+  }, [messages.length, loading])
 
   useEffect(() => {
     setLoading(true)
@@ -117,9 +170,23 @@ export default function ClientChat() {
     const list = [...PRESET_MENTIONS]
     const seenNames = new Set(list.map((m) => m.handle.toLowerCase()))
 
+    // Always include current logged-in user in mention targets
+    if (currentUserName && currentUserName !== 'You' && !seenNames.has(currentUserName.toLowerCase())) {
+      seenNames.add(currentUserName.toLowerCase())
+      list.push({
+        id: `user-${currentUserName}`,
+        handle: currentUserName,
+        label: `@${currentUserName}`,
+        role: user?.role === 'admin' ? 'Admin' : 'You',
+        description: 'Mention yourself / account',
+        avatar: user?.avatar,
+        initials: currentUserName.slice(0, 2).toUpperCase(),
+      })
+    }
+
     messages.forEach((m) => {
       const name = m.sender?.name?.trim()
-      if (name && !seenNames.has(name.toLowerCase()) && name !== 'You' && name !== currentUserName) {
+      if (name && !seenNames.has(name.toLowerCase()) && name !== 'You') {
         seenNames.add(name.toLowerCase())
         list.push({
           id: `member-${name}`,
@@ -131,10 +198,26 @@ export default function ClientChat() {
           initials: m.sender.initials || name.slice(0, 2).toUpperCase(),
         })
       }
+      if (Array.isArray(m.mentions)) {
+        m.mentions.forEach((mentionName) => {
+          const clean = String(mentionName || '').trim()
+          if (clean && !seenNames.has(clean.toLowerCase())) {
+            seenNames.add(clean.toLowerCase())
+            list.push({
+              id: `mention-${clean}`,
+              handle: clean,
+              label: `@${clean}`,
+              role: 'Member',
+              description: `Mention ${clean}`,
+              initials: clean.slice(0, 2).toUpperCase(),
+            })
+          }
+        })
+      }
     })
 
     return list
-  }, [messages, currentUserName])
+  }, [messages, currentUserName, user])
 
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
@@ -154,7 +237,7 @@ export default function ClientChat() {
     )
   }, [mentionTargets, mentionMenuOpen, mentionQuery])
 
-  // Build comprehensive mention regex supporting full names (e.g. @Parthavi Gaikwad)
+  // Build comprehensive mention regex supporting full names and preventing greedy word matching
   const buildMentionRegex = useMemo(() => {
     return (explicitMentions = []) => {
       const allKnown = new Set([
@@ -168,18 +251,16 @@ export default function ClientChat() {
         .sort((a, b) => b.length - a.length)
         .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
-      const knownPattern = sortedKnown.length > 0 ? `@(?:${sortedKnown.join('|')})` : ''
-
-      // Multi-word capitalized names: @FirstName LastName (e.g. @Parthavi Gaikwad)
-      const capitalizedMultiWord = `@[A-Z][a-zA-Z0-9_]*(?:\\s+[A-Z][a-zA-Z0-9_]*)+`
+      // Exact match for known multi-word & single-word handles up to word boundary
+      const knownPattern = sortedKnown.length > 0 ? `@(?:${sortedKnown.join('|')})(?![\\w])` : ''
 
       // Names with parenthetical roles: @Name (Role) (e.g. @Sarah (Support Lead))
       const withParentheses = `@[a-zA-Z0-9_]+(?:\\s+[a-zA-Z0-9_]+)*\\s*\\([^\\)]+\\)`
 
-      // Single word mentions: @all, @team, etc.
+      // Single word mentions: @all, @team, etc. (never crosses spaces)
       const singleWord = `@[a-zA-Z0-9_]+`
 
-      const patterns = [knownPattern, withParentheses, capitalizedMultiWord, singleWord].filter(Boolean)
+      const patterns = [knownPattern, withParentheses, singleWord].filter(Boolean)
 
       return new RegExp(`(${patterns.join('|')})`, 'gi')
     }
@@ -310,6 +391,7 @@ export default function ClientChat() {
       })
       setJustSentId(sent.id)
       await loadMessages()
+      setTimeout(() => scrollToBottom(true), 40)
     } catch (err) {
       showToast(err.message || 'Failed to send message', 'error')
       setInputMessage(text)
@@ -404,6 +486,8 @@ export default function ClientChat() {
     if (!content) return null
     const mentionRegex = buildMentionRegex(explicitMentions)
     const parts = content.split(mentionRegex)
+    const query = (searchQuery || '').trim()
+    const queryRegex = query ? new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi') : null
 
     return (
       <p className="whitespace-pre-wrap leading-relaxed">
@@ -422,6 +506,24 @@ export default function ClientChat() {
               </span>
             )
           }
+
+          if (queryRegex && part) {
+            const subParts = part.split(queryRegex)
+            return (
+              <React.Fragment key={i}>
+                {subParts.map((sub, j) =>
+                  sub.toLowerCase() === query.toLowerCase() ? (
+                    <mark key={j} className="rounded-xs bg-amber-200/95 text-slate-900 px-0.5 font-bold shadow-2xs">
+                      {sub}
+                    </mark>
+                  ) : (
+                    sub
+                  )
+                )}
+              </React.Fragment>
+            )
+          }
+
           return part
         })}
       </p>
@@ -455,24 +557,79 @@ export default function ClientChat() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => loadMessages()}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
-            title="Refresh conversation"
-            aria-label="Refresh conversation"
-          >
-            <RefreshCw size={15} />
-          </button>
+          {searchOpen ? (
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 shadow-2xs animate-in fade-in slide-in-from-right-3 duration-200">
+              <Search size={14} className="text-slate-400 shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearchOpen(false)
+                    setSearchQuery('')
+                  }
+                }}
+                placeholder="Search messages, senders..."
+                className="w-44 sm:w-64 bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none"
+                autoFocus
+              />
+              {searchQuery && (
+                <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                  {displayedMessages.length} match{displayedMessages.length === 1 ? '' : 'es'}
+                </span>
+              )}
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="rounded p-0.5 text-slate-400 hover:text-slate-700"
+                  title="Clear search"
+                >
+                  <X size={12} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchOpen(false)
+                  setSearchQuery('')
+                }}
+                className="rounded p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition"
+                title="Close search (Esc)"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchOpen(true)
+                setTimeout(() => searchInputRef.current?.focus(), 50)
+              }}
+              className="flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-2xs hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 transition"
+              title="Search conversation"
+              aria-label="Search conversation"
+            >
+              <Search size={14} className="text-slate-400" />
+              <span>Search</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-[#FBFBFC]">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="relative flex-1 overflow-y-auto p-6 space-y-5 bg-[#FBFBFC]"
+      >
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <div className="flex items-center gap-2 text-sm text-muted">
-              <RefreshCw className="animate-spin" size={18} />
+              <Loader2 className="animate-spin text-purple" size={18} />
               Loading conversation...
             </div>
           </div>
@@ -484,20 +641,59 @@ export default function ClientChat() {
               Start chatting with our team to request changes, tweaks, or updates for {brandName}.
             </p>
           </div>
+        ) : displayedMessages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <Search size={32} className="text-slate-300 mb-2" />
+            <p className="text-sm font-bold text-ink">No matching messages</p>
+            <p className="text-xs text-muted mt-1 max-w-sm">
+              We couldn't find any messages matching &quot;{searchQuery}&quot;.
+            </p>
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-purple shadow-2xs hover:bg-slate-50 transition"
+            >
+              Clear search filter
+            </button>
+          </div>
         ) : (
-          messages.map((msg, index) => {
-            const fromClient = isClient(msg.sender)
-            const isJustSent = msg.id === justSentId
-            const reactions = msg.reactions || {}
+          <AnimatePresence initial={false}>
+            {displayedMessages.map((msg, index) => {
+              const fromClient = isClient(msg.sender)
+              const isJustSent = msg.id === justSentId
+              const reactions = msg.reactions || {}
+              const myNameLower = (user?.name || user?.email?.split('@')[0] || '').toLowerCase()
+              const myFirstName = myNameLower ? myNameLower.split(' ')[0] : ''
+              const isMentionedToMe = !fromClient && (
+                (Array.isArray(msg.mentions) && (
+                  msg.mentions.some((m) => String(m).toLowerCase() === 'all' || String(m).toLowerCase() === 'team') ||
+                  (myNameLower && msg.mentions.some((m) => myNameLower.includes(String(m).toLowerCase()) || String(m).toLowerCase().includes(myNameLower))) ||
+                  (myFirstName && msg.mentions.some((m) => String(m).toLowerCase() === myFirstName))
+                )) ||
+                (msg.content && (
+                  msg.content.toLowerCase().includes('@all') ||
+                  msg.content.toLowerCase().includes('@team') ||
+                  (myNameLower && msg.content.toLowerCase().includes(`@${myNameLower}`)) ||
+                  (myFirstName && msg.content.toLowerCase().includes(`@${myFirstName}`))
+                ))
+              )
 
-            return (
-              <div
-                key={msg.id || index}
-                className={`group relative flex gap-3.5 transition-all duration-300 ease-out ${
-                  fromClient ? 'flex-row-reverse justify-start' : 'flex-row justify-start'
-                } ${isJustSent ? 'translate-y-2 opacity-90 scale-[0.99]' : 'translate-y-0 opacity-100 scale-100'}`}
-              >
-                {/* Profile Pic / Avatar */}
+              return (
+                <motion.div
+                  key={msg.id || index}
+                  layout="position"
+                  initial={{ opacity: 0, y: 16, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{
+                    duration: 0.28,
+                    ease: [0.16, 1, 0.3, 1],
+                  }}
+                  className={`group relative flex gap-3.5 transition-all duration-300 ease-out ${
+                    fromClient ? 'flex-row-reverse justify-start' : 'flex-row justify-start'
+                  } ${isJustSent ? 'translate-y-2 opacity-90 scale-[0.99]' : 'translate-y-0 opacity-100 scale-100'}`}
+                >
+                  {/* Profile Pic / Avatar */}
                 <div className="shrink-0 pt-0.5">
                   {msg.sender.avatar ? (
                     <img
@@ -534,6 +730,11 @@ export default function ClientChat() {
                         Orb Team
                       </span>
                     )}
+                    {isMentionedToMe && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-extrabold text-blue-700 border border-blue-200">
+                        <span>@</span> Mentioned you
+                      </span>
+                    )}
                   </div>
 
                   {/* Quoted Reply Snippet if present */}
@@ -564,6 +765,8 @@ export default function ClientChat() {
                       className={`cursor-context-menu select-text rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-2xs transition-all ${
                         fromClient
                           ? 'rounded-tr-xs bg-primary text-white selection:bg-white/20'
+                          : isMentionedToMe
+                          ? 'rounded-tl-xs border-2 border-blue-400 bg-blue-50/50 text-slate-900 ring-2 ring-blue-100'
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
@@ -703,11 +906,25 @@ export default function ClientChat() {
                     </div>
                   )}
                 </div>
-              </div>
+              </motion.div>
             )
-          })
+          })}
+        </AnimatePresence>
         )}
         <div ref={messagesEndRef} />
+
+        {/* Scroll To Bottom Floating Button */}
+        {showScrollBottom && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom(true)}
+            className="sticky bottom-4 float-right z-20 flex h-10 w-10 items-center justify-center rounded-full border-2 border-ink bg-white text-ink shadow-brutal hover:bg-slate-50 hover:text-purple hover:scale-105 transition-all duration-200 animate-in fade-in zoom-in-90"
+            title="Scroll to bottom"
+            aria-label="Scroll to bottom"
+          >
+            <ArrowDown size={18} />
+          </button>
+        )}
       </div>
 
       {/* Quoted reply banner if active */}
