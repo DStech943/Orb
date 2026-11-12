@@ -17,6 +17,7 @@ import {
   Search,
   Send,
   Smile,
+  Video,
   X,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -64,6 +65,8 @@ export default function ClientChat() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [showScrollBottom, setShowScrollBottom] = useState(false)
+  const [mediaPanelOpen, setMediaPanelOpen] = useState(false)
+  const [mediaFilter, setMediaFilter] = useState('all')
 
   const fileInputRef = useRef(null)
   const messagesEndRef = useRef(null)
@@ -99,6 +102,29 @@ export default function ClientChat() {
 
   // Always show all messages — search just highlights & scrolls, never filters
   const displayedMessages = messages
+
+  const sharedMedia = useMemo(() => messages.flatMap((message) => (Array.isArray(message.media) ? message.media : []).map((file, index) => ({
+    ...file,
+    key: `${message.id}-${file.id || index}`,
+    messageId: message.id,
+    senderName: message.sender?.name || 'Unknown sender',
+    createdAt: message.createdAt,
+  }))), [messages])
+
+  const mediaItems = useMemo(() => sharedMedia.filter((file) => {
+    const type = String(file.type || '').toLowerCase()
+    const isImage = Boolean(file.isImage || type.startsWith('image/'))
+    const isVideo = type.startsWith('video/')
+    return mediaFilter === 'all' || (mediaFilter === 'images' && isImage) || (mediaFilter === 'videos' && isVideo) || (mediaFilter === 'files' && !isImage && !isVideo)
+  }), [mediaFilter, sharedMedia])
+
+  const jumpToMessage = useCallback((messageId) => {
+    const target = document.querySelector(`[data-msg-id="${messageId}"]`)
+    if (!target) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    target.classList.add('ring-2', 'ring-purple/50', 'rounded-2xl')
+    window.setTimeout(() => target.classList.remove('ring-2', 'ring-purple/50', 'rounded-2xl'), 1200)
+  }, [])
 
   // Compute which message IDs match the current search query
   const searchMatchIds = useMemo(() => {
@@ -556,7 +582,7 @@ export default function ClientChat() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-100px)] max-w-5xl flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="relative mx-auto flex h-[calc(100vh-100px)] max-w-5xl flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
         <div className="flex items-center gap-3.5">
@@ -575,9 +601,9 @@ export default function ClientChat() {
                 {brandName}
               </span>
             </div>
-            <p className="text-xs text-muted">
-              Live updates, adjustments, and coordination directly with the Orb operations team
-            </p>
+            <button type="button" onClick={() => setMediaPanelOpen((open) => !open)} aria-expanded={mediaPanelOpen} aria-controls="chatspace-media-panel" className="mt-0.5 inline-flex items-center gap-1 text-xs font-semibold text-muted transition hover:text-purple">
+              <ImageIcon size={13} /> Media {sharedMedia.length ? `(${sharedMedia.length})` : ''}
+            </button>
           </div>
         </div>
 
@@ -662,6 +688,34 @@ export default function ClientChat() {
           )}
         </div>
       </div>
+
+      {mediaPanelOpen && (
+        <aside id="chatspace-media-panel" aria-label="Shared media" className="absolute inset-y-[76px] right-0 z-30 flex w-[min(20rem,90vw)] flex-col border-l border-slate-200 bg-white shadow-xl">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div><h3 className="text-sm font-extrabold text-ink">Media</h3><p className="text-[11px] text-muted">Jump to any shared attachment.</p></div>
+            <button type="button" onClick={() => setMediaPanelOpen(false)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Close media panel"><X size={17} /></button>
+          </div>
+          <div className="grid grid-cols-4 gap-1 border-b border-slate-100 p-2" role="tablist" aria-label="Media type">
+            {[
+              ['all', 'All', Paperclip],
+              ['images', 'Images', ImageIcon],
+              ['videos', 'Videos', Video],
+              ['files', 'Files', FileText],
+            ].map(([value, label, Icon]) => <button key={value} type="button" role="tab" aria-selected={mediaFilter === value} onClick={() => setMediaFilter(value)} className={`flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] font-bold transition ${mediaFilter === value ? 'bg-purple text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}><Icon size={14} />{label}</button>)}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {mediaItems.length ? <div className="grid gap-2">{mediaItems.map((file) => {
+              const type = String(file.type || '').toLowerCase()
+              const isImage = Boolean(file.isImage || type.startsWith('image/'))
+              const isVideo = type.startsWith('video/')
+              return <button key={file.key} type="button" onClick={() => jumpToMessage(file.messageId)} className="group flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 text-left transition hover:border-purple/40 hover:bg-purple/5">
+                <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-md bg-slate-100 text-slate-400">{isImage ? <img src={file.url} alt="" className="h-full w-full object-cover" /> : isVideo ? <Video size={19} /> : <FileText size={19} />}</div>
+                <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-slate-700">{file.name || (isImage ? 'Image' : isVideo ? 'Video' : 'File')}</p><p className="mt-0.5 truncate text-[10px] text-slate-400">{file.senderName} · {formatTime(file.createdAt)}</p></div>
+              </button>
+            })}</div> : <div className="grid min-h-40 place-items-center text-center"><div><ImageIcon className="mx-auto text-slate-300" size={26} /><p className="mt-2 text-xs font-bold text-slate-600">No {mediaFilter === 'all' ? 'media' : mediaFilter} shared yet</p></div></div>}
+          </div>
+        </aside>
+      )}
 
       {/* Messages Scroll Area */}
       <div
