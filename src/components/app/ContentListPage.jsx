@@ -200,12 +200,15 @@ function ShopifyMetafieldSection({ product, onChange }) {
   </section>
 }
 
-function VariantDetailPanel({ product, variant, variants, onBack, onSelect, onChange, onSave, saving, loading, error }) {
+function VariantDetailPanel({ product, variant, variants, onBack, onSelect, onChange, onSave, saving, loading, error, saveSuccess, onClearSuccess }) {
   const image = variant.image || product.featuredImage || {}
   const fields = Array.isArray(variant.metafields) ? variant.metafields : []
   const [drafts, setDrafts] = useState({})
   useEffect(() => { setDrafts({}) }, [variant.id])
-  const updateField = (index, text) => onChange({ ...variant, metafields: fields.map((field, fieldIndex) => fieldIndex === index ? { ...field, value: metafieldValueFromText(field, text), is_set: true } : field) })
+  const updateField = (index, text) => {
+    if (saveSuccess && onClearSuccess) onClearSuccess()
+    onChange({ ...variant, metafields: fields.map((field, fieldIndex) => fieldIndex === index ? { ...field, value: metafieldValueFromText(field, text), is_set: true } : field) })
+  }
   const fieldClass = 'mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-purple focus:ring-2 focus:ring-purple/15'
   return <div className="product-workspace mx-auto max-w-[1320px] pb-4">
     <button type="button" onClick={onBack} className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-purple"><ArrowLeft size={16} />{product.name || 'Product'}</button>
@@ -215,19 +218,32 @@ function VariantDetailPanel({ product, variant, variants, onBack, onSelect, onCh
       <main className="min-w-0 space-y-5"><section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex gap-4">{image.url ? <img src={image.url} alt={image.altText || ''} className="h-20 w-20 rounded-xl object-cover" /> : null}<div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-500">{product.name}</p><label className="mt-3 block text-sm font-bold">Variant title<input className={fieldClass} value={variant.title || ''} onChange={(event) => onChange({ ...variant, title: event.target.value })} /></label></div></div></section>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-extrabold text-ink">Pricing and identification</h2><div className="mt-4 grid gap-4 sm:grid-cols-2"><label className="block text-sm font-bold">Price<input className={fieldClass} value={variant.price?.amount || ''} onChange={(event) => onChange({ ...variant, price: { ...(variant.price || {}), amount: event.target.value, currencyCode: variant.price?.currencyCode || product.currency || '' } })} /></label><label className="block text-sm font-bold">SKU<input className={fieldClass} value={variant.sku || ''} onChange={(event) => onChange({ ...variant, sku: event.target.value })} /></label><label className="block text-sm font-bold">Barcode<input className={fieldClass} value={variant.barcode || ''} onChange={(event) => onChange({ ...variant, barcode: event.target.value })} /></label><label className="block text-sm font-bold">Inventory quantity<input className={fieldClass} type="number" value={variant.inventoryQuantity ?? ''} onChange={(event) => onChange({ ...variant, inventoryQuantity: event.target.value === '' ? null : Number(event.target.value) })} /></label></div></section>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div><h2 className="font-extrabold text-ink">Variant metafields</h2><p className="mt-1 text-sm text-slate-500">These fields are attached to this selected variant.</p></div>{loading ? <OrbLoader compact label="Loading Shopify metafields" /> : error ? <p className="mt-4 rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</p> : fields.length ? <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">{fields.map((field, index) => { const key = field.id || `${field.namespace}-${field.key}-${index}`; const type = String(field.type || '').toLowerCase(); const text = drafts[key] ?? metafieldEditableText(field); const references = metafieldReferences(field); const isReference = type.includes('reference'); const long = text.length > 150 || type === 'rich_text_field' || type.includes('multi_line'); const setText = (value) => { setDrafts((current) => ({ ...current, [key]: value })); updateField(index, value) }; return <div key={key} className="grid gap-2 border-b border-slate-200 px-4 py-3 last:border-b-0 sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-5"><div><h3 className="text-sm font-semibold">{metafieldDisplayName(field)}</h3><p className="mt-1 text-xs text-slate-400">{field.namespace}.{field.key}</p></div><div>{references.length || isReference ? <div className="flex flex-wrap gap-1.5">{references.length ? references.map((reference, referenceIndex) => <span key={reference.id || referenceIndex} className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600 ring-1 ring-slate-200">{metafieldReferenceLabel(reference)}</span>) : <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-500 ring-1 ring-slate-200">Linked Shopify item</span>}</div> : type === 'boolean' ? <BooleanMetafieldControl label={metafieldDisplayName(field)} value={field.value} onChange={setText} /> : long ? <textarea aria-label={metafieldDisplayName(field)} className="min-h-28 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-purple focus:ring-2 focus:ring-purple/15" value={text} onChange={(event) => setText(event.target.value)} /> : <input aria-label={metafieldDisplayName(field)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-purple focus:ring-2 focus:ring-purple/15" value={text} onChange={(event) => setText(event.target.value)} />}</div></div> })}</div> : <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No pinned Shopify metafield definitions are configured for this variant.</p>}</section>
-        {onSave ? <div className="flex justify-end"><Button type="button" variant="purple" disabled={saving || !fields.length} onClick={() => onSave(variant)}>{saving ? 'Saving to Shopify…' : 'Save variant metafields to Shopify'}</Button></div> : null}
+        {onSave ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            {saveSuccess ? (
+              <span className="inline-flex items-center gap-2 rounded-lg border-2 border-emerald-600 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800 shadow-sm">
+                <Check size={15} className="stroke-[3] text-emerald-600" /> {saveSuccess}
+              </span>
+            ) : <span />}
+            <Button type="button" variant="purple" disabled={saving || !fields.length} onClick={() => onSave(variant)}>
+              {saving ? 'Saving to Shopify…' : 'Save variant metafields to Shopify'}
+            </Button>
+          </div>
+        ) : null}
       </main>
     </div>
   </div>
 }
 
-function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loadThemeTemplates, saveVariantMetafields }) {
+function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loadThemeTemplates, saveVariantMetafields, onReload }) {
+  const { showToast } = useToast()
   const variants = Array.isArray(product.variants) ? product.variants : []
   const savedMedia = Array.isArray(product.media) ? product.media : []
   const media = savedMedia.length ? savedMedia : product.featuredImage?.url ? [{ id: 'featured-image', image: product.featuredImage, alt: product.featuredImage.altText || '' }] : []
   const [showAllMedia, setShowAllMedia] = useState(false)
   const [loadingVariantMetafields, setLoadingVariantMetafields] = useState(false)
   const [variantMetafieldError, setVariantMetafieldError] = useState('')
+  const [variantSaveSuccess, setVariantSaveSuccess] = useState('')
   const [selectedVariantId, setSelectedVariantId] = useState(null)
   const [savingVariant, setSavingVariant] = useState(false)
   const [themeTemplates, setThemeTemplates] = useState([])
@@ -263,6 +279,7 @@ function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loa
     } catch (error) { setVariantMetafieldError(error.message || 'Could not load variant metafields.') } finally { setLoadingVariantMetafields(false) }
   }
   const openVariant = async (variantId) => {
+    setVariantSaveSuccess('')
     setSelectedVariantId(variantId)
     const variant = variants.find((item) => item.id === variantId)
     if (variant && !Array.isArray(variant.metafields) && loadVariantMetafields) await fetchVariantMetafields(variantId)
@@ -272,10 +289,23 @@ function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loa
     if (!saveVariantMetafields) return
     setSavingVariant(true)
     setVariantMetafieldError('')
+    setVariantSaveSuccess('')
     try {
-      await saveVariantMetafields(product, variant)
+      const result = await saveVariantMetafields(product, variant)
+      const savedCount = result?.saved || 0
+      const deletedCount = result?.deleted || 0
+      const variantName = variant.title || 'Variant'
+      const toastMessage = `${variantName} metafields saved in Shopify.${deletedCount ? ` (${deletedCount} cleared)` : ''}`
+      showToast(toastMessage)
+      setVariantSaveSuccess(toastMessage)
+      if (onReload) await onReload()
+      if (loadVariantMetafields && variant.id) {
+        await fetchVariantMetafields(variant.id)
+      }
     } catch (error) {
-      setVariantMetafieldError(error.message || 'Could not save variant metafields to Shopify.')
+      const errorMsg = error.message || 'Could not save variant metafields to Shopify.'
+      setVariantMetafieldError(errorMsg)
+      showToast(errorMsg, 'error')
     } finally {
       setSavingVariant(false)
     }
@@ -284,7 +314,7 @@ function ShopifyProductWorkspace({ product, onChange, loadVariantMetafields, loa
   const templateOptions = [...themeTemplates]
   if (product.templateSuffix && !templateOptions.some((item) => item.value === product.templateSuffix)) templateOptions.push({ value: product.templateSuffix, label: product.templateSuffix.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) })
   const selectedVariant = variants.find((variant) => variant.id === selectedVariantId)
-  if (selectedVariant) return <VariantDetailPanel product={product} variant={selectedVariant} variants={variants} onBack={() => setSelectedVariantId(null)} onSelect={openVariant} onChange={updateSelectedVariant} onSave={saveSelectedVariant} saving={savingVariant} loading={loadingVariantMetafields} error={variantMetafieldError} />
+  if (selectedVariant) return <VariantDetailPanel product={product} variant={selectedVariant} variants={variants} onBack={() => { setVariantSaveSuccess(''); setSelectedVariantId(null) }} onSelect={openVariant} onChange={updateSelectedVariant} onSave={saveSelectedVariant} saving={savingVariant} loading={loadingVariantMetafields} error={variantMetafieldError} saveSuccess={variantSaveSuccess} onClearSuccess={() => setVariantSaveSuccess('')} />
   return <div className="product-workspace mx-auto max-w-[1320px] pb-4">
     <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_290px]">
       <main className="min-w-0 space-y-5">
@@ -342,7 +372,7 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
   </section>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, initialDraft = null, assistantDraft = null }) {
+export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, initialDraft = null, assistantDraft = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isFaq = kind === 'faq'
@@ -443,11 +473,26 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   }, [selected])
 
   const toggle = (id) => setChecked((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id])
+  const NEW_ITEM_ID = '__new__'
+  const createBlank = () => {
+    scrollPosition.current = window.scrollY
+    if (isFaq) {
+      setSelected({ id: NEW_ITEM_ID, question: '', answer: '', category: 'Support', status: 'Draft', source: 'Manual', updated: 'Not saved' })
+    } else if (isSop) {
+      setSelected({ id: NEW_ITEM_ID, title: '', situation: '', checkFirst: '', whatToDo: '', whatToSay: '', escalateTo: '', category: 'Support', status: 'Draft', source: 'Manual', updated: 'Not saved' })
+    }
+  }
+  const isNewItem = selected?.id === NEW_ITEM_ID
   const save = async () => {
     try {
       const editorName = user?.name || user?.email?.split('@')[0] || 'Orb user'
-      await update(isSop ? { ...selected, updatedBy: editorName } : selected)
-      showToast('Saved.')
+      if (isNewItem && createItem) {
+        await createItem(isSop ? { ...selected, updatedBy: editorName } : selected)
+        showToast('Created.')
+      } else {
+        await update(isSop ? { ...selected, updatedBy: editorName } : selected)
+        showToast('Saved.')
+      }
       setSelected(null)
       reload()
     } catch (saveError) { showToast(saveError.message || 'Could not save this item.') }
@@ -539,7 +584,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
 
   const selectableColumns = isProduct || isReadOnly ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]
   const matchingAssistantDraft = isProduct && selected && assistantDraft?.message && productMatchesAssistantDraft(selected, assistantDraft)
-  const productEditor = <>{matchingAssistantDraft ? <ProductMetafieldDraftReview product={selected} draft={assistantDraft} onApply={applyAssistantDraftToMetafield} /> : null}<ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} loadThemeTemplates={loadThemeTemplates} saveVariantMetafields={saveVariantMetafields} /></>
+  const productEditor = <>{matchingAssistantDraft ? <ProductMetafieldDraftReview product={selected} draft={assistantDraft} onApply={applyAssistantDraftToMetafield} /> : null}<ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} loadThemeTemplates={loadThemeTemplates} saveVariantMetafields={saveVariantMetafields} onReload={reload} /></>
   const footer = selected && (
     isReadOnly ? (
       <div className="flex flex-wrap items-center justify-between w-full">
@@ -549,9 +594,9 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     ) : (
       <div className="flex flex-wrap gap-2">
         {isProduct && saveProductMetafields && <Button variant="purple" onClick={saveMetafieldsToShopify} disabled={savingShopify}>{savingShopify ? 'Saving to Shopify…' : 'Save metafields to Shopify'}</Button>}
-        <Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : 'Save'}</Button>
-        {!isProduct && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}
-        <Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button>
+        <Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : isNewItem ? 'Create' : 'Save'}</Button>
+        {!isProduct && !isNewItem && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}
+        {!isNewItem && <Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button>}
       </div>
     )
   )
@@ -570,7 +615,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         {!isReadOnly && !isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
         {!isReadOnly && !isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to Qdrant'}</Button>}
         {isProduct && syncProducts && <Button variant="outline" onClick={sync} disabled={syncing}><RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Sync'}</Button>}
-        {!isReadOnly && <Button onClick={() => navigate('/app?generate=1')}><Plus size={16} />Generate more</Button>}
+        {!isReadOnly && <Button onClick={!isProduct ? createBlank : () => navigate('/app?generate=1')}><Plus size={16} />{!isProduct ? (isFaq ? 'Add FAQ' : 'Add SOP') : 'Generate more'}</Button>}
       </div>
     </div>
     {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Open the matching product and choose the Shopify metafield that should receive this editable draft.</p></section>}
@@ -581,9 +626,9 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
       </div>
       {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
-      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? "Generate content" : undefined} onAction={!isReadOnly ? () => navigate('/app?generate=1') : undefined} />}</div>
+      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} />}</div>
     </section>
-    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
     <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />
     <ConfirmDialog open={confirmApproveAll} onClose={() => setConfirmApproveAll(false)} onConfirm={() => { setConfirmApproveAll(false); approve(draftIds) }} title="Approve all drafts?" description={`${draftIds.length} ${draftIds.length === 1 ? 'draft will' : 'drafts will'} be marked approved and become available to Create with Orb.`} confirmLabel="Approve all" />
   </div>

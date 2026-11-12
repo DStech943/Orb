@@ -206,6 +206,17 @@ class ManualFaqCreate(RequestModel):
     category: str = Field(default="Customer support", max_length=200)
 
 
+class ManualSopCreate(RequestModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=3, max_length=400)
+    situation: str = Field(default="", max_length=2_000)
+    check_first: str = Field(default="", max_length=2_000)
+    what_to_do: str = Field(default="", max_length=5_000)
+    what_to_say: str = Field(default="", max_length=5_000)
+    escalate_to: str = Field(default="", max_length=1_000)
+    category: str = Field(default="Support", max_length=200)
+
+
 class OrbGuideRequest(RequestModel):
     page_path: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=1, max_length=1_200)
@@ -2502,6 +2513,39 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User 
     row = rows[0]
     stored = decode_jsonb(row.get("payload"))
     return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else faq}}
+
+
+@router.post("/knowledge/sops/manual", status_code=status.HTTP_201_CREATED)
+async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+    """Create a reviewable SOP manually without requiring a visual flow."""
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    title = payload.title.strip()
+    sop = {
+        "title": title,
+        "situation": payload.situation.strip() or title,
+        "category": payload.category.strip() or "Support",
+        "lifecycle_stage": "",
+        "status": "Draft",
+        "source": "Manual",
+        "updated_by": "Orb user",
+        "check_first": payload.check_first.strip(),
+        "what_to_do": payload.what_to_do.strip(),
+        "what_to_say": payload.what_to_say.strip(),
+        "escalate_to": payload.escalate_to.strip(),
+        "source_urls": [],
+    }
+    rows = await _supabase_service_write(
+        request,
+        "POST",
+        "orb_generated_content",
+        params={"select": "id,payload,status,created_at"},
+        payload={"brand_id": brand["id"], "kind": "sop", "status": "draft", "payload": sop, "evidence": []},
+    )
+    if not rows:
+        raise HTTPException(status_code=503, detail="Supabase did not return the new SOP")
+    row = rows[0]
+    stored = decode_jsonb(row.get("payload"))
+    return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else sop}}
 
 
 def _flow_sop_node_text(node: dict[str, Any]) -> str:
