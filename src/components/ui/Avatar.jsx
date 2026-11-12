@@ -1,3 +1,3 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 const initials = (name) => (name || '').split(' ').filter(Boolean).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'O'
-export default function Avatar({ name, className = '' }) { return <span aria-label={name ? `${name} avatar` : 'Avatar'} className={`grid h-9 w-9 place-items-center rounded-md border-2 border-ink bg-purple text-xs font-extrabold text-white ${className}`}>{initials(name)}</span> }
+export default function Avatar({ name, src = '', className = '' }) { const [failed, setFailed] = useState(false); useEffect(() => setFailed(false), [src]); const showImage = Boolean(src && !failed); return <span aria-label={name ? `${name} avatar` : 'Avatar'} className={`grid h-9 w-9 place-items-center overflow-hidden rounded-md border-2 border-ink bg-purple text-xs font-extrabold text-white ${className}`}>{showImage ? <img src={src} alt="" className="h-full w-full object-cover" onError={() => setFailed(true)} /> : initials(name)}</span> }
