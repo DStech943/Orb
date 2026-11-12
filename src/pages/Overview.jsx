@@ -405,10 +405,10 @@ function MastersheetBanner({ brandName }) {
   const isConfigured = Boolean(liveUrl)
 
   return (
-    <section className="rounded-xl border-2 border-ink bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-5 shadow-brutal">
+    <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl border border-emerald-300 bg-emerald-100 text-emerald-800 shadow-2xs">
+          <div className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-emerald-50 text-emerald-700 shadow-2xs">
             <FileSpreadsheet size={22} />
           </div>
           <div>
@@ -418,13 +418,13 @@ function MastersheetBanner({ brandName }) {
               </h3>
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold border ${
                 isConfigured
-                  ? 'bg-emerald-100/80 text-emerald-800 border-emerald-300'
-                  : 'bg-amber-100 text-amber-800 border-amber-300'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-amber-50 text-amber-800 border-amber-200'
               }`}>
                 {loading ? 'Checking...' : isConfigured ? 'Vault Configured' : 'Needs Setup'}
               </span>
             </div>
-            <p className="mt-0.5 text-xs text-slate-600 max-w-xl">
+            <p className="mt-0.5 text-xs text-muted max-w-xl">
               {isConfigured
                 ? `Central master inventory, operations, and support tracking spreadsheet for ${brandName}.`
                 : `Connect ${brandName}'s Google Sheets Mastersheet in Tools to link live inventory and orders.`}
@@ -445,10 +445,10 @@ function MastersheetBanner({ brandName }) {
             href={targetUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="interactive-brutal inline-flex items-center gap-2 rounded-md border-2 border-ink bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-brutal hover:bg-emerald-700 transition"
+            className="interactive-brutal inline-flex items-center gap-2 rounded-md border-2 border-ink bg-emerald-100 px-4 py-2.5 text-xs font-bold text-emerald-950 shadow-brutal hover:bg-emerald-200 transition"
           >
             <span>Open Mastersheet</span>
-            <ExternalLink size={14} />
+            <ExternalLink size={14} className="text-emerald-800" />
           </a>
         </div>
       </div>

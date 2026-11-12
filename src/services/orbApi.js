@@ -128,6 +128,9 @@ const agentRequest = async (path, options = {}) => {
 export const activeBrandName = () =>
   window.localStorage.getItem("orb_selected_brand_name") || "";
 
+export const activeBrandId = () =>
+  window.localStorage.getItem("orb_selected_brand") || "";
+
 // Multipart is deliberately kept out of `request`: setting application/json
 // there would corrupt the browser-generated FormData boundary. The Slack bot
 // token remains server-side; this only carries the signed-in user's session.
