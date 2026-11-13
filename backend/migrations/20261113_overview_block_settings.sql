@@ -7,6 +7,10 @@ CREATE TABLE IF NOT EXISTS cx_copilot.orb_overview_block_settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE cx_copilot.orb_overview_block_settings
+  ADD COLUMN IF NOT EXISTS tracked_variant_metafield jsonb NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS daily_slack_report jsonb NOT NULL DEFAULT '{"enabled":false,"hour":9,"timezone":"Asia/Kolkata"}'::jsonb;
+
 GRANT USAGE ON SCHEMA cx_copilot TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON cx_copilot.orb_overview_block_settings TO authenticated;
 ALTER TABLE cx_copilot.orb_overview_block_settings ENABLE ROW LEVEL SECURITY;

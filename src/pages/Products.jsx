@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { Check, ChevronDown, Loader2, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import ContentListPage from '../components/app/ContentListPage'
 import { deleteProduct, listProducts, loadProductMetafields, loadProductThemeTemplates, loadProductVariantMetafields, saveProduct, saveProductMetafieldsToShopify, saveVariantMetafieldsToShopify, syncProductsForActiveBrand } from '../services/generation'
-import { activeBrandName, getShopifyCredentialStatus, getShopifyVariantMetafieldTracker, hasOrbApi } from '../services/orbApi'
+import { activeBrandId, activeBrandName, getShopifyCredentialStatus, getShopifyVariantMetafieldTracker, hasOrbApi } from '../services/orbApi'
+import { saveTrackedVariantMetafield } from '../services/overviewBlocks'
 
 const trackerStorageKey = (brandName) => `orb:variant-metafield-tracker:${String(brandName || '').trim().toLowerCase()}`
 const fieldId = (field) => `${field?.namespace || ''}.${field?.key || ''}`
@@ -36,11 +37,13 @@ function VariantMetafieldTracker({ brandName, connected }) {
     const next = event.target.value || null
     setSelectedField(next)
     window.localStorage.setItem(trackerStorageKey(brandName), JSON.stringify({ field: next, mode }))
+    saveTrackedVariantMetafield(activeBrandId(), { field: next, mode }).catch(() => {})
   }
   const selectMode = (event) => {
     const next = event.target.value
     setMode(next)
     window.localStorage.setItem(trackerStorageKey(brandName), JSON.stringify({ field: selectedField, mode: next }))
+    saveTrackedVariantMetafield(activeBrandId(), { field: selectedField, mode: next }).catch(() => {})
   }
   const activeDefinition = data?.definitions?.find((field) => fieldId(field) === selectedField)
   const matchingVariants = (data?.variants || []).filter((variant) => {

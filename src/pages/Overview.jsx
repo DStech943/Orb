@@ -17,11 +17,11 @@ import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
 import { MOCK_STATES, useOverview } from '../services/overview'
-import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker } from '../services/orbApi'
+import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker, sendDailySlackReport } from '../services/orbApi'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
-import { DEFAULT_OVERVIEW_BLOCKS, getOverviewBlocks, saveOverviewBlocks } from '../services/overviewBlocks'
+import { DEFAULT_OVERVIEW_BLOCKS, getDailySlackReport, getOverviewBlocks, saveDailySlackReport, saveOverviewBlocks } from '../services/overviewBlocks'
 
 const WELCOME_LINES = [
   'Good support is just consistency, repeated.',
@@ -409,6 +409,18 @@ function OverviewBlockCustomizer({ blocks, onChange, saving }) {
   return <details className="mt-4 rounded-lg border border-ink/15 bg-white/80 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold text-ink"><SlidersHorizontal size={16} />Customize blocks for this brand</summary><p className="mt-2 text-xs leading-5 text-muted">These choices are shared with everyone viewing this brand’s Overview.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{OVERVIEW_BLOCK_OPTIONS.map((option) => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-ink/10 p-2.5 hover:border-primary/40"><input type="checkbox" checked={blocks.includes(option.id)} onChange={(event) => onChange(option.id, event.target.checked)} disabled={saving} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block text-sm font-bold">{option.label}</span><span className="mt-0.5 block text-xs leading-4 text-muted">{option.description}</span></span></label>)}</div>{saving ? <p className="mt-3 text-xs font-bold text-muted">Saving layout…</p> : null}</details>
 }
 
+function DailySlackReportControl({ brandId, brandName }) {
+  const { showToast } = useToast()
+  const [report, setReport] = useState({ enabled: false, hour: 9, timezone: 'Asia/Kolkata' })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [sending, setSending] = useState(false)
+  useEffect(() => { let active = true; getDailySlackReport(brandId).then((next) => { if (active) setReport(next) }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [brandId])
+  const update = async (patch) => { const next = { ...report, ...patch }; setReport(next); setSaving(true); try { await saveDailySlackReport(brandId, next) } catch (error) { setReport(report); showToast(error.message || 'Could not save daily report settings.', 'error') } finally { setSaving(false) } }
+  const sendTest = async () => { setSending(true); try { await sendDailySlackReport(brandName); showToast('Daily report sent to the configured Slack channel.') } catch (error) { showToast(error.message || 'Could not send the daily report.', 'error') } finally { setSending(false) } }
+  return <section className="mt-4 rounded-lg border border-ink/15 bg-white/80 p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-extrabold">Daily Slack report</p><p className="mt-0.5 text-xs text-muted">Out of stock, low stock, active operations, and the tracked variant metafield.</p></div><label className="inline-flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={report.enabled} onChange={(event) => update({ enabled: event.target.checked })} disabled={loading || saving} className="h-4 w-4 accent-primary" />Enabled</label></div>{report.enabled && <div className="mt-3 flex flex-wrap items-center gap-3"><label className="text-xs font-bold">Send at <select value={report.hour} onChange={(event) => update({ hour: Number(event.target.value) })} className="ml-1 rounded border border-ink/20 bg-white px-2 py-1 text-sm">{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select> IST</label><Button size="sm" variant="outline" onClick={sendTest} disabled={sending}>{sending ? 'Sending…' : 'Send test report'}</Button><span className="text-[11px] text-muted">Railway cron must call the daily-report endpoint at this time.</span></div>}</section>
+}
+
 function MastersheetBanner({ brandName }) {
   const [liveUrl, setLiveUrl] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -630,7 +642,7 @@ function BrandOverview({ overview, onRetry }) {
   const flowConfig = METRIC_CONFIG.find((config) => config.key === 'flows')
   const optionalMetric = (key) => METRIC_CONFIG.find((config) => config.key === key)
 
-  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{isAdmin && <OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} />}</header>
+  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{isAdmin && <><OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} /><DailySlackReportControl brandId={brandId} brandName={brandName} /></>}</header>
     {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
       <div className="grid gap-5 lg:grid-cols-2">
         {blocks.includes('flows') && <MetricBox config={flowConfig} data={overview.counts?.flows} brandName={brandName} />}
