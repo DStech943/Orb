@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
+  SlidersHorizontal,
   X,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -16,10 +17,11 @@ import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
 import { MOCK_STATES, useOverview } from '../services/overview'
-import { extendOperation, getBrandMastersheetUrl } from '../services/orbApi'
+import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker } from '../services/orbApi'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
+import { DEFAULT_OVERVIEW_BLOCKS, getOverviewBlocks, saveOverviewBlocks } from '../services/overviewBlocks'
 
 const WELCOME_LINES = [
   'Good support is just consistency, repeated.',
@@ -275,7 +277,7 @@ const formatDaysAgo = (dateValue) => {
   return `${diffDays} days ago`
 }
 
-function OutOfStockProducts({ products = [], status, onRetry }) {
+function InventoryProducts({ products = [], status, onRetry, near = false }) {
   if (status === 'loading') {
     return (
       <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
@@ -286,13 +288,14 @@ function OutOfStockProducts({ products = [], status, onRetry }) {
     )
   }
   if (status === 'error') {
-    return <InlineBlockError label="out of stock products" onRetry={onRetry} />
+    return <InlineBlockError label={near ? 'near out of stock products' : 'out of stock products'} onRetry={onRetry} />
   }
 
   // Filter for active products that are currently out of stock
   const outOfStockItems = (products || []).filter((product) => {
     const isActive = String(product?.status || 'active').toLowerCase() === 'active'
-    return isActive && Boolean(product.isOutOfStock)
+    if (!isActive) return false
+    return near ? Number(product.variantCount || 0) > 0 && Number(product.totalInventory) > 0 && Number(product.totalInventory) < 7 : Boolean(product.isOutOfStock)
   })
 
   return (
@@ -300,7 +303,7 @@ function OutOfStockProducts({ products = [], status, onRetry }) {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-            Out of stock products
+            {near ? 'Near out of stock' : 'Out of stock products'}
           </p>
           <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 border border-rose-200">
             {outOfStockItems.length}
@@ -339,7 +342,7 @@ function OutOfStockProducts({ products = [], status, onRetry }) {
                         <>
                           <span>•</span>
                           <span className="text-rose-600 font-semibold">
-                            Out of stock: {timeAgo}
+                            {near ? `${item.totalInventory} left` : `Out of stock: ${timeAgo}`}
                           </span>
                         </>
                       )}
@@ -361,11 +364,49 @@ function OutOfStockProducts({ products = [], status, onRetry }) {
       ) : (
         <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted">
           <Check size={17} className="text-emerald-600" />
-          All active products have available inventory.
+          {near ? 'No active product has fewer than 7 items left.' : 'All active products have available inventory.'}
         </div>
       )}
     </section>
   )
+}
+
+function TrackedVariantMetafield({ brandName }) {
+  const [state, setState] = useState({ loading: true, error: '', data: null, tracked: null })
+  const [retry, setRetry] = useState(0)
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      let tracked = null
+      try { tracked = JSON.parse(window.localStorage.getItem(`orb:variant-metafield-tracker:${String(brandName || '').toLowerCase()}`) || 'null') } catch {}
+      if (!tracked?.field) { if (active) setState({ loading: false, error: '', data: null, tracked: null }); return }
+      try {
+        const data = await getShopifyVariantMetafieldTracker({ brandName })
+        if (active) setState({ loading: false, error: '', data, tracked })
+      } catch (error) { if (active) setState({ loading: false, error: error.message || 'Could not load tracked metafield.', data: null, tracked }) }
+    }
+    load(); return () => { active = false }
+  }, [brandName, retry])
+  if (state.loading) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><Skeleton className="h-5 w-52" /><Skeleton className="mt-4 h-10" /></section>
+  if (!state.tracked) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Tracked variant metafield</p><p className="mt-3 text-sm text-muted">Choose a variant metafield to track in Products, then add this block to see it here.</p><Link to="/app/products" className="mt-3 inline-flex text-sm font-extrabold text-primary hover:underline">Configure tracker</Link></section>
+  if (state.error) return <InlineBlockError label="tracked variant metafield" onRetry={() => setRetry((value) => value + 1)} />
+  const definition = state.data?.definitions?.find((field) => `${field.namespace}.${field.key}` === state.tracked.field)
+  const matches = (state.data?.variants || []).filter((variant) => state.tracked.mode === 'nonempty' ? Boolean(String(variant.values?.[state.tracked.field] || '').trim()) : ['true', '1', 'yes'].includes(String(variant.values?.[state.tracked.field] || '').trim().toLowerCase()))
+  return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Tracked variant metafield</p><h2 className="mt-1 text-lg font-extrabold">{definition?.name || state.tracked.field}</h2></div><Link to="/app/products" className="text-xs font-extrabold text-primary hover:underline">Manage</Link></div><p className="mt-1 text-xs text-muted">{state.tracked.mode === 'nonempty' ? 'Variants with a value' : 'Variants marked true'} · {matches.length} found</p>{matches.length ? <div className="mt-3 divide-y divide-ink/10">{matches.slice(0, 5).map((variant) => <div key={variant.id} className="flex items-center justify-between gap-3 py-2"><div className="min-w-0"><p className="truncate text-sm font-bold">{variant.product_title}</p><p className="truncate text-xs text-muted">{variant.title}</p></div><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-extrabold text-emerald-700">{variant.values?.[state.tracked.field]}</span></div>)}</div> : <p className="mt-4 text-sm text-muted">No variants match this rule.</p>}</section>
+}
+
+const OVERVIEW_BLOCK_OPTIONS = [
+  { id: 'flows', label: 'Flows', description: 'Published and draft flow count.' },
+  { id: 'out_of_stock', label: 'Out of stock products', description: 'Active products with no inventory.' },
+  { id: 'near_out_of_stock', label: 'Near out of stock products', description: 'Active products with fewer than 7 items left.' },
+  { id: 'operations', label: 'Active operations', description: 'Offers, notices, and restock updates currently used by the agent.' },
+  { id: 'faqs', label: 'FAQs', description: 'Published FAQ count and drafts.' },
+  { id: 'sops', label: 'SOPs', description: 'Published SOP count and drafts.' },
+  { id: 'tracked_variant_metafield', label: 'Tracked variant metafield', description: 'The Shopify variant metafield selected in Products.' },
+]
+
+function OverviewBlockCustomizer({ blocks, onChange, saving }) {
+  return <details className="mt-4 rounded-lg border border-ink/15 bg-white/80 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold text-ink"><SlidersHorizontal size={16} />Customize blocks for this brand</summary><p className="mt-2 text-xs leading-5 text-muted">These choices are shared with everyone viewing this brand’s Overview.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{OVERVIEW_BLOCK_OPTIONS.map((option) => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-ink/10 p-2.5 hover:border-primary/40"><input type="checkbox" checked={blocks.includes(option.id)} onChange={(event) => onChange(option.id, event.target.checked)} disabled={saving} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block text-sm font-bold">{option.label}</span><span className="mt-0.5 block text-xs leading-4 text-muted">{option.description}</span></span></label>)}</div>{saving ? <p className="mt-3 text-xs font-bold text-muted">Saving layout…</p> : null}</details>
 }
 
 function MastersheetBanner({ brandName }) {
@@ -546,6 +587,10 @@ function BrandOverview({ overview, onRetry }) {
   const [operations, setOperations] = useState(overview.operations || [])
   const [setupHidden, setSetupHidden] = useState(false)
   const [setupCelebrating, setSetupCelebrating] = useState(false)
+  const [blocks, setBlocks] = useState(DEFAULT_OVERVIEW_BLOCKS)
+  const [savingBlocks, setSavingBlocks] = useState(false)
+  const { showToast } = useToast()
+  const brandId = overview.brand?.id || activeBrandId()
 
   useEffect(() => {
     const saved = window.sessionStorage.getItem(sessionKey)
@@ -556,6 +601,11 @@ function BrandOverview({ overview, onRetry }) {
   }, [sessionKey])
 
   useEffect(() => { setOperations(overview.operations || []) }, [overview.operations])
+  useEffect(() => {
+    let active = true
+    getOverviewBlocks(brandId, brandName).then((next) => { if (active) setBlocks(next) }).catch(() => { if (active) setBlocks(DEFAULT_OVERVIEW_BLOCKS) })
+    return () => { active = false }
+  }, [brandId, brandName])
   useEffect(() => {
     if (window.localStorage.getItem(setupStorageKey)) { setSetupHidden(true); setSetupCelebrating(false); return undefined }
     if (!setupComplete) { setSetupHidden(false); setSetupCelebrating(false); return undefined }
@@ -572,16 +622,25 @@ function BrandOverview({ overview, onRetry }) {
     return () => window.clearInterval(interval)
   }, [])
   const extend = (id, newExpiresAt) => setOperations((items) => items.map((operation) => operation.id === id ? { ...operation, expiresAt: newExpiresAt } : operation))
+  const updateBlocks = async (block, enabled) => {
+    const next = enabled ? [...blocks, block] : blocks.filter((value) => value !== block)
+    setBlocks(next); setSavingBlocks(true)
+    try { await saveOverviewBlocks(brandId, brandName, next) } catch (error) { setBlocks(blocks); showToast(error.message || 'Could not save this Overview layout.', 'error') } finally { setSavingBlocks(false) }
+  }
+  const flowConfig = METRIC_CONFIG.find((config) => config.key === 'flows')
+  const optionalMetric = (key) => METRIC_CONFIG.find((config) => config.key === key)
 
-  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{!isNewBrand && <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />}</header>
+  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{isAdmin && <OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} />}</header>
     {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
-      <MastersheetBanner brandName={brandName} />
-      <MetricGrid counts={overview.counts} brandName={brandName} status={overview.blockStatus?.metrics} onRetry={onRetry} />
       <div className="grid gap-5 lg:grid-cols-2">
-        <OutOfStockProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />
-        <ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} />
+        {blocks.includes('flows') && <MetricBox config={flowConfig} data={overview.counts?.flows} brandName={brandName} />}
+        {blocks.includes('out_of_stock') && <InventoryProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />}
+        {blocks.includes('near_out_of_stock') && <InventoryProducts near products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />}
+        {blocks.includes('operations') && <ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} />}
+        {blocks.includes('faqs') && <MetricBox config={optionalMetric('faqs')} data={overview.counts?.faqs} brandName={brandName} />}
+        {blocks.includes('sops') && <MetricBox config={optionalMetric('sops')} data={overview.counts?.sops} brandName={brandName} />}
+        {blocks.includes('tracked_variant_metafield') && <TrackedVariantMetafield brandName={brandName} />}
       </div>
-      {!setupHidden && (setupCelebrating ? <section className="rounded-xl border-2 border-ink bg-white p-6 text-center shadow-brutal"><span className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-emerald-500 bg-emerald-50 text-emerald-600"><SpringCheck animated /></span><h2 className="mt-3 text-xl font-extrabold">Setup complete</h2><p className="mt-1 text-sm text-muted">Orb is ready for your team.</p></section> : <SetupChecklist steps={setupSteps} />)}
     </main>}
   </div>
 }

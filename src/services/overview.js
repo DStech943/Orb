@@ -105,7 +105,7 @@ async function fetchViaApi(brandName, user) {
   const faqCounts  = splitByStatus(faqsPoints)
   const flowCounts = splitByStatus(flowsArr)
 
-  const products = productsPoints.slice(0, 8).map((p) => {
+  const products = productsPoints.map((p) => {
     const pl = p?.payload ?? {}
     const sh = pl.shopify ?? pl.structured?.shopify_admin ?? {}
     const firstImage = (...candidates) => candidates.flat(Infinity).find((image) => typeof image === 'string' && image.trim()) ?? null
@@ -119,6 +119,8 @@ async function fetchViaApi(brandName, user) {
       status: pl.status ?? sh.status ?? 'active',
       isOutOfStock,
       totalInventory,
+      variantCount: variants.length,
+      variants,
       outOfStockSince: pl.out_of_stock_since ?? pl.outOfStockSince ?? (isOutOfStock ? (pl.updated_at ?? pl.created_at ?? null) : null),
       imageUrl: firstImage(
         pl.featured_image?.url, pl.featured_image?.src, pl.featuredImage?.url, pl.featuredImage?.src,

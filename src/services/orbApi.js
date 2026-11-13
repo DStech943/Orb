@@ -501,6 +501,8 @@ export const getShopifyVariantMetafields = ({
   request(
     `/api/shopify/products/${encodeURIComponent(productId)}/variant-metafields?brand_name=${encodeURIComponent(brandName)}&variant_id=${encodeURIComponent(variantId)}`,
   );
+export const getShopifyVariantMetafieldTracker = ({ brandName }) =>
+  request(`/api/shopify/products/variant-metafield-tracker?brand_name=${encodeURIComponent(brandName)}`);
 export const saveShopifyProductMetafields = ({
   brandName,
   productId,
