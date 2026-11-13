@@ -26,11 +26,13 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, ORB_VOICE_WAKE_STATUS_EVENT, setOrbVoiceWakeEnabled, supportsOrbVoiceWake } from "../lib/orbVoiceWake";
 import { listBrands, invalidateBrandCache } from "../services/brands";
-import { getRemoteBrandAgentConnection, listBrandAgentFeedback, setRemoteBrandAgentConnection, updateBrandAgentFeedback } from "../services/orbApi";
+import { getRemoteBrandAgentConnection, listBrandAgentFeedback, setRemoteBrandAgentConnection, updateBrandAgentFeedback, activeBrandId, activeBrandName, sendDailySlackReport } from "../services/orbApi";
+import { getDailySlackReport, saveDailySlackReport } from "../services/overviewBlocks";
 
 const tabs = [
   { id: "profile", label: "Profile" },
   { id: "team", label: "Team" },
+  { id: "notifications", label: "Notifications" },
   { id: "billing", label: "Billing" },
 ];
 const team = [
@@ -48,6 +50,89 @@ const feedbackDate = (value) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Unknown date" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 };
+
+function DailySlackReportPanel() {
+  const { showToast } = useToast();
+  const brandId = activeBrandId();
+  const brandName = activeBrandName();
+  const [report, setReport] = useState({ enabled: false, hour: 9, timezone: "Asia/Kolkata" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!brandId) return;
+    let active = true;
+    getDailySlackReport(brandId)
+      .then((next) => { if (active) setReport(next); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [brandId]);
+
+  const update = async (patch) => {
+    const next = { ...report, ...patch };
+    setReport(next);
+    setSaving(true);
+    try { await saveDailySlackReport(brandId, next); showToast("Slack report settings saved."); }
+    catch (error) { setReport(report); showToast(error.message || "Could not save daily report settings.", "error"); }
+    finally { setSaving(false); }
+  };
+
+  const sendTest = async () => {
+    setSending(true);
+    try { await sendDailySlackReport(brandName); showToast("Daily report sent to the configured Slack channel."); }
+    catch (error) { showToast(error.message || "Could not send the daily report.", "error"); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <div className="grid max-w-xl gap-5">
+      <div>
+        <h3 className="text-xl font-extrabold">Notifications</h3>
+        <p className="mt-1 text-sm text-muted">Configure automated reports sent to your Slack workspace.</p>
+      </div>
+      <section className="rounded-xl border border-ink/15 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-extrabold">Daily Slack report</p>
+            <p className="mt-0.5 text-sm text-muted">Out of stock, low stock, active operations, and the tracked variant metafield.</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={report.enabled}
+            disabled={loading || saving}
+            onClick={() => update({ enabled: !report.enabled })}
+            className={`relative mt-1 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-2 ${report.enabled ? "bg-primary" : "bg-slate-300"} disabled:cursor-wait disabled:opacity-60`}
+          >
+            <span className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${report.enabled ? "translate-x-5" : "translate-x-0"}`} />
+          </button>
+        </div>
+        {report.enabled && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-ink/10 pt-4">
+            <label className="text-sm font-bold">
+              Send at{" "}
+              <select
+                value={report.hour}
+                onChange={(event) => update({ hour: Number(event.target.value) })}
+                className="ml-1 rounded border border-ink/20 bg-white px-2 py-1 text-sm"
+              >
+                {Array.from({ length: 24 }, (_, hour) => (
+                  <option key={hour} value={hour}>{String(hour).padStart(2, "0")}:00</option>
+                ))}
+              </select>{" "}
+              IST
+            </label>
+            <Button size="sm" variant="outline" onClick={sendTest} disabled={sending}>
+              {sending ? "Sending…" : "Send test report"}
+            </Button>
+            <span className="text-xs text-muted">Railway cron must call the daily-report endpoint at this time.</span>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
 
 export default function Settings() {
   const { user } = useAuth();
@@ -733,6 +818,9 @@ export default function Settings() {
                 </div>
               ) : !feedbackLoading && feedbackBrandId ? <p className="rounded-lg border border-dashed border-ink/20 bg-white p-5 text-sm text-muted">No feedback has been submitted for this brand yet.</p> : null}
             </div>
+          )}
+          {active === "notifications" && (
+            <DailySlackReportPanel />
           )}
           {active === "billing" && (
             <div className="grid gap-5 lg:grid-cols-2">
