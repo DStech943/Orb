@@ -17,11 +17,11 @@ import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
 import { MOCK_STATES, useOverview } from '../services/overview'
-import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker, sendDailySlackReport } from '../services/orbApi'
+import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker } from '../services/orbApi'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
-import { DEFAULT_OVERVIEW_BLOCKS, getDailySlackReport, getOverviewBlocks, saveDailySlackReport, saveOverviewBlocks } from '../services/overviewBlocks'
+import { DEFAULT_OVERVIEW_BLOCKS, getOverviewBlocks, saveOverviewBlocks } from '../services/overviewBlocks'
 
 const WELCOME_LINES = [
   'Good support is just consistency, repeated.',
@@ -406,7 +406,7 @@ const OVERVIEW_BLOCK_OPTIONS = [
 ]
 
 function OverviewBlockCustomizer({ blocks, onChange, saving }) {
-  return <details className="mt-4 rounded-lg border border-ink/15 bg-white/80 p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold text-ink"><SlidersHorizontal size={16} />Customize blocks for this brand</summary><p className="mt-2 text-xs leading-5 text-muted">These choices are shared with everyone viewing this brand’s Overview.</p><div className="mt-3 grid gap-2 sm:grid-cols-2">{OVERVIEW_BLOCK_OPTIONS.map((option) => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-ink/10 p-2.5 hover:border-primary/40"><input type="checkbox" checked={blocks.includes(option.id)} onChange={(event) => onChange(option.id, event.target.checked)} disabled={saving} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block text-sm font-bold">{option.label}</span><span className="mt-0.5 block text-xs leading-4 text-muted">{option.description}</span></span></label>)}</div>{saving ? <p className="mt-3 text-xs font-bold text-muted">Saving layout…</p> : null}</details>
+  return <details className="absolute right-0 top-0 z-20"><summary aria-label="Customize overview blocks" title="Customize overview blocks" className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-full border border-ink/15 bg-white text-ink shadow-sm transition hover:border-primary hover:text-primary"><SlidersHorizontal size={16} /></summary><div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-ink/15 bg-white p-3 shadow-lg"><p className="text-xs leading-5 text-muted">Choose which blocks appear for this brand.</p><div className="mt-3 grid gap-2">{OVERVIEW_BLOCK_OPTIONS.map((option) => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-ink/10 p-2.5 hover:border-primary/40"><input type="checkbox" checked={blocks.includes(option.id)} onChange={(event) => onChange(option.id, event.target.checked)} disabled={saving} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block text-sm font-bold">{option.label}</span><span className="mt-0.5 block text-xs leading-4 text-muted">{option.description}</span></span></label>)}</div>{saving ? <p className="mt-3 text-xs font-bold text-muted">Saving layout…</p> : null}</div></details>
 }
 
 function DailySlackReportControl({ brandId, brandName }) {
@@ -642,8 +642,9 @@ function BrandOverview({ overview, onRetry }) {
   const flowConfig = METRIC_CONFIG.find((config) => config.key === 'flows')
   const optionalMetric = (key) => METRIC_CONFIG.find((config) => config.key === key)
 
-  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{isAdmin && <><OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} /><DailySlackReportControl brandId={brandId} brandName={brandName} /></>}</header>
+  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{!isNewBrand && <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />}{isAdmin && <><OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} /><DailySlackReportControl brandId={brandId} brandName={brandName} /></>}</header>
     {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
+      <MastersheetBanner brandName={brandName} />
       <div className="grid gap-5 lg:grid-cols-2">
         {blocks.includes('flows') && <MetricBox config={flowConfig} data={overview.counts?.flows} brandName={brandName} />}
         {blocks.includes('out_of_stock') && <InventoryProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />}
