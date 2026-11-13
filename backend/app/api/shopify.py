@@ -765,45 +765,93 @@ async def variant_metafield_tracker(
     domain, access_token, _source = await _resolve_credentials(request, brand_name, True, user)
     if not domain or not access_token:
         raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
-    query = """
-    query OrbVariantMetafieldTracker($first: Int!) {
+    # Fetch variant metafield definitions first
+    definitions_query = """
+    query OrbVariantMetafieldDefinitions {
       metafieldDefinitions(first: 100, ownerType: PRODUCTVARIANT) {
         nodes { id name namespace key description type { name } }
       }
-      products(first: $first) {
+    }
+    """
+    try:
+        def_data = await _admin_query(request.app.state.settings, definitions_query, {}, domain=admin_domain(domain), access_token=access_token)
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    definitions = []
+    for definition in ((def_data.get("metafieldDefinitions") or {}).get("nodes") or []):
+        if not isinstance(definition, dict):
+            continue
+        namespace, key = str(definition.get("namespace") or ""), str(definition.get("key") or "")
+        if namespace and key:
+            field_type = definition.get("type") if isinstance(definition.get("type"), dict) else {}
+            definitions.append({
+                "id": definition.get("id"),
+                "name": definition.get("name") or f"{namespace}.{key}",
+                "namespace": namespace,
+                "key": key,
+                "type": field_type.get("name") or "",
+                "description": definition.get("description") or "",
+            })
+
+    # Fetch products and their variant metafields in batches to respect query cost limits
+    products_query = """
+    query OrbVariantMetafieldProducts($first: Int!, $after: String) {
+      products(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id title handle
           variants(first: 100) {
             nodes {
               id title sku
-              metafields(first: 100) { nodes { id namespace key type value } }
+              metafields(first: 15) { nodes { id namespace key type value } }
             }
           }
         }
       }
     }
     """
-    try:
-        data = await _admin_query(request.app.state.settings, query, {"first": 250}, domain=admin_domain(domain), access_token=access_token)
-    except ShopifyAdminUnavailable as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    definitions = []
-    for definition in ((data.get("metafieldDefinitions") or {}).get("nodes") or []):
-        if not isinstance(definition, dict):
-            continue
-        namespace, key = str(definition.get("namespace") or ""), str(definition.get("key") or "")
-        if namespace and key:
-            field_type = definition.get("type") if isinstance(definition.get("type"), dict) else {}
-            definitions.append({"id": definition.get("id"), "name": definition.get("name") or f"{namespace}.{key}", "namespace": namespace, "key": key, "type": field_type.get("name") or "", "description": definition.get("description") or ""})
     variants = []
-    for product in ((data.get("products") or {}).get("nodes") or []):
-        if not isinstance(product, dict):
-            continue
-        for variant in ((product.get("variants") or {}).get("nodes") or []):
-            if not isinstance(variant, dict):
+    cursor: str | None = None
+    # Up to 5 pages of 50 products = 250 products max (well within cost limit per query)
+    for _ in range(5):
+        try:
+            prod_data = await _admin_query(
+                request.app.state.settings,
+                products_query,
+                {"first": 50, "after": cursor},
+                domain=admin_domain(domain),
+                access_token=access_token,
+            )
+        except ShopifyAdminUnavailable as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        products_page = (prod_data.get("products") or {})
+        for product in (products_page.get("nodes") or []):
+            if not isinstance(product, dict):
                 continue
-            values = {f"{field.get('namespace')}.{field.get('key')}": str(field.get("value") or "") for field in ((variant.get("metafields") or {}).get("nodes") or []) if isinstance(field, dict)}
-            variants.append({"id": variant.get("id"), "title": variant.get("title") or "Default title", "sku": variant.get("sku") or "", "product_id": product.get("id"), "product_title": product.get("title") or "Untitled product", "values": values})
+            for variant in ((product.get("variants") or {}).get("nodes") or []):
+                if not isinstance(variant, dict):
+                    continue
+                values = {
+                    f"{field.get('namespace')}.{field.get('key')}": str(field.get("value") or "")
+                    for field in ((variant.get("metafields") or {}).get("nodes") or [])
+                    if isinstance(field, dict)
+                }
+                variants.append({
+                    "id": variant.get("id"),
+                    "title": variant.get("title") or "Default title",
+                    "sku": variant.get("sku") or "",
+                    "product_id": product.get("id"),
+                    "product_title": product.get("title") or "Untitled product",
+                    "values": values,
+                })
+
+        page_info = products_page.get("pageInfo") or {}
+        if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
+            break
+        cursor = str(page_info["endCursor"])
+
     return {"definitions": definitions, "variants": variants}
 
 
