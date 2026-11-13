@@ -372,7 +372,7 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
   </section>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, initialDraft = null, assistantDraft = null }) {
+export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isFaq = kind === 'faq'
@@ -626,10 +626,11 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     </div>
     {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Open the matching product and choose the Shopify metafield that should receive this editable draft.</p></section>}
     <section className="mt-6 rounded-lg border-2 border-ink bg-white p-4 shadow-brutal">
-      <div className={`grid gap-3 ${isProduct ? 'md:grid-cols-[1fr_150px_190px]' : 'md:grid-cols-[1fr_150px_150px]'}`}>
+      <div className={`grid items-center gap-3 ${isProduct ? (extraFilterAction ? 'md:grid-cols-[1fr_150px_190px_auto]' : 'md:grid-cols-[1fr_150px_190px]') : 'md:grid-cols-[1fr_150px_150px]'}`}>
         <label className="flex items-center gap-2 rounded-md border-2 border-ink px-3 py-2"><Search size={16} /><input className="min-w-0 flex-1 outline-none" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>
         <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}>{isProduct ? <><option>All</option><option>Active</option><option>Draft</option></> : <><option>All</option><option>Draft</option><option>Approved</option></>}</Select>
         {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
+        {extraFilterAction}
       </div>
       {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
       <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} />}</div>
