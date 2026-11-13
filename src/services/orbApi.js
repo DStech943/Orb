@@ -158,6 +158,7 @@ export const sendSlackEscalation = async (
   }
   return response.json();
 };
+export const sendDailySlackReport = (brandName) => request('/api/reports/slack/daily', { method: 'POST', body: JSON.stringify({ brand_name: brandName }) });
 export const listRemoteBrands = () => request("/api/brands", { cacheTtl: 60_000 });
 export const listBrandCategories = () => request("/api/categories", { cacheTtl: 300_000 });
 export const setRemoteBrandCategory = (brandId, industryCategory) =>
@@ -501,6 +502,8 @@ export const getShopifyVariantMetafields = ({
   request(
     `/api/shopify/products/${encodeURIComponent(productId)}/variant-metafields?brand_name=${encodeURIComponent(brandName)}&variant_id=${encodeURIComponent(variantId)}`,
   );
+export const getShopifyVariantMetafieldTracker = ({ brandName }) =>
+  request(`/api/shopify/products/variant-metafield-tracker?brand_name=${encodeURIComponent(brandName)}`);
 export const saveShopifyProductMetafields = ({
   brandName,
   productId,

@@ -7,14 +7,21 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel, Field
 
-from app.api.knowledge import _remote_brand_by_name, _supabase_rows
+from app.api.knowledge import _remote_brand_by_name, _supabase_rows, _supabase_service_rows
 from app.auth import User, current_user
+from app.api.shopify import _resolve_credentials
+from app.scraper.shopify import ShopifyAdminUnavailable, _admin_query, admin_domain, list_admin_products
 
 
 router = APIRouter(prefix="/api/escalations", tags=["escalations"])
 _SLACK_API = "https://slack.com/api"
 _MAX_ATTACHMENTS = 5
+
+
+class DailySlackReportRequest(BaseModel):
+    brand_name: str = Field(min_length=1, max_length=160)
 
 
 def _platform_config(value: Any) -> dict[str, Any]:
@@ -126,3 +133,67 @@ async def send_slack_escalation(
             })
 
     return {"ok": True, "channel_id": channel_id, "attachments_uploaded": len(attachment_data)}
+
+
+@router.post("/daily")
+async def send_daily_slack_report(
+    payload: DailySlackReportRequest, request: Request, user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Post a read-only daily brand snapshot to its configured Slack channel."""
+    settings = request.app.state.settings
+    if not settings.slack_bot_token:
+        raise HTTPException(status_code=503, detail="Daily Slack reports are not configured yet. Add SLACK_BOT_TOKEN in Railway.")
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    configured_channel = _platform_config(brand.get("platform_config")).get("slack_channel_id")
+    channel_id = str(configured_channel or settings.slack_channel_id or "").strip()
+    if not channel_id:
+        raise HTTPException(status_code=422, detail="No Slack channel is configured for this brand.")
+    domain, access_token, _source = await _resolve_credentials(request, payload.brand_name, True, user)
+    if not domain or not access_token:
+        raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
+    try:
+        products = await list_admin_products(settings, 250, domain=admin_domain(domain), access_token=access_token)
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    out_of_stock, near_out = [], []
+    for product in products:
+        if str(product.get("status") or "ACTIVE").upper() != "ACTIVE":
+            continue
+        variants = ((product.get("variants") or {}).get("nodes") or []) if isinstance(product.get("variants"), dict) else (product.get("variants") or [])
+        quantities = [int(variant.get("inventoryQuantity") or 0) for variant in variants if isinstance(variant, dict) and variant.get("inventoryQuantity") is not None]
+        if not quantities:
+            continue
+        total = sum(quantities)
+        name = str(product.get("title") or "Untitled product")
+        if total <= 0: out_of_stock.append(name)
+        elif total < 7: near_out.append(f"{name} — {total} left")
+
+    operations = await _supabase_rows(request, "orb_operational_updates", {"select": "message,status", "brand_id": f"eq.{brand['id']}", "status": "in.(recorded,ready_for_review,applied)", "order": "created_at.desc", "limit": "5"})
+    settings_rows = await _supabase_service_rows(request, "orb_overview_block_settings", {"select": "tracked_variant_metafield", "brand_id": f"eq.{brand['id']}", "limit": "1"})
+    tracker = (settings_rows[0].get("tracked_variant_metafield") or {}) if settings_rows else {}
+    tracker_lines: list[str] = []
+    field = str(tracker.get("field") or "")
+    if field and "." in field:
+        namespace, key = field.split(".", 1)
+        query = """query OrbDailyTrackedField($namespace: String!, $key: String!) { products(first: 250) { nodes { title variants(first: 100) { nodes { title metafield(namespace: $namespace, key: $key) { value } } } } } }"""
+        try:
+            tracked_data = await _admin_query(settings, query, {"namespace": namespace, "key": key}, domain=admin_domain(domain), access_token=access_token)
+            for product in ((tracked_data.get("products") or {}).get("nodes") or []):
+                for variant in ((product.get("variants") or {}).get("nodes") or []):
+                    value = str(((variant.get("metafield") or {}).get("value") or "")).strip()
+                    matches = bool(value) if tracker.get("mode") == "nonempty" else value.lower() in {"true", "1", "yes"}
+                    if matches: tracker_lines.append(f"{product.get('title')} / {variant.get('title')} — {value}")
+        except ShopifyAdminUnavailable:
+            tracker_lines = []
+
+    def section(title: str, values: list[str], empty: str) -> str:
+        body = "\n".join(f"• {_slack_text(value)}" for value in values[:10]) if values else empty
+        return f"*{title} ({len(values)})*\n{body}"
+    name = _slack_text(str(brand.get("name") or payload.brand_name))
+    parts = [f"*Orb daily status — {name}*", section("Out of stock", out_of_stock, "All active products have inventory."), section("Near out of stock (<7)", near_out, "No active products are below 7 items."), section("Active operations", [str(row.get("message") or "Operational update") for row in operations], "No active operations.")]
+    if field: parts.append(section(f"Tracked variant metafield: {field}", tracker_lines, "No variants currently match this rule."))
+    report = "\n\n".join(parts)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        await _slack_json(client, settings.slack_bot_token, "chat.postMessage", {"channel": channel_id, "text": report})
+    return {"ok": True, "channel_id": channel_id, "report": report}

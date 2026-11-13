@@ -405,6 +405,12 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const { data: fetchedData, loading, error, reload } = useAsync(list, [list, brandVersion])
   const data = Array.isArray(fetchedData) ? fetchedData : []
   useEffect(() => {
+    if (!isProduct) return undefined
+    const refreshAfterBackgroundSync = () => reload()
+    window.addEventListener('orb:products-synced', refreshAfterBackgroundSync)
+    return () => window.removeEventListener('orb:products-synced', refreshAfterBackgroundSync)
+  }, [isProduct, reload])
+  useEffect(() => {
     if (!initialDraft || handledHandoffRef.current === initialDraft.id) return
     handledHandoffRef.current = initialDraft.id
     scrollPosition.current = window.scrollY
