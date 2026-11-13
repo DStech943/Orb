@@ -233,7 +233,10 @@ function ProductCard({ product, index, drop, onUnavailable }) {
 function ProductBlock({ products, productError, loading, brandName, onRetry }) {
   const [unavailableImageIds, setUnavailableImageIds] = useState([])
   const selected = useMemo(() => {
-    const items = (products || []).filter((product) => product.imageUrl && !unavailableImageIds.includes(product.id))
+    const items = (products || []).filter((product) => {
+      const isActive = String(product?.status || 'active').toLowerCase() === 'active'
+      return isActive && product.imageUrl && !unavailableImageIds.includes(product.id)
+    })
     const hasBestSellers = items.some((product) => product.bestSellerScore !== null && product.bestSellerScore !== undefined)
     return items.sort((a, b) => {
       if (hasBestSellers) return Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
@@ -278,6 +281,8 @@ const formatDaysAgo = (dateValue) => {
 }
 
 function InventoryProducts({ products = [], status, onRetry, near = false }) {
+  const [modalOpen, setModalOpen] = useState(false)
+
   if (status === 'loading') {
     return (
       <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
@@ -298,28 +303,103 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
     return near ? Number(product.variantCount || 0) > 0 && Number(product.totalInventory) > 0 && Number(product.totalInventory) < 7 : Boolean(product.isOutOfStock)
   })
 
-  return (
-    <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-            {near ? 'Near out of stock' : 'Out of stock products'}
-          </p>
-          <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 border border-rose-200">
-            {outOfStockItems.length}
-          </span>
-        </div>
-        <Link to="/app/products" className="text-xs font-extrabold text-primary hover:underline">
-          View catalog
-        </Link>
-      </div>
+  const visibleItems = outOfStockItems.slice(0, 3)
+  const hasMore = outOfStockItems.length > 3
 
-      {outOfStockItems.length > 0 ? (
-        <div className="mt-3 divide-y divide-ink/10">
-          {outOfStockItems.slice(0, 5).map((item) => {
+  return (
+    <>
+      <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
+              {near ? 'Near out of stock' : 'Out of stock products'}
+            </p>
+            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 border border-rose-200">
+              {outOfStockItems.length}
+            </span>
+          </div>
+          <Link to="/app/products" className="text-xs font-extrabold text-primary hover:underline">
+            View catalog
+          </Link>
+        </div>
+
+        {outOfStockItems.length > 0 ? (
+          <>
+            <div className="mt-3 divide-y divide-ink/10">
+              {visibleItems.map((item) => {
+                const timeAgo = formatDaysAgo(item.outOfStockSince)
+                return (
+                  <div key={item.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0 flex items-center gap-3">
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.title}
+                          className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 object-cover bg-slate-50"
+                        />
+                      ) : (
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-100 text-slate-400">
+                          <PackageX size={18} />
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-extrabold text-ink">
+                          {item.title}
+                        </p>
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
+                          {item.price && <span>{item.price}</span>}
+                          {timeAgo && (
+                            <>
+                              <span>•</span>
+                              <span className="text-rose-600 font-semibold">
+                                {near ? `${item.totalInventory} left` : `Out of stock: ${timeAgo}`}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Link
+                      to={`/app/products?product=${encodeURIComponent(item.id)}`}
+                      className="shrink-0 text-xs font-bold text-slate-500 hover:text-primary transition"
+                      title="Inspect product"
+                    >
+                      <ArrowUpRight size={15} />
+                    </Link>
+                  </div>
+                )
+              })}
+            </div>
+
+            {hasMore && (
+              <button
+                type="button"
+                onClick={() => setModalOpen(true)}
+                className="mt-3 w-full rounded-lg border border-ink/15 bg-slate-50/80 py-2 text-center text-xs font-bold text-ink hover:bg-slate-100 hover:border-primary/40 transition"
+              >
+                View all {outOfStockItems.length} {near ? 'near out of stock' : 'out of stock'} products →
+              </button>
+            )}
+          </>
+        ) : (
+          <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted">
+            <Check size={17} className="text-emerald-600" />
+            {near ? 'No active product has fewer than 7 items left.' : 'All active products have available inventory.'}
+          </div>
+        )}
+      </section>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={near ? `Near out of stock products (${outOfStockItems.length})` : `Out of stock products (${outOfStockItems.length})`}
+      >
+        <div className="max-h-[60vh] overflow-y-auto pr-1 divide-y divide-ink/10">
+          {outOfStockItems.map((item) => {
             const timeAgo = formatDaysAgo(item.outOfStockSince)
             return (
-              <div key={item.id} className="flex items-center justify-between gap-3 py-3">
+              <div key={item.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                 <div className="min-w-0 flex items-center gap-3">
                   {item.imageUrl ? (
                     <img
@@ -352,22 +432,19 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
 
                 <Link
                   to={`/app/products?product=${encodeURIComponent(item.id)}`}
-                  className="shrink-0 text-xs font-bold text-slate-500 hover:text-primary transition"
+                  onClick={() => setModalOpen(false)}
+                  className="shrink-0 text-xs font-bold text-primary hover:underline flex items-center gap-1"
                   title="Inspect product"
                 >
-                  <ArrowUpRight size={15} />
+                  <span>Inspect</span>
+                  <ArrowUpRight size={14} />
                 </Link>
               </div>
             )
           })}
         </div>
-      ) : (
-        <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted">
-          <Check size={17} className="text-emerald-600" />
-          {near ? 'No active product has fewer than 7 items left.' : 'All active products have available inventory.'}
-        </div>
-      )}
-    </section>
+      </Modal>
+    </>
   )
 }
 

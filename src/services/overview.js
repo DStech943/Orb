@@ -105,7 +105,14 @@ async function fetchViaApi(brandName, user) {
   const faqCounts  = splitByStatus(faqsPoints)
   const flowCounts = splitByStatus(flowsArr)
 
-  const products = productsPoints.map((p) => {
+  const products = productsPoints
+    .filter((p) => {
+      const pl = p?.payload ?? {}
+      const sh = pl.shopify ?? pl.structured?.shopify_admin ?? {}
+      const s = String(pl.status ?? sh.status ?? p?.status ?? 'active').toLowerCase()
+      return s === 'active' || s === 'published'
+    })
+    .map((p) => {
     const pl = p?.payload ?? {}
     const sh = pl.shopify ?? pl.structured?.shopify_admin ?? {}
     const firstImage = (...candidates) => candidates.flat(Infinity).find((image) => typeof image === 'string' && image.trim()) ?? null
