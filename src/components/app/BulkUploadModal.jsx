@@ -330,9 +330,20 @@ export default function BulkUploadModal({
 
       const result = await bulkUploadKnowledge(kindKey, payloadItems)
       const count = result?.created ?? payloadItems.length
-      showToast(
-        `Successfully imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}.`
-      )
+      const published = result?.published ?? 0
+      if (published > 0) {
+        showToast(
+          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')} and published to Qdrant.`
+        )
+      } else if (defaultStatus === 'Draft') {
+        showToast(
+          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ draft' : 'FAQ drafts') : (count === 1 ? 'SOP draft' : 'SOP drafts')}. Click "Approve all drafts" to publish them to Qdrant.`
+        )
+      } else {
+        showToast(
+          `Successfully imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}.`
+        )
+      }
       if (onSuccess) onSuccess()
       onClose()
     } catch (err) {
@@ -538,15 +549,15 @@ export default function BulkUploadModal({
           <label className="grid gap-1 text-xs font-bold text-slate-700">
             Initial Status
             <span className="text-[11px] font-normal text-slate-500">
-              Mark entries as Draft for review or directly Approved
+              Draft (requires approval before Qdrant) or Approved (stored in Qdrant)
             </span>
             <select
               value={defaultStatus}
               onChange={(e) => setDefaultStatus(e.target.value)}
               className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary"
             >
-              <option value="Draft">Draft (recommended for review)</option>
-              <option value="Approved">Approved</option>
+              <option value="Draft">Draft (review before publishing to Qdrant)</option>
+              <option value="Approved">Approved (indexes directly into Qdrant)</option>
             </select>
           </label>
         </div>

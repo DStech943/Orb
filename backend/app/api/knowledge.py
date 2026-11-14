@@ -2629,7 +2629,7 @@ async def create_bulk_knowledge(
     if not db_rows:
         raise HTTPException(status_code=400, detail=f"No valid {kind} entries were found in the uploaded data.")
 
-    inserted = 0
+    inserted_rows = []
     batch_size = 50
     for i in range(0, len(db_rows), batch_size):
         chunk = db_rows[i:i + batch_size]
@@ -2640,9 +2640,42 @@ async def create_bulk_knowledge(
             params={"select": "id,payload,status,created_at"},
             payload=chunk,
         )
-        inserted += len(rows) if rows else len(chunk)
+        if rows:
+            inserted_rows.extend(rows)
 
-    return {"created": inserted, "kind": kind}
+    inserted = len(inserted_rows) or len(db_rows)
+
+    # If any items were directly uploaded as Approved, publish them to Qdrant immediately!
+    approved_items = [
+        {"id": str(r["id"]), "payload": decode_jsonb(r.get("payload")) or {}}
+        for r in inserted_rows
+        if str(r.get("status") or "").lower() == "approved" and "id" in r
+    ]
+    published_count = 0
+    if approved_items:
+        try:
+            content_kind = "sop" if kind == "sops" else "faq"
+            await publish_points(
+                request.app.state.db,
+                request.app.state.settings,
+                brand["name"],
+                content_kind,
+                approved_items,
+            )
+            published_count = len(approved_items)
+            approved_ids = [item["id"] for item in approved_items]
+            await _supabase_service_write(
+                request,
+                "PATCH",
+                "orb_generated_content",
+                params={"id": f"in.({','.join(approved_ids)})"},
+                payload={"qdrant_published_at": datetime.now(timezone.utc).isoformat(), "qdrant_error": None},
+                prefer="return=minimal",
+            )
+        except Exception as exc:
+            logger.warning("Could not automatically publish bulk approved points to Qdrant: %s", exc)
+
+    return {"created": inserted, "published": published_count, "kind": kind}
 
 
 def _flow_sop_node_text(node: dict[str, Any]) -> str:
