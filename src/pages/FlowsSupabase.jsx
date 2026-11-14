@@ -2477,7 +2477,7 @@ function Builder({
         });
       controls.remove();
     };
-  }, [historyStatus.undo, historyStatus.redo, zoom, orbPanelOpen]);
+  }, [historyStatus.undo, historyStatus.redo, zoom, orbPanelOpen, toolboxOpen]);
   useEffect(() => {
     const canvas = stageRef.current?.parentElement?.parentElement;
     const controls = zoomControlsRef.current;
@@ -2508,7 +2508,7 @@ function Builder({
         zIndex: "",
       });
     };
-  }, [orbPanelOpen]);
+  }, [orbPanelOpen, toolboxOpen]);
   const drop = (event) => {
     event.preventDefault();
     const type = event.dataTransfer.getData("application/orb-flow-block");
@@ -3057,7 +3057,9 @@ function Builder({
           </aside>
           )}
           <main
-            className={`relative min-w-0 overflow-auto bg-[#fcfdff] p-5 ${orbWorking || flowReveal ? "orb-flow-generating" : ""}`}
+            className={`relative min-w-0 overflow-auto bg-[#fcfdff] transition-[padding] duration-200 ${
+              toolboxOpen ? "p-5" : "p-5 pl-20 sm:pl-36 lg:pl-48"
+            } ${orbWorking || flowReveal ? "orb-flow-generating" : ""}`}
           >
             {!toolboxOpen && (
               <button
