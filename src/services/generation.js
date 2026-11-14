@@ -1,5 +1,5 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { activeBrandName, deleteKnowledge, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createAssistantFaq, createManualSop } from './orbApi'
+import { activeBrandName, deleteKnowledge, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createAssistantFaq, createManualSop, bulkCreateKnowledge } from './orbApi'
 const KEY = 'orb_generation_data_v1'
 const KNOWLEDGE_CACHE_MS = 20_000
 const knowledgeCache = new Map()
@@ -133,3 +133,48 @@ export async function addSource(source) { await wait(); const data = read(); con
 export async function removeSource(id) { await wait(); const data = read(); data.sources = data.sources.filter((item) => item.id !== id); write(data) }
 export async function getOverviewData() { await wait(); const data = read(); return { sops: data.sops, faqs: data.faqs, products: data.products, sources: data.sources, generations: data.generations } }
 export async function seedSampleData() { await wait(); write(clone(sampleData)); return clone(sampleData) }
+export async function bulkUploadKnowledge(kind, items) {
+  const brandName = activeBrandName()
+  if (hasOrbApi) {
+    const result = await bulkCreateKnowledge(kind, items, brandName)
+    invalidateKnowledgeCache(kind)
+    return result
+  }
+  await wait(200)
+  const data = read()
+  if (kind === 'faqs') {
+    const nextFaqs = items.map((item) => ({
+      id: uid('faq'),
+      question: item.question,
+      answer: item.answer,
+      category: item.category || 'Support',
+      status: item.status || 'Draft',
+      source: 'Bulk upload',
+      updated: 'Just now',
+    }))
+    data.faqs = [...nextFaqs, ...(data.faqs || [])]
+    write(data)
+    return { created: nextFaqs.length }
+  }
+  if (kind === 'sops') {
+    const nextSops = items.map((item) => ({
+      id: uid('sop'),
+      title: item.title || 'Untitled SOP',
+      situation: item.situation || item.title || '',
+      category: item.category || 'Support',
+      lifecycle: item.lifecycle_stage || '—',
+      status: item.status || 'Draft',
+      source: 'Bulk upload',
+      updated: 'Just now',
+      updatedBy: 'Orb user',
+      checkFirst: item.checkFirst || item.check_first || '',
+      whatToDo: item.whatToDo || item.what_to_do || '',
+      whatToSay: item.whatToSay || item.what_to_say || '',
+      escalateTo: item.escalateTo || item.escalate_to || '',
+    }))
+    data.sops = [...nextSops, ...(data.sops || [])]
+    write(data)
+    return { created: nextSops.length }
+  }
+  return { created: 0 }
+}

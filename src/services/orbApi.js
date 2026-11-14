@@ -290,6 +290,11 @@ export const createManualSop = ({ title, situation, checkFirst, whatToDo, whatTo
       what_to_say: whatToSay || "", escalate_to: escalateTo || "", category,
     }),
   });
+export const bulkCreateKnowledge = (kind, items, brandName = activeBrandName()) =>
+  request(`/api/knowledge/${kind}/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, items }),
+  });
 export const createSopFromFlow = (flow, brandName = activeBrandName()) =>
   request("/api/knowledge/sops/from-flow", {
     method: "POST",

@@ -217,6 +217,11 @@ class ManualSopCreate(RequestModel):
     category: str = Field(default="Support", max_length=200)
 
 
+class BulkKnowledgeCreate(RequestModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    items: list[dict[str, Any]] = Field(min_length=1, max_length=1_000)
+
+
 class OrbGuideRequest(RequestModel):
     page_path: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=1, max_length=1_200)
@@ -2546,6 +2551,98 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User 
     row = rows[0]
     stored = decode_jsonb(row.get("payload"))
     return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else sop}}
+
+
+@router.post("/knowledge/{kind}/bulk", status_code=status.HTTP_201_CREATED)
+async def create_bulk_knowledge(
+    kind: Literal["sops", "faqs"],
+    payload: BulkKnowledgeCreate,
+    request: Request,
+    _: User = Depends(_admin),
+) -> dict[str, Any]:
+    """Create multiple reviewable FAQs or SOPs in bulk from a CSV or pasted tabular text."""
+    brand = await _remote_brand_by_name(request, payload.brand_name)
+    brand_id = brand["id"]
+    db_rows: list[dict[str, Any]] = []
+
+    if kind == "faqs":
+        for item in payload.items:
+            question = str(item.get("question") or "").strip()
+            answer = str(item.get("answer") or "").strip()
+            if not question or not answer:
+                continue
+            category = str(item.get("category") or "").strip() or "Customer support"
+            status_val = str(item.get("status") or "Draft").strip().capitalize()
+            if status_val not in ("Draft", "Approved"):
+                status_val = "Draft"
+            faq = {
+                "question": question,
+                "answer": answer,
+                "category": category,
+                "status": status_val,
+                "source": "Bulk upload",
+                "source_urls": [],
+            }
+            db_rows.append({
+                "brand_id": brand_id,
+                "kind": "faq",
+                "status": status_val.lower(),
+                "payload": faq,
+                "evidence": [],
+            })
+    elif kind == "sops":
+        for item in payload.items:
+            title = str(item.get("title") or item.get("name") or "").strip()
+            if not title:
+                continue
+            situation = str(item.get("situation") or "").strip() or title
+            check_first = str(item.get("check_first") or item.get("checkFirst") or "").strip()
+            what_to_do = str(item.get("what_to_do") or item.get("whatToDo") or "").strip()
+            what_to_say = str(item.get("what_to_say") or item.get("whatToSay") or "").strip()
+            escalate_to = str(item.get("escalate_to") or item.get("escalateTo") or "").strip()
+            category = str(item.get("category") or "").strip() or "Support"
+            status_val = str(item.get("status") or "Draft").strip().capitalize()
+            if status_val not in ("Draft", "Approved"):
+                status_val = "Draft"
+            sop = {
+                "title": title,
+                "situation": situation,
+                "category": category,
+                "lifecycle_stage": str(item.get("lifecycle_stage") or "").strip(),
+                "status": status_val,
+                "source": "Bulk upload",
+                "updated_by": "Orb user",
+                "check_first": check_first,
+                "what_to_do": what_to_do,
+                "what_to_say": what_to_say,
+                "escalate_to": escalate_to,
+                "source_urls": [],
+            }
+            db_rows.append({
+                "brand_id": brand_id,
+                "kind": "sop",
+                "status": status_val.lower(),
+                "payload": sop,
+                "evidence": [],
+            })
+
+    if not db_rows:
+        raise HTTPException(status_code=400, detail=f"No valid {kind} entries were found in the uploaded data.")
+
+    inserted = 0
+    batch_size = 50
+    for i in range(0, len(db_rows), batch_size):
+        chunk = db_rows[i:i + batch_size]
+        rows = await _supabase_service_write(
+            request,
+            "POST",
+            "orb_generated_content",
+            params={"select": "id,payload,status,created_at"},
+            payload=chunk,
+        )
+        inserted += len(rows) if rows else len(chunk)
+
+    return {"created": inserted, "kind": kind}
 
 
 def _flow_sop_node_text(node: dict[str, Any]) -> str:
