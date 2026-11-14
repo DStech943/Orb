@@ -20,6 +20,8 @@ import {
   Mic,
   Minimize2,
   Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   Plus,
   RotateCcw,
@@ -1644,6 +1646,7 @@ function Builder({
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
   const [orbPanelOpen, setOrbPanelOpen] = useState(withOrb);
+  const [toolboxOpen, setToolboxOpen] = useState(true);
   useEffect(() => {
     setOrbPanelOpen(withOrb);
   }, [withOrb]);
@@ -2818,6 +2821,20 @@ function Builder({
             <ArrowLeft size={16} />
             All flows
           </button>
+          <button
+            type="button"
+            onClick={() => setToolboxOpen((open) => !open)}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-bold transition ${
+              toolboxOpen
+                ? "border-slate-200 text-slate-600 hover:bg-slate-100"
+                : "border-primary bg-primary-tint text-primary hover:bg-primary/20"
+            }`}
+            title={toolboxOpen ? "Collapse toolbox" : "Show toolbox"}
+            aria-label={toolboxOpen ? "Collapse toolbox" : "Show toolbox"}
+          >
+            {toolboxOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+            <span>Toolbox</span>
+          </button>
           <input
             value={draft.title}
             onChange={(event) =>
@@ -2908,13 +2925,33 @@ function Builder({
           </div>
         </Modal>
         <div
-          className={`grid min-h-0 flex-1 ${orbPanelOpen ? "xl:grid-cols-[238px_minmax(0,1fr)_350px]" : "lg:grid-cols-[238px_1fr]"}`}
+          className={`grid min-h-0 flex-1 ${
+            toolboxOpen
+              ? orbPanelOpen
+                ? "xl:grid-cols-[238px_minmax(0,1fr)_350px] lg:grid-cols-[238px_1fr]"
+                : "lg:grid-cols-[238px_1fr]"
+              : orbPanelOpen
+              ? "xl:grid-cols-[minmax(0,1fr)_350px] grid-cols-1"
+              : "grid-cols-1"
+          }`}
         >
-          <aside className="border-b border-slate-200 bg-slate-50 p-4 lg:border-b-0 lg:border-r">
-            <div className="flex items-center justify-between">
-              <h2 className="font-extrabold">Toolbox</h2>
-              <span className="text-[10px] text-slate-400">v1.0</span>
-            </div>
+          {toolboxOpen && (
+            <aside className="border-b border-slate-200 bg-slate-50 p-4 lg:border-b-0 lg:border-r">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="font-extrabold">Toolbox</h2>
+                  <span className="text-[10px] text-slate-400">v1.0</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setToolboxOpen(false)}
+                  className="rounded p-1 text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
+                  title="Collapse toolbox"
+                  aria-label="Collapse toolbox"
+                >
+                  <PanelLeftClose size={16} />
+                </button>
+              </div>
             <p className="mt-1 text-xs leading-5 text-slate-500">
               Click or drag a block onto the canvas.
             </p>
@@ -3018,9 +3055,22 @@ function Builder({
               </button>
             )}
           </aside>
+          )}
           <main
             className={`relative min-w-0 overflow-auto bg-[#fcfdff] p-5 ${orbWorking || flowReveal ? "orb-flow-generating" : ""}`}
           >
+            {!toolboxOpen && (
+              <button
+                type="button"
+                onClick={() => setToolboxOpen(true)}
+                className="absolute left-4 top-4 z-30 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-md transition hover:bg-slate-50 hover:text-primary"
+                title="Open Toolbox"
+                aria-label="Open Toolbox"
+              >
+                <PanelLeftOpen size={16} />
+                <span>Toolbox</span>
+              </button>
+            )}
             {(orbWorking || flowReveal) && (
               <div className="flow-dot-grid" aria-hidden="true">
                 <DotGrid

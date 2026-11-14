@@ -9,6 +9,8 @@ import {
   LayoutGrid,
   MessageSquare,
   PackageSearch,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Wrench,
   X,
@@ -19,7 +21,13 @@ import { listBrands } from '../../services/brands'
 import { getChatspaceUnreadStatus, getUnreadChatCount, markChatspaceAsRead, wsClient } from '../../services/clientChat'
 import { activeBrandName } from '../../services/orbApi'
 
-export default function Sidebar({ mobile = false, onClose, counts = {} }) {
+export default function Sidebar({
+  mobile = false,
+  onClose,
+  counts = {},
+  collapsed = false,
+  onToggleCollapse,
+}) {
   const { user } = useAuth() || {}
   const [agentName, setAgentName] = useState('AI')
   const [chatUnread, setChatUnread] = useState(0)
@@ -82,20 +90,52 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
     { to: '/app/settings', label: 'Settings', icon: Settings },
   ]
 
+  const isCollapsed = collapsed && !mobile
+
   return (
     <aside
-      className={`flex h-full w-64 flex-col bg-white p-4 ${
-        mobile ? '' : 'border-r border-ink/20'
-      }`}
+      className={`flex h-full flex-col bg-white transition-[width,padding] duration-200 ${
+        isCollapsed ? 'w-16 px-2 py-4' : 'w-64 p-4'
+      } ${mobile ? '' : 'border-r border-ink/20'}`}
     >
-      <div className="mb-8 flex items-center justify-between">
-        <NavLink to="/" className="orb-wordmark text-2xl font-extrabold tracking-tight">
-          Orb<span className="text-purple">.</span>
-        </NavLink>
-        {mobile && (
+      <div
+        className={`mb-8 flex items-center ${
+          isCollapsed ? 'justify-center' : 'justify-between'
+        }`}
+      >
+        {isCollapsed ? (
+          <NavLink
+            to="/"
+            className="orb-wordmark text-xl font-extrabold tracking-tight"
+            title="Orb"
+          >
+            O<span className="text-purple">.</span>
+          </NavLink>
+        ) : (
+          <NavLink
+            to="/"
+            className="orb-wordmark text-2xl font-extrabold tracking-tight"
+          >
+            Orb<span className="text-purple">.</span>
+          </NavLink>
+        )}
+        {mobile ? (
           <button aria-label="Close navigation" onClick={onClose}>
             <X />
           </button>
+        ) : (
+          !isCollapsed &&
+          onToggleCollapse && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="rounded-md border border-transparent p-1.5 text-slate-400 transition hover:border-ink/20 hover:bg-slate-100 hover:text-ink"
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          )
         )}
       </div>
       <nav aria-label="App navigation" className="grid gap-2">
@@ -111,16 +151,24 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
               to={to}
               end={end}
               onClick={onClose}
+              title={isCollapsed ? label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-md px-3 py-3 text-sm font-extrabold transition ${
-                  isActive ? 'bg-purple text-white' : 'hover:bg-peach'
+                `group relative flex items-center rounded-md font-extrabold transition ${
+                  isCollapsed
+                    ? 'justify-center p-2.5 text-xs'
+                    : 'gap-3 px-3 py-3 text-sm'
+                } ${
+                  isActive ? 'bg-purple text-white' : 'hover:bg-peach text-ink'
                 }`
               }
             >
               <div className="relative flex items-center justify-center">
                 <Icon size={18} />
                 {hasUnreadPing && (
-                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5" title="Unread messages">
+                  <span
+                    className="absolute -top-1 -right-1 flex h-2.5 w-2.5"
+                    title="Unread messages"
+                  >
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
                     <span className="relative inline-flex h-2.5 w-2.5 rounded-full border border-white bg-blue-500" />
                   </span>
@@ -133,36 +181,61 @@ export default function Sidebar({ mobile = false, onClose, counts = {} }) {
                     @
                   </span>
                 )}
-              </div>
-              <span className="min-w-0 truncate">{label}</span>
-              <div className="ml-auto flex items-center gap-1.5">
-                {hasTaggedPing && (
+                {isCollapsed && badgeValue > 0 && !hasUnreadPing && (
                   <span
-                    className="flex items-center gap-0.5 rounded-full bg-blue-600 px-1.5 py-0.2 text-[10px] font-black text-white shadow-xs"
-                    title="You were tagged in Chatspace"
+                    className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full border border-white bg-purple px-1 text-[9px] font-bold text-white shadow-xs"
+                    title={`${badgeValue} unread`}
                   >
-                    <span>@</span>
-                    {chatMentionCount > 1 && <span>{chatMentionCount}</span>}
-                  </span>
-                )}
-                {badgeValue > 0 && (
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      isChatspace
-                        ? 'bg-blue-500 text-white'
-                        : isNaN(badgeValue)
-                        ? ''
-                        : 'bg-white/25'
-                    }`}
-                  >
-                    {badgeValue}
+                    {badgeValue > 99 ? '99+' : badgeValue}
                   </span>
                 )}
               </div>
+              {!isCollapsed && (
+                <>
+                  <span className="min-w-0 truncate">{label}</span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {hasTaggedPing && (
+                      <span
+                        className="flex items-center gap-0.5 rounded-full bg-blue-600 px-1.5 py-0.2 text-[10px] font-black text-white shadow-xs"
+                        title="You were tagged in Chatspace"
+                      >
+                        <span>@</span>
+                        {chatMentionCount > 1 && <span>{chatMentionCount}</span>}
+                      </span>
+                    )}
+                    {badgeValue > 0 && (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          isChatspace
+                            ? 'bg-blue-500 text-white'
+                            : isNaN(badgeValue)
+                            ? ''
+                            : 'bg-white/25'
+                        }`}
+                      >
+                        {badgeValue}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
             </NavLink>
           )
         })}
       </nav>
+      {isCollapsed && onToggleCollapse && (
+        <div className="mt-auto flex justify-center border-t border-slate-100 pt-4">
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="rounded-md border border-slate-200 p-2 text-slate-500 transition hover:border-ink hover:bg-peach hover:text-ink"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

@@ -4,6 +4,8 @@ import {
   CircleAlert,
   Loader2,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Paperclip,
   X,
 } from "lucide-react";
@@ -211,7 +213,7 @@ function SlackEscalation() {
   */
 }
 
-export default function Topbar({ onMenu }) {
+export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -260,6 +262,17 @@ export default function Topbar({ onMenu }) {
         >
           <Menu />
         </button>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            className="hidden lg:grid h-9 w-9 place-items-center rounded-md border-2 border-ink bg-white text-ink transition-transform hover:-translate-y-0.5"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={onToggleCollapse}
+          >
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+        )}
         <h1 className="mr-auto text-lg font-extrabold tracking-tight sm:text-xl">
           {title}
         </h1>
