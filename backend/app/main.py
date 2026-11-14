@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.crawls import router as crawls_router
 from app.api.escalations import router as escalations_router
@@ -44,8 +46,20 @@ async def lifespan(app: FastAPI):
         await app.state.db.close()
 
 
+logger = logging.getLogger("orb.api")
 settings = get_settings()
 app = FastAPI(title="Orb crawler API", version="2.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled server error processing %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc}"},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

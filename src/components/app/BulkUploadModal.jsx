@@ -335,6 +335,10 @@ export default function BulkUploadModal({
         showToast(
           `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')} and published to Qdrant.`
         )
+      } else if (result?.qdrant_error) {
+        showToast(
+          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}, but Qdrant publishing encountered an issue: ${result.qdrant_error}. Click "Publish approved to Qdrant" to retry.`
+        )
       } else if (defaultStatus === 'Draft') {
         showToast(
           `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ draft' : 'FAQ drafts') : (count === 1 ? 'SOP draft' : 'SOP drafts')}. Click "Approve all drafts" to publish them to Qdrant.`

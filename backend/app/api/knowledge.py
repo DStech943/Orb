@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from io import StringIO
@@ -24,6 +25,8 @@ from app.services.qdrant import (
     publish_points,
     scroll_points,
 )
+
+logger = logging.getLogger("orb.knowledge")
 
 router = APIRouter(prefix="/api", tags=["knowledge"])
 
@@ -2633,13 +2636,23 @@ async def create_bulk_knowledge(
     batch_size = 50
     for i in range(0, len(db_rows), batch_size):
         chunk = db_rows[i:i + batch_size]
-        rows = await _supabase_service_write(
-            request,
-            "POST",
-            "orb_generated_content",
-            params={"select": "id,payload,status,created_at"},
-            payload=chunk,
-        )
+        try:
+            rows = await _supabase_write(
+                request,
+                "POST",
+                "orb_generated_content",
+                params={"select": "id,payload,status,created_at"},
+                payload=chunk,
+            )
+        except Exception as write_err:
+            logger.info("Falling back to service-role write for bulk knowledge: %s", write_err)
+            rows = await _supabase_service_write(
+                request,
+                "POST",
+                "orb_generated_content",
+                params={"select": "id,payload,status,created_at"},
+                payload=chunk,
+            )
         if rows:
             inserted_rows.extend(rows)
 
@@ -2652,6 +2665,7 @@ async def create_bulk_knowledge(
         if str(r.get("status") or "").lower() == "approved" and "id" in r
     ]
     published_count = 0
+    qdrant_error: str | None = None
     if approved_items:
         try:
             content_kind = "sop" if kind == "sops" else "faq"
@@ -2664,18 +2678,62 @@ async def create_bulk_knowledge(
             )
             published_count = len(approved_items)
             approved_ids = [item["id"] for item in approved_items]
-            await _supabase_service_write(
-                request,
-                "PATCH",
-                "orb_generated_content",
-                params={"id": f"in.({','.join(approved_ids)})"},
-                payload={"qdrant_published_at": datetime.now(timezone.utc).isoformat(), "qdrant_error": None},
-                prefer="return=minimal",
-            )
+            patch_payload = {
+                "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
+                "qdrant_error": None,
+            }
+            try:
+                await _supabase_write(
+                    request,
+                    "PATCH",
+                    "orb_generated_content",
+                    params={"id": f"in.({','.join(approved_ids)})"},
+                    payload=patch_payload,
+                    prefer="return=minimal",
+                )
+            except Exception:
+                await _supabase_service_write(
+                    request,
+                    "PATCH",
+                    "orb_generated_content",
+                    params={"id": f"in.({','.join(approved_ids)})"},
+                    payload=patch_payload,
+                    prefer="return=minimal",
+                )
         except Exception as exc:
+            qdrant_error = str(exc)
             logger.warning("Could not automatically publish bulk approved points to Qdrant: %s", exc)
+            approved_ids = [item["id"] for item in approved_items]
+            if approved_ids:
+                error_payload = {"qdrant_error": str(exc)[:2000]}
+                try:
+                    await _supabase_write(
+                        request,
+                        "PATCH",
+                        "orb_generated_content",
+                        params={"id": f"in.({','.join(approved_ids)})"},
+                        payload=error_payload,
+                        prefer="return=minimal",
+                    )
+                except Exception:
+                    try:
+                        await _supabase_service_write(
+                            request,
+                            "PATCH",
+                            "orb_generated_content",
+                            params={"id": f"in.({','.join(approved_ids)})"},
+                            payload=error_payload,
+                            prefer="return=minimal",
+                        )
+                    except Exception:
+                        pass
 
-    return {"created": inserted, "published": published_count, "kind": kind}
+    return {
+        "created": inserted,
+        "published": published_count,
+        "kind": kind,
+        "qdrant_error": qdrant_error,
+    }
 
 
 def _flow_sop_node_text(node: dict[str, Any]) -> str:
