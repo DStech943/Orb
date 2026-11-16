@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
-import { activeBrandName, askOrbGuide, draftOrbWork } from '../../services/orbApi'
+import { activeBrandName, askOrbGuide, chatWithBrandAgent, draftOrbWork } from '../../services/orbApi'
+import { listBrands } from '../../services/brands'
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, setOrbVoiceWakeEnabled, setOrbVoiceWakeStatus } from '../../lib/orbVoiceWake'
 import { startBrowserDictation } from '../../lib/browserDictation'
 
@@ -22,6 +23,7 @@ const pages = {
 }
 
 const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+const newAgentSessionId = () => `orb_guide_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : `${Date.now()}${Math.random().toString(36).slice(2, 12)}`}`.slice(0, 64)
 
 // Speech recognition frequently transcribes “Orb” as “or” / “orbe”. Keeping
 // those common variants here makes the wake phrase more forgiving without
@@ -131,6 +133,9 @@ export default function OrbGuide() {
   const [messages, setMessages] = useState([])
   const [thinking, setThinking] = useState(false)
   const [typedPlaceholder, setTypedPlaceholder] = useState('')
+  const [brandAgentMode, setBrandAgentMode] = useState(false)
+  const [activeBrand, setActiveBrand] = useState(null)
+  const [agentSessionId, setAgentSessionId] = useState(newAgentSessionId)
   const [voiceWakeEnabled, setVoiceWakeEnabled] = useState(isOrbVoiceWakeEnabled)
   const [dictating, setDictating] = useState(false)
   const [dictationError, setDictationError] = useState('')
@@ -148,6 +153,30 @@ export default function OrbGuide() {
   const lastDestinationRef = useRef(null)
   const flowPage = location.pathname === '/app/flows'
   const rotatingPrompts = [`What's happening on ${current.title}?`, 'Where do I create a support flow?', 'Where can I test my AI agent?']
+  const agentName = String(activeBrand?.ai_agent_name || '').trim() || (activeBrand?.name ? `${activeBrand.name} AI` : 'Brand AI')
+
+  useEffect(() => {
+    let live = true
+    const loadActiveBrand = async () => {
+      try {
+        const brands = await listBrands()
+        if (!live) return
+        const selectedId = window.localStorage.getItem('orb_selected_brand') || ''
+        setActiveBrand(brands.find((brand) => brand.id === selectedId) || brands[0] || null)
+      } catch { if (live) setActiveBrand(null) }
+    }
+    loadActiveBrand()
+    window.addEventListener('orb:brand-changed', loadActiveBrand)
+    return () => { live = false; window.removeEventListener('orb:brand-changed', loadActiveBrand) }
+  }, [])
+
+  const switchChatMode = (nextBrandAgentMode) => {
+    setBrandAgentMode(nextBrandAgentMode)
+    setMessages([])
+    setDraft('')
+    draftRef.current = ''
+    setAgentSessionId(newAgentSessionId())
+  }
 
   useEffect(() => { draftRef.current = draft }, [draft])
 
@@ -414,6 +443,24 @@ export default function OrbGuide() {
     // Clear the browser control too. This prevents a late text-input or
     // speech-recognition event from leaving the just-sent prompt visible.
     if (inputRef.current) inputRef.current.value = ''
+    if (brandAgentMode) {
+      if (!activeBrand?.id) {
+        setMessages((items) => [...items, { id: makeId(), role: 'agent', error: true, text: 'Choose a brand with a connected AI agent first.' }])
+        return
+      }
+      setThinking(true)
+      try {
+        const result = await chatWithBrandAgent(activeBrand.id, { message: text, session_id: agentSessionId })
+        const reply = String(result?.response || result?.reply || '').trim()
+        if (!reply) throw new Error(`${agentName} returned no reply.`)
+        setMessages((items) => [...items, { id: makeId(), role: 'agent', text: reply }])
+      } catch (error) {
+        setMessages((items) => [...items, { id: makeId(), role: 'agent', error: true, text: error?.message || `${agentName} could not respond. Please try again.` }])
+      } finally {
+        setThinking(false)
+      }
+      return
+    }
     setPromptReset((value) => value + 1)
     const requestedWork = assistantWorkFromRequest(text)
     if (requestedWork) {
@@ -534,7 +581,7 @@ export default function OrbGuide() {
 
   return <div className="fixed bottom-5 right-5 z-[80] sm:bottom-6">
     {open && <section aria-label="Orb workspace guide" className="orb-guide-panel absolute bottom-16 right-0 flex h-[min(35rem,calc(100vh-8rem))] w-[min(23rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-primary/15 bg-white shadow-2xl shadow-slate-900/15">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-gradient-to-r from-primary-tint/70 to-white px-4 py-3.5"><span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span><div className="min-w-0"><p className="text-sm font-extrabold text-slate-900">Ask Orb</p><p className="truncate text-[11px] text-slate-500">Guiding you through {current.title}</p></div><button type="button" onClick={closeGuide} aria-label="Close Orb guide" className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={17} /></button></header>
+      <header className="flex items-center gap-3 border-b border-slate-200 bg-gradient-to-r from-primary-tint/70 to-white px-4 py-3.5"><span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><p className="text-sm font-extrabold text-slate-900">{brandAgentMode ? `Ask ${agentName}` : 'Ask Orb'}</p><div className="flex rounded-md border border-slate-200 bg-white/80 p-0.5 text-[9px] font-bold"><button type="button" onClick={() => switchChatMode(false)} className={`rounded px-1.5 py-0.5 transition ${!brandAgentMode ? 'bg-primary text-white' : 'text-slate-500 hover:text-slate-800'}`}>Orb</button><button type="button" onClick={() => switchChatMode(true)} disabled={!activeBrand?.id} className={`max-w-20 truncate rounded px-1.5 py-0.5 transition disabled:opacity-40 ${brandAgentMode ? 'bg-primary text-white' : 'text-slate-500 hover:text-slate-800'}`}>{agentName}</button></div></div><p className="truncate text-[11px] text-slate-500">{brandAgentMode ? `Testing ${agentName} for ${activeBrand?.name || 'this brand'}` : `Guiding you through ${current.title}`}</p></div><button type="button" onClick={closeGuide} aria-label="Close Orb guide" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={17} /></button></header>
       <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-4">
         {messages.length === 0 && !thinking && <div aria-live="polite" className="orb-guide-greeting orb-guide-copy inline-flex rounded-2xl rounded-tl-md border border-slate-200 bg-white px-3 py-2.5 shadow-sm">How may I help you?</div>}
         <div className={messages.length || thinking ? 'space-y-3' : 'mt-5 space-y-3'}>{messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`max-w-[84%] rounded-2xl px-3 py-2.5 shadow-sm ${message.role === 'user' ? 'rounded-br-md bg-primary text-xs leading-5 text-white' : message.error ? 'rounded-bl-md border border-red-200 bg-red-50 text-red-700' : 'orb-guide-copy rounded-bl-md border border-slate-200 bg-white'}`}><p>{message.text}</p>{message.destination && <button type="button" onClick={() => navigate(message.destination)} className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary-tint px-2 py-1 text-[11px] font-bold text-primary transition hover:bg-primary/15">Open {message.destinationLabel || pages[message.destination]?.title || 'page'}<ArrowUpRight size={13} /></button>}</div></div>)}{thinking && <div aria-live="polite" className="orb-guide-thinking orb-guide-copy inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2.5"><span className="orb-guide-thinking__dots" aria-hidden="true"><i /><i /><i /></span>Orb is thinking…</div>}</div>
