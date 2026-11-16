@@ -48,6 +48,30 @@ const PRESET_MENTIONS = [
 ]
 
 const SLASH_COMMAND_IDS = ['products', 'oos', 'nos', 'flows', 'operation', 'template', 'sheet']
+const chatspaceScrollMemory = new Map()
+const referenceKey = (reference = {}) => `${reference.type || 'reference'}:${reference.id || reference.title || 'item'}`
+const referenceToken = (reference) => `[[orb-reference:${encodeURIComponent(reference.type || 'reference')}:${encodeURIComponent(reference.id || reference.title || 'item')}]]`
+const referenceTokenPattern = /\[\[orb-reference:([^:\]]+):([^\]]+)\]\]/g
+const serializeRichMessage = (text, references = []) => {
+  const value = String(text || '')
+  const orderedReferences = [...references]
+    .map((reference, index) => ({ reference, index, position: Number.isFinite(reference.position) ? reference.position : 0 }))
+    .sort((left, right) => left.position - right.position || left.index - right.index)
+  let output = ''
+  let cursor = 0
+  orderedReferences.forEach(({ reference, position }) => {
+    const insertionPoint = Math.max(cursor, Math.min(value.length, position))
+    output += value.slice(cursor, insertionPoint)
+    output += referenceToken(reference)
+    cursor = insertionPoint
+  })
+  return `${output}${value.slice(cursor)}`
+}
+const saveChatspaceScroll = (key, element) => {
+  if (!element || !Number.isFinite(element.scrollTop)) return
+  chatspaceScrollMemory.set(key, element.scrollTop)
+  try { window.sessionStorage.setItem(key, String(element.scrollTop)) } catch {}
+}
 
 export default function ClientChat() {
   const { user } = useAuth()
@@ -82,6 +106,7 @@ export default function ClientChat() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const inputMessageRef = useRef('')
+  const composerCursorRef = useRef(0)
   const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
   const searchInputRef = useRef(null)
@@ -92,6 +117,73 @@ export default function ClientChat() {
   useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
   useEffect(() => { setSlashCommandIndex(0) }, [inputMessage])
   useEffect(() => () => { dictationRef.current?.stop() }, [])
+
+  const readComposerState = (root) => {
+    let text = ''
+    const positions = new Map()
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.nodeValue || ''
+        return
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return
+      const element = node.nodeType === Node.ELEMENT_NODE ? node : null
+      const referenceKeyValue = element?.dataset?.referenceKey
+      if (referenceKeyValue) {
+        positions.set(referenceKeyValue, text.length)
+        return
+      }
+      if (element?.tagName === 'BR') {
+        text += '\n'
+        return
+      }
+      Array.from(node.childNodes).forEach(walk)
+    }
+    Array.from(root?.childNodes || []).forEach(walk)
+    return { text, positions }
+  }
+
+  const composerCursorPosition = () => {
+    const root = inputRef.current
+    const selection = window.getSelection()
+    if (!root || !selection?.rangeCount || !root.contains(selection.anchorNode)) return inputMessage.length
+    const range = selection.getRangeAt(0).cloneRange()
+    range.selectNodeContents(root)
+    range.setEnd(selection.anchorNode, selection.anchorOffset)
+    return readComposerState(range.cloneContents()).text.length
+  }
+
+  const setComposerCaret = (position) => {
+    const root = inputRef.current
+    if (!root) return
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement?.closest('[data-reference-key]')
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+    })
+    let remaining = Math.max(0, position)
+    let node = walker.nextNode()
+    while (node) {
+      const length = node.nodeValue?.length || 0
+      if (remaining <= length) {
+        const range = document.createRange()
+        range.setStart(node, remaining)
+        range.collapse(true)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        return
+      }
+      remaining -= length
+      node = walker.nextNode()
+    }
+    const range = document.createRange()
+    range.selectNodeContents(root)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }
 
   const startDictation = useCallback(() => {
     if (sending) return
@@ -122,7 +214,7 @@ export default function ClientChat() {
   const handleScroll = () => {
     const el = scrollContainerRef.current
     if (!el) return
-    try { window.sessionStorage.setItem(chatScrollStorageKey, String(el.scrollTop)) } catch {}
+    saveChatspaceScroll(chatScrollStorageKey, el)
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     setShowScrollBottom(distanceFromBottom > 160)
   }
@@ -222,12 +314,14 @@ export default function ClientChat() {
       if (isFirstLoad.current) {
         const savedScrollTop = restoredScrollTopRef.current
         if (Number.isFinite(savedScrollTop)) {
-          window.requestAnimationFrame(() => {
+          // Flow/message animations can briefly reset the container after the
+          // first paint. Restore through that settling window as well.
+          ;[0, 90, 280].forEach((delay) => window.setTimeout(() => {
             const el = scrollContainerRef.current
             if (!el) return
             el.scrollTop = Math.min(savedScrollTop, Math.max(0, el.scrollHeight - el.clientHeight))
             handleScroll()
-          })
+          }, delay))
         } else {
           scrollToBottom(false)
         }
@@ -246,7 +340,9 @@ export default function ClientChat() {
 
   useEffect(() => {
     try {
-      const stored = window.sessionStorage.getItem(chatScrollStorageKey)
+      const stored = chatspaceScrollMemory.has(chatScrollStorageKey)
+        ? String(chatspaceScrollMemory.get(chatScrollStorageKey))
+        : window.sessionStorage.getItem(chatScrollStorageKey)
       const parsed = stored === null ? null : Number(stored)
       restoredScrollTopRef.current = Number.isFinite(parsed) ? parsed : null
     } catch {
@@ -254,9 +350,7 @@ export default function ClientChat() {
     }
     isFirstLoad.current = true
     return () => {
-      const el = scrollContainerRef.current
-      if (!el) return
-      try { window.sessionStorage.setItem(chatScrollStorageKey, String(el.scrollTop)) } catch {}
+      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current)
     }
   }, [chatScrollStorageKey])
 
@@ -463,23 +557,37 @@ export default function ClientChat() {
 
   const chooseReference = (kind, item) => {
     if (kind === 'command') {
-      setInputMessage(item ? `/${item} ` : '')
+      setInputMessage((current) => item ? current.replace(/\/\w*$/, `/${item} `) : current.replace(/(?:^|\s)\/\w*(?:\s+.*)?$/, ''))
       window.setTimeout(() => inputRef.current?.focus(), 0)
       return
     }
+    const slashIndex = inputMessage.lastIndexOf('/')
+    const messageBeforeCommand = slashIndex >= 0 ? inputMessage.slice(0, slashIndex) : inputMessage
+    const insertionPosition = messageBeforeCommand.length
     const next = item.type === 'product-set'
       ? item.products.map((product) => ({ type: 'product', id: product.id, title: product.name, subtitle: `${item.id === 'oos' ? 'Out of stock' : `${(product.variants || []).map((variant) => Number(variant.inventoryQuantity) || 0).reduce((total, quantity) => total + quantity, 0)} in stock`}`, image: product.featuredImage?.url || '', href: product.url || '/app/products', external: Boolean(product.url) }))
       : [item]
-    setSelectedReferences((current) => [...current, ...next.filter((reference) => !current.some((existing) => existing.type === reference.type && existing.id === reference.id))])
-    setInputMessage('')
-    window.setTimeout(() => inputRef.current?.focus(), 0)
+    setSelectedReferences((current) => [...current, ...next
+      .filter((reference) => !current.some((existing) => existing.type === reference.type && existing.id === reference.id))
+      .map((reference) => ({ ...reference, position: insertionPosition }))])
+    setInputMessage(messageBeforeCommand)
+    window.setTimeout(() => {
+      inputRef.current?.focus()
+      // The chosen capsule is rendered at the command location; continue
+      // typing immediately after it rather than in a separate field.
+      setComposerCaret(Number.MAX_SAFE_INTEGER)
+    }, 0)
   }
 
   const handleInputChange = (e) => {
-    const val = e.target.value
+    const { text: val, positions } = readComposerState(e.currentTarget)
+    const cursorPos = composerCursorPosition()
+    composerCursorRef.current = cursorPos
+    setSelectedReferences((current) => current
+      .filter((reference) => positions.has(referenceKey(reference)))
+      .map((reference) => ({ ...reference, position: positions.get(referenceKey(reference)) })))
     setInputMessage(val)
 
-    const cursorPos = e.target.selectionStart || val.length
     const textBeforeCursor = val.slice(0, cursorPos)
     const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\s]*)$/)
 
@@ -499,9 +607,15 @@ export default function ClientChat() {
   const insertMention = (target) => {
     if (!target) return
     const beforeAt = inputMessage.slice(0, mentionCursorIndex)
-    const afterCursor = inputMessage.slice(inputRef.current?.selectionStart || inputMessage.length)
+    const cursorPosition = composerCursorRef.current || inputMessage.length
+    const afterCursor = inputMessage.slice(cursorPosition)
     const replacement = `@${target.handle} `
     const newText = `${beforeAt}${replacement}${afterCursor}`
+    setSelectedReferences((current) => current.map((reference) => (
+      Number.isFinite(reference.position) && reference.position > cursorPosition
+        ? { ...reference, position: reference.position + replacement.length }
+        : reference
+    )))
     setInputMessage(newText)
     setMentionMenuOpen(false)
 
@@ -509,7 +623,8 @@ export default function ClientChat() {
       if (inputRef.current) {
         inputRef.current.focus()
         const newCursorPos = beforeAt.length + replacement.length
-        inputRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        composerCursorRef.current = newCursorPos
+        setComposerCaret(newCursorPos)
       }
     }, 10)
   }
@@ -518,10 +633,11 @@ export default function ClientChat() {
     e?.preventDefault()
     if ((!inputMessage.trim() && attachedFiles.length === 0 && selectedReferences.length === 0) || sending) return
 
-    const text = inputMessage
+    const enteredText = inputMessage
     const currentReply = replyingTo
     const mediaToSend = [...attachedFiles]
     const referencesToSend = [...selectedReferences]
+    const text = serializeRichMessage(enteredText, referencesToSend)
 
     // Extract any @mentions from the text using our comprehensive mention regex
     const mentionRegex = buildMentionRegex()
@@ -551,7 +667,7 @@ export default function ClientChat() {
       setTimeout(() => scrollToBottom(true), 40)
     } catch (err) {
       showToast(err.message || 'Failed to send message', 'error')
-      setInputMessage(text)
+      setInputMessage(enteredText)
       setReplyingTo(currentReply)
       setAttachedFiles(mediaToSend)
       setSelectedReferences(referencesToSend)
@@ -567,7 +683,7 @@ export default function ClientChat() {
   const handleKeyDown = (e) => {
     // Own the top-level command list here, so keyboard navigation works even
     // before React has mounted the suggestion menu on the first `/` press.
-    const partialSlash = inputMessage.match(/^\/(\w*)$/)?.[1]?.toLowerCase()
+    const partialSlash = inputMessage.match(/(?:^|\s)\/(\w*)$/)?.[1]?.toLowerCase()
     if (partialSlash !== undefined) {
       const commands = SLASH_COMMAND_IDS.filter((command) => command.startsWith(partialSlash))
       if (commands.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
@@ -592,7 +708,7 @@ export default function ClientChat() {
     }
     // Never let an in-progress slash command fall through to the form submit
     // while its picker is mounting or loading its options.
-    if (/^\/\w*(?:\s.*)?$/.test(inputMessage) && ['Enter', 'Tab', 'ArrowDown', 'ArrowUp', 'Escape'].includes(e.key)) {
+    if (/(?:^|\s)\/\w*(?:\s.*)?$/.test(inputMessage) && ['Enter', 'Tab', 'ArrowDown', 'ArrowUp', 'Escape'].includes(e.key)) {
       e.preventDefault()
       return
     }
@@ -718,6 +834,111 @@ export default function ClientChat() {
         })}
       </TextElement>
     )
+  }
+
+  // References are saved as lightweight tokens within the message string, not
+  // as a second attachment layer. This preserves the writer's exact order:
+  // “text, capsule, more text” remains that way after sending and reloading.
+  const renderRichMessageContent = (content, references, fromClient, explicitMentions = []) => {
+    const value = String(content || '')
+    const availableReferences = Array.isArray(references) ? references : []
+    const referencesByKey = new Map(availableReferences.map((reference) => [referenceKey(reference), reference]))
+    const consumed = new Set()
+    const parts = []
+    let cursor = 0
+    let match
+
+    referenceTokenPattern.lastIndex = 0
+    while ((match = referenceTokenPattern.exec(value))) {
+      if (match.index > cursor) {
+        parts.push(
+          <React.Fragment key={`text-${cursor}`}>
+            {renderMessageContent(value.slice(cursor, match.index), fromClient, explicitMentions, true)}
+          </React.Fragment>,
+        )
+      }
+
+      let type = ''
+      let id = ''
+      try {
+        type = decodeURIComponent(match[1])
+        id = decodeURIComponent(match[2])
+      } catch {
+        // A malformed legacy token is treated as normal text below.
+      }
+      const reference = referencesByKey.get(`${type}:${id}`)
+      if (reference) {
+        consumed.add(referenceKey(reference))
+        parts.push(
+          <ChatReferenceCapsules
+            key={`reference-${match.index}`}
+            references={[reference]}
+            tone={fromClient ? 'dark' : 'light'}
+            inline
+            className="mt-0"
+          />,
+        )
+      } else {
+        parts.push(<React.Fragment key={`unknown-${match.index}`}>{match[0]}</React.Fragment>)
+      }
+      cursor = referenceTokenPattern.lastIndex
+    }
+
+    if (cursor < value.length) {
+      parts.push(
+        <React.Fragment key={`text-${cursor}`}>
+          {renderMessageContent(value.slice(cursor), fromClient, explicitMentions, true)}
+        </React.Fragment>,
+      )
+    }
+
+    // Existing messages created before ordered tokens were introduced still
+    // display their capsules safely. New messages never take this path.
+    const legacyReferences = availableReferences.filter((reference) => !consumed.has(referenceKey(reference)))
+    if (legacyReferences.length) {
+      parts.push(
+        <ChatReferenceCapsules
+          key="legacy-references"
+          references={legacyReferences}
+          tone={fromClient ? 'dark' : 'light'}
+          inline
+          className="mt-0"
+        />,
+      )
+    }
+
+    return parts.length ? parts : null
+  }
+
+  const renderComposerContent = () => {
+    const orderedReferences = [...selectedReferences]
+      .map((reference, index) => ({ reference, index, position: Number.isFinite(reference.position) ? reference.position : 0 }))
+      .sort((left, right) => left.position - right.position || left.index - right.index)
+    const parts = []
+    let cursor = 0
+
+    orderedReferences.forEach(({ reference, position }, index) => {
+      const insertionPoint = Math.max(cursor, Math.min(inputMessage.length, position))
+      if (insertionPoint > cursor) {
+        parts.push(<React.Fragment key={`composer-text-${cursor}`}>{inputMessage.slice(cursor, insertionPoint)}</React.Fragment>)
+      }
+      parts.push(
+        <span key={`composer-reference-${referenceKey(reference)}-${index}`} data-reference-key={referenceKey(reference)} contentEditable={false} className="inline-flex align-middle">
+          <ChatReferenceCapsules
+            references={[reference]}
+            inline
+            tone="composer"
+            className="mt-0"
+            onRemove={(removed) => setSelectedReferences((current) => current.filter((item) => referenceKey(item) !== referenceKey(removed)))}
+          />
+        </span>,
+      )
+      cursor = insertionPoint
+    })
+    if (cursor < inputMessage.length) {
+      parts.push(<React.Fragment key={`composer-text-${cursor}`}>{inputMessage.slice(cursor)}</React.Fragment>)
+    }
+    return parts
   }
 
   return (
@@ -982,8 +1203,7 @@ export default function ClientChat() {
                       }`}
                     >
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <ChatReferenceCapsules references={msg.references} tone={fromClient ? 'dark' : 'light'} inline className="mt-0" />
-                        {renderMessageContent(msg.content, fromClient, msg.mentions, true)}
+                        {renderRichMessageContent(msg.content, msg.references, fromClient, msg.mentions)}
                       </div>
 
                       {/* Attached Media Grid */}
@@ -1263,27 +1483,26 @@ export default function ClientChat() {
         <form onSubmit={handleSend} className="relative">
           <ChatReferenceCommands ref={slashMenuRef} value={inputMessage} brandName={brandName} role={user?.role} commandSelectedIndex={slashCommandIndex} onChoose={chooseReference} />
           <div className="rounded-2xl border border-[#bdc6ff] bg-[#eef0ff] p-2 shadow-sm transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/10">
-            <div className="relative px-1">
-              <ChatReferenceCapsules
-                references={selectedReferences}
-                inline
-                className="absolute left-1 top-1 z-10 mt-0"
-                onRemove={(reference) => setSelectedReferences((current) => current.filter((item) => !(item.type === reference.type && item.id === reference.id)))}
-              />
-              <textarea
+            <div className="px-1">
+              <div
                 ref={inputRef}
-                rows={1}
-                value={inputMessage}
-                onChange={handleInputChange}
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                aria-multiline="true"
+                aria-label={replyingTo ? `Type your reply to #${replyingTo.id.slice(0, 6)}` : `Message our team about ${brandName}`}
+                onInput={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={
+                onFocus={() => { composerCursorRef.current = composerCursorPosition() }}
+                className="min-h-[32px] w-full whitespace-pre-wrap break-words bg-transparent px-1 py-1.5 text-sm leading-6 text-slate-700 empty:before:pointer-events-none empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)] focus:outline-none"
+                data-placeholder={
                   replyingTo
                     ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
                     : `Message our team about ${brandName}...`
                 }
-                style={{ textIndent: selectedReferences.length ? '13rem' : undefined }}
-                className="block min-h-[32px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-slate-700 placeholder:text-slate-400 focus:outline-none"
-              />
+              >
+                {renderComposerContent()}
+              </div>
             </div>
             <div className="flex items-center justify-between px-1">
               <button

@@ -21,13 +21,14 @@ const flowSteps = (flow) => { const data = flowData(flow); return (Array.isArray
 export function ChatReferenceCapsules({ references = [], tone = 'light', onRemove, className = 'mt-2', inline = false }) {
   if (!references.length) return null
   const inverse = tone === 'dark'
+  const composer = tone === 'composer'
   return <span className={`${className} ${inline ? 'inline-flex max-w-full flex-wrap items-center gap-1.5 align-middle' : 'flex flex-wrap gap-2'}`}>{references.map((reference) => {
     const subtitle = reference.type === 'template' ? 'Template' : reference.subtitle
     const icon = reference.image ? <img src={reference.image} alt="" className="h-full w-full object-cover" /> : reference.type === 'flow' ? <Workflow size={inline ? 12 : 14} /> : reference.type === 'sheet' ? <FileSpreadsheet size={inline ? 12 : 14} /> : reference.type === 'operation' ? <ClipboardList size={inline ? 12 : 14} /> : reference.type === 'template' ? <FileText size={inline ? 12 : 14} /> : <Package size={inline ? 12 : 14} />
     const content = inline
-      ? <><span className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500">{icon}</span><span className="max-w-32 truncate text-[11px] font-bold">{reference.title}</span>{subtitle ? <span className={`max-w-20 truncate text-[10px] ${inverse ? 'text-white/70' : 'text-slate-500'}`}>{subtitle}</span> : null}</>
+      ? <><span className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500">{icon}</span><span className="max-w-32 truncate text-[11px] font-bold">{reference.title}</span>{subtitle ? <span className={`max-w-20 truncate text-[10px] ${inverse ? 'text-white/70' : composer ? 'text-primary/65' : 'text-slate-500'}`}>{subtitle}</span> : null}</>
       : <><span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md bg-slate-100 text-slate-500">{icon}</span><span className="min-w-0"><span className="block max-w-48 truncate text-xs font-bold">{reference.title}</span><span className={`block max-w-48 truncate text-[10px] ${inverse ? 'text-white/70' : 'text-slate-500'}`}>{subtitle}</span></span></>
-    const classes = `group/reference inline-flex max-w-full items-center ${inline ? 'gap-1 rounded-full px-1.5 py-1' : 'gap-2 rounded-lg px-2 py-1.5'} border text-left transition ${inverse ? 'border-white/25 bg-white/10 hover:bg-white/20' : 'border-slate-200 bg-slate-50 hover:border-primary/35 hover:bg-primary/5'}`
+    const classes = `group/reference inline-flex max-w-full items-center ${inline ? 'gap-1 rounded-full px-1.5 py-1' : 'gap-2 rounded-lg px-2 py-1.5'} border text-left transition ${inverse ? 'border-white/25 bg-white/10 hover:bg-white/20' : composer ? 'border-primary/25 bg-primary/10 hover:bg-primary/15' : 'border-slate-200 bg-slate-50 hover:border-primary/35 hover:bg-primary/5'}`
     return <span key={reference.id || `${reference.type}-${reference.title}`} className="relative inline-flex max-w-full">{reference.href ? <a href={reference.href} target={reference.external ? '_blank' : undefined} rel={reference.external ? 'noreferrer' : undefined} className={classes}>{content}</a> : <span className={classes}>{content}</span>}{onRemove ? <button type="button" onClick={() => onRemove(reference)} aria-label={`Remove ${reference.title}`} className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-slate-700 text-white shadow-sm hover:bg-black"><X size={10} /></button> : null}</span>
   })}</span>
 }
@@ -37,7 +38,9 @@ const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value,
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const match = String(value || '').match(/^\/(\w*)(?:\s+(.*))?$/)
+  // A slash command can follow normal text so its selected capsule is stored
+  // at that exact point in the outgoing rich-text message.
+  const match = String(value || '').match(/(?:^|\s)\/(\w*)(?:\s+([^]*))?$/)
   const command = match?.[1]?.toLowerCase() || ''
   const query = match?.[2]?.toLowerCase().trim() || ''
   const commands = COMMANDS.filter((item) => !item.internal || isInternal(role))
