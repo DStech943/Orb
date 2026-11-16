@@ -2499,13 +2499,13 @@ async def list_knowledge(
 
 @router.post("/knowledge/faqs/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    """Create a reviewable FAQ from an explicit Orb assistant instruction."""
+    """Create a manual FAQ and publish it to the brand's live Qdrant knowledge."""
     brand = await _remote_brand_by_name(request, payload.brand_name)
     faq = {
         "question": payload.question.strip(),
         "answer": payload.answer.strip(),
         "category": payload.category.strip() or "Customer support",
-        "status": "Draft",
+        "status": "Published",
         "source": "Orb assistant",
         "source_urls": [],
     }
@@ -2520,12 +2520,55 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User 
         raise HTTPException(status_code=503, detail="Supabase did not return the new FAQ")
     row = rows[0]
     stored = decode_jsonb(row.get("payload"))
-    return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else faq}}
+    faq_id = str(row["id"])
+    published_payload = stored if isinstance(stored, dict) else faq
+    try:
+        collection = await publish_points(
+            request.app.state.db,
+            request.app.state.settings,
+            brand["name"],
+            "faq",
+            [{"id": faq_id, "payload": published_payload}],
+        )
+    except PublishUnavailable as exc:
+        # Keep a recoverable record for an administrator, but never represent
+        # it as live knowledge when Qdrant did not acknowledge the write.
+        await _supabase_service_write(
+            request,
+            "PATCH",
+            "orb_generated_content",
+            params={"id": f"eq.{faq_id}"},
+            payload={
+                "status": "draft",
+                "payload": {**published_payload, "status": "Draft"},
+                "qdrant_error": str(exc)[:2000],
+            },
+            prefer="return=minimal",
+        )
+        raise HTTPException(status_code=503, detail=f"FAQ was saved as a draft, but could not be published to Qdrant: {exc}") from exc
+
+    await _supabase_service_write(
+        request,
+        "PATCH",
+        "orb_generated_content",
+        params={"id": f"eq.{faq_id}"},
+        payload={
+            "status": "published",
+            "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
+            "qdrant_error": None,
+        },
+        prefer="return=minimal",
+    )
+    return {
+        "point": {"id": faq_id, "payload": published_payload},
+        "published": True,
+        "collection": collection,
+    }
 
 
 @router.post("/knowledge/sops/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    """Create a reviewable SOP manually without requiring a visual flow."""
+    """Create a manual SOP and publish it to the brand's live Qdrant knowledge."""
     brand = await _remote_brand_by_name(request, payload.brand_name)
     title = payload.title.strip()
     sop = {
@@ -2533,7 +2576,7 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User 
         "situation": payload.situation.strip() or title,
         "category": payload.category.strip() or "Support",
         "lifecycle_stage": "",
-        "status": "Draft",
+        "status": "Published",
         "source": "Manual",
         "updated_by": "Orb user",
         "check_first": payload.check_first.strip(),
@@ -2553,7 +2596,48 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User 
         raise HTTPException(status_code=503, detail="Supabase did not return the new SOP")
     row = rows[0]
     stored = decode_jsonb(row.get("payload"))
-    return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else sop}}
+    sop_id = str(row["id"])
+    published_payload = stored if isinstance(stored, dict) else sop
+    try:
+        collection = await publish_points(
+            request.app.state.db,
+            request.app.state.settings,
+            brand["name"],
+            "sop",
+            [{"id": sop_id, "payload": published_payload}],
+        )
+    except PublishUnavailable as exc:
+        await _supabase_service_write(
+            request,
+            "PATCH",
+            "orb_generated_content",
+            params={"id": f"eq.{sop_id}"},
+            payload={
+                "status": "draft",
+                "payload": {**published_payload, "status": "Draft"},
+                "qdrant_error": str(exc)[:2000],
+            },
+            prefer="return=minimal",
+        )
+        raise HTTPException(status_code=503, detail=f"SOP was saved as a draft, but could not be published to Qdrant: {exc}") from exc
+
+    await _supabase_service_write(
+        request,
+        "PATCH",
+        "orb_generated_content",
+        params={"id": f"eq.{sop_id}"},
+        payload={
+            "status": "published",
+            "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
+            "qdrant_error": None,
+        },
+        prefer="return=minimal",
+    )
+    return {
+        "point": {"id": sop_id, "payload": published_payload},
+        "published": True,
+        "collection": collection,
+    }
 
 
 @router.post("/knowledge/{kind}/bulk", status_code=status.HTTP_201_CREATED)
@@ -2774,7 +2858,7 @@ def _flow_sop_snapshot(flow: dict[str, Any]) -> tuple[list[dict[str, Any]], list
 
 @router.post("/knowledge/sops/from-flow", status_code=status.HTTP_201_CREATED)
 async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    """Convert an editable visual flow into a draft SOP for the brand library.
+    """Convert an editable visual flow into a published SOP for the brand library.
 
     The source canvas is retained in the SOP payload so the team can always
     trace a written procedure back to the exact flow that produced it.
@@ -2827,7 +2911,7 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
         "situation": trigger,
         "category": str(flow.get("queryCategory") or flow.get("query_category") or "Visual flow").strip(),
         "lifecycle_stage": str(flow.get("lifecycleStage") or flow.get("lifecycle_stage") or "").strip(),
-        "status": "Draft",
+        "status": "Published",
         "source": "Visual flow",
         "updated_by": "Orb",
         "check_first": "\n".join(f"• {item}" for item in checks) or "Follow the flow's trigger and required checks.",
@@ -2851,10 +2935,51 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
         },
     )
     if not rows:
-        raise HTTPException(status_code=503, detail="Supabase did not return the new draft SOP")
+        raise HTTPException(status_code=503, detail="Supabase did not return the new SOP")
     row = rows[0]
     stored = decode_jsonb(row.get("payload"))
-    return {"point": {"id": str(row["id"]), "payload": stored if isinstance(stored, dict) else sop}}
+    sop_id = str(row["id"])
+    published_payload = stored if isinstance(stored, dict) else sop
+    try:
+        collection = await publish_points(
+            request.app.state.db,
+            request.app.state.settings,
+            brand["name"],
+            "sop",
+            [{"id": sop_id, "payload": published_payload}],
+        )
+    except PublishUnavailable as exc:
+        await _supabase_service_write(
+            request,
+            "PATCH",
+            "orb_generated_content",
+            params={"id": f"eq.{sop_id}"},
+            payload={
+                "status": "draft",
+                "payload": {**published_payload, "status": "Draft"},
+                "qdrant_error": str(exc)[:2000],
+            },
+            prefer="return=minimal",
+        )
+        raise HTTPException(status_code=503, detail=f"SOP was saved as a draft, but could not be published to Qdrant: {exc}") from exc
+
+    await _supabase_service_write(
+        request,
+        "PATCH",
+        "orb_generated_content",
+        params={"id": f"eq.{sop_id}"},
+        payload={
+            "status": "published",
+            "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
+            "qdrant_error": None,
+        },
+        prefer="return=minimal",
+    )
+    return {
+        "point": {"id": sop_id, "payload": published_payload},
+        "published": True,
+        "collection": collection,
+    }
 
 
 @router.patch("/knowledge/{kind}/{item_id}")

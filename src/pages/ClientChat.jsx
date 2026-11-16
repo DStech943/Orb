@@ -100,6 +100,7 @@ export default function ClientChat() {
   const [dictating, setDictating] = useState(false)
   const [dictationError, setDictationError] = useState('')
   const [slashCommandIndex, setSlashCommandIndex] = useState(0)
+  const [composerRevision, setComposerRevision] = useState(0)
 
   const fileInputRef = useRef(null)
   const slashMenuRef = useRef(null)
@@ -183,6 +184,18 @@ export default function ClientChat() {
     const selection = window.getSelection()
     selection?.removeAllRanges()
     selection?.addRange(range)
+  }
+
+  const replaceComposerText = (nextText, cursorPosition = nextText.length) => {
+    setInputMessage(nextText)
+    // Contenteditable owns its DOM between keystrokes. A keyed refresh is
+    // needed for programmatic edits such as `/pr` → `/products `.
+    setComposerRevision((revision) => revision + 1)
+    window.setTimeout(() => {
+      inputRef.current?.focus()
+      composerCursorRef.current = cursorPosition
+      setComposerCaret(cursorPosition)
+    }, 0)
   }
 
   const startDictation = useCallback(() => {
@@ -557,8 +570,10 @@ export default function ClientChat() {
 
   const chooseReference = (kind, item) => {
     if (kind === 'command') {
-      setInputMessage((current) => item ? current.replace(/\/\w*$/, `/${item} `) : current.replace(/(?:^|\s)\/\w*(?:\s+.*)?$/, ''))
-      window.setTimeout(() => inputRef.current?.focus(), 0)
+      const nextText = item
+        ? inputMessage.replace(/\/\w*$/, `/${item} `)
+        : inputMessage.replace(/(?:^|\s)\/\w*(?:\s+.*)?$/, '')
+      replaceComposerText(nextText)
       return
     }
     const slashIndex = inputMessage.lastIndexOf('/')
@@ -571,6 +586,7 @@ export default function ClientChat() {
       .filter((reference) => !current.some((existing) => existing.type === reference.type && existing.id === reference.id))
       .map((reference) => ({ ...reference, position: insertionPosition }))])
     setInputMessage(messageBeforeCommand)
+    setComposerRevision((revision) => revision + 1)
     window.setTimeout(() => {
       inputRef.current?.focus()
       // The chosen capsule is rendered at the command location; continue
@@ -645,6 +661,7 @@ export default function ClientChat() {
     const mentionMatches = matches.map((m) => m.replace(/^@/, '').trim()).filter(Boolean)
 
     setInputMessage('')
+    setComposerRevision((revision) => revision + 1)
     setReplyingTo(null)
     setAttachedFiles([])
     setSelectedReferences([])
@@ -668,6 +685,7 @@ export default function ClientChat() {
     } catch (err) {
       showToast(err.message || 'Failed to send message', 'error')
       setInputMessage(enteredText)
+      setComposerRevision((revision) => revision + 1)
       setReplyingTo(currentReply)
       setAttachedFiles(mediaToSend)
       setSelectedReferences(referencesToSend)
@@ -693,12 +711,13 @@ export default function ClientChat() {
       }
       if (commands.length && (e.key === 'Enter' || e.key === 'Tab')) {
         e.preventDefault()
-        setInputMessage(`/${commands[slashCommandIndex % commands.length]} `)
+        const selectedCommand = commands[slashCommandIndex % commands.length]
+        replaceComposerText(inputMessage.replace(/\/\w*$/, `/${selectedCommand} `))
         return
       }
       if (e.key === 'Escape') {
         e.preventDefault()
-        setInputMessage('')
+        replaceComposerText(inputMessage.replace(/(?:^|\s)\/\w*$/, ''))
         return
       }
     }
@@ -1485,6 +1504,7 @@ export default function ClientChat() {
           <div className="rounded-2xl border border-[#bdc6ff] bg-[#eef0ff] p-2 shadow-sm transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/10">
             <div className="px-1">
               <div
+                key={composerRevision}
                 ref={inputRef}
                 contentEditable
                 suppressContentEditableWarning

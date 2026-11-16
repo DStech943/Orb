@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
-import { activeBrandName, askOrbGuide, chatWithBrandAgent, draftOrbWork } from '../../services/orbApi'
+import { activeBrandName, askOrbGuide, chatWithBrandAgent, createAssistantFaq, draftOrbWork } from '../../services/orbApi'
 import { listBrands } from '../../services/brands'
 import { listSops } from '../../services/generation'
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, setOrbVoiceWakeEnabled, setOrbVoiceWakeStatus } from '../../lib/orbVoiceWake'
@@ -554,10 +554,16 @@ export default function OrbGuide() {
             answer: prepared?.answer || fallback.answer,
             category: prepared?.category || 'Product',
           }
-          const destination = `/app/brain?tab=faqs&draftQuestion=${encodeURIComponent(faq.question)}&draftAnswer=${encodeURIComponent(faq.answer)}&draftCategory=${encodeURIComponent(faq.category)}`
+          await createAssistantFaq(faq, brandName)
+          const destination = '/app/brain?tab=faqs'
           lastDestinationRef.current = { destination, destinationLabel: 'FAQs' }
-          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening an unsaved FAQ draft for you to review. Nothing will be added until you choose Save.', destination, destinationLabel: 'FAQs' }])
-          window.setTimeout(() => navigate(destination), 280)
+          setMessages((items) => [...items, {
+            id: makeId(),
+            role: 'orb',
+            text: 'Added the FAQ to the brand knowledge and published it to Qdrant.',
+            destination,
+            destinationLabel: 'FAQs',
+          }])
           return
         }
         if (requestedWork.type === 'product') {
