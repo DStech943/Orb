@@ -86,6 +86,8 @@ export default function ClientChat() {
   const scrollContainerRef = useRef(null)
   const searchInputRef = useRef(null)
   const isFirstLoad = useRef(true)
+  const restoredScrollTopRef = useRef(null)
+  const chatScrollStorageKey = `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
 
   useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
   useEffect(() => { setSlashCommandIndex(0) }, [inputMessage])
@@ -120,6 +122,7 @@ export default function ClientChat() {
   const handleScroll = () => {
     const el = scrollContainerRef.current
     if (!el) return
+    try { window.sessionStorage.setItem(chatScrollStorageKey, String(el.scrollTop)) } catch {}
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     setShowScrollBottom(distanceFromBottom > 160)
   }
@@ -217,7 +220,17 @@ export default function ClientChat() {
   useEffect(() => {
     if (!loading && messages.length > 0) {
       if (isFirstLoad.current) {
-        scrollToBottom(false)
+        const savedScrollTop = restoredScrollTopRef.current
+        if (Number.isFinite(savedScrollTop)) {
+          window.requestAnimationFrame(() => {
+            const el = scrollContainerRef.current
+            if (!el) return
+            el.scrollTop = Math.min(savedScrollTop, Math.max(0, el.scrollHeight - el.clientHeight))
+            handleScroll()
+          })
+        } else {
+          scrollToBottom(false)
+        }
         isFirstLoad.current = false
       } else {
         const el = scrollContainerRef.current
@@ -230,6 +243,22 @@ export default function ClientChat() {
       }
     }
   }, [messages.length, loading])
+
+  useEffect(() => {
+    try {
+      const stored = window.sessionStorage.getItem(chatScrollStorageKey)
+      const parsed = stored === null ? null : Number(stored)
+      restoredScrollTopRef.current = Number.isFinite(parsed) ? parsed : null
+    } catch {
+      restoredScrollTopRef.current = null
+    }
+    isFirstLoad.current = true
+    return () => {
+      const el = scrollContainerRef.current
+      if (!el) return
+      try { window.sessionStorage.setItem(chatScrollStorageKey, String(el.scrollTop)) } catch {}
+    }
+  }, [chatScrollStorageKey])
 
   useEffect(() => {
     setLoading(true)
@@ -953,8 +982,8 @@ export default function ClientChat() {
                       }`}
                     >
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {renderMessageContent(msg.content, fromClient, msg.mentions, true)}
                         <ChatReferenceCapsules references={msg.references} tone={fromClient ? 'dark' : 'light'} inline className="mt-0" />
+                        {renderMessageContent(msg.content, fromClient, msg.mentions, true)}
                       </div>
 
                       {/* Attached Media Grid */}
@@ -1234,10 +1263,11 @@ export default function ClientChat() {
         <form onSubmit={handleSend} className="relative">
           <ChatReferenceCommands ref={slashMenuRef} value={inputMessage} brandName={brandName} role={user?.role} commandSelectedIndex={slashCommandIndex} onChoose={chooseReference} />
           <div className="rounded-2xl border border-[#bdc6ff] bg-[#eef0ff] p-2 shadow-sm transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/10">
-            <div className="flex flex-wrap items-center gap-2 px-1">
+            <div className="relative px-1">
               <ChatReferenceCapsules
                 references={selectedReferences}
-                className="mt-0"
+                inline
+                className="absolute left-1 top-1 z-10 mt-0"
                 onRemove={(reference) => setSelectedReferences((current) => current.filter((item) => !(item.type === reference.type && item.id === reference.id)))}
               />
               <textarea
@@ -1251,7 +1281,8 @@ export default function ClientChat() {
                     ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
                     : `Message our team about ${brandName}...`
                 }
-                className="min-h-[32px] min-w-[180px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
+                style={{ textIndent: selectedReferences.length ? '13rem' : undefined }}
+                className="block min-h-[32px] w-full resize-none bg-transparent px-1 py-1.5 text-sm leading-6 text-slate-700 placeholder:text-slate-400 focus:outline-none"
               />
             </div>
             <div className="flex items-center justify-between px-1">

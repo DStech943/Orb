@@ -306,20 +306,32 @@ const blankFlow = ({ empty = false } = {}) => ({
       ],
   edges: [],
 });
-const normalise = (point) => ({
-  id: point.is_template ? null : point.id,
-  templateId: point.template_id || null,
-  templateVersion: Number(point.template_version || 1),
-  templateCategory: point.category_code || "",
-  isTemplate: Boolean(point.is_template),
-  title: point.payload?.title || "Untitled flow",
-  lifecycle_stage: point.payload?.lifecycle_stage || "",
-  status: point.payload?.status || "draft",
-  nodes: Array.isArray(point.payload?.nodes) ? point.payload.nodes : [],
-  edges: Array.isArray(point.payload?.edges) ? point.payload.edges : [],
-  import_source: point.payload?.import_source,
-  updatedAt: point.payload?.updated_at || point.payload?.created_at || "",
-});
+const flowPayload = (point = {}) => {
+  if (point.payload && typeof point.payload === "object") return point.payload;
+  if (typeof point.payload === "string") {
+    try { return JSON.parse(point.payload); } catch { return {}; }
+  }
+  return {};
+};
+const normalise = (point = {}) => {
+  const payload = flowPayload(point);
+  return {
+    id: point.is_template ? null : point.id,
+    templateId: point.template_id || null,
+    templateVersion: Number(point.template_version || 1),
+    templateCategory: point.category_code || "",
+    isTemplate: Boolean(point.is_template),
+    // Older flow responses expose these fields at the record level, while
+    // current API responses put them inside payload. Support both shapes.
+    title: payload.title || payload.name || point.title || point.name || "Untitled flow",
+    lifecycle_stage: payload.lifecycle_stage || point.lifecycle_stage || "",
+    status: payload.status || point.status || "draft",
+    nodes: Array.isArray(payload.nodes) ? payload.nodes : (Array.isArray(point.nodes) ? point.nodes : []),
+    edges: Array.isArray(payload.edges) ? payload.edges : (Array.isArray(point.edges) ? point.edges : []),
+    import_source: payload.import_source || point.import_source,
+    updatedAt: payload.updated_at || payload.created_at || point.updated_at || point.created_at || "",
+  };
+};
 
 const key = (value) =>
   String(value || "")
