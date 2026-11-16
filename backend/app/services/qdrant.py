@@ -126,11 +126,25 @@ async def delete_knowledge_point(
     kind: str,
     item_id: UUID | str,
 ) -> None:
-    """Delete one published SOP/FAQ/product point from its brand collection.
+    """Delete one published SOP/FAQ/product point from its brand collection."""
+    await delete_knowledge_points(pool, settings, brand_name, kind, [item_id])
+
+
+async def delete_knowledge_points(
+    pool: asyncpg.Pool,
+    settings: Settings,
+    brand_name: str,
+    kind: str,
+    item_ids: list[UUID | str],
+) -> None:
+    """Hard-delete published knowledge points from one Qdrant collection.
 
     The operation is deliberately idempotent: an already-missing collection
     means there is no live knowledge point left to remove.
     """
+    point_ids = list(dict.fromkeys(str(item_id) for item_id in item_ids if str(item_id).strip()))
+    if not point_ids:
+        return
     base_url, headers = await _client(pool)
     collection = collection_name(settings.qdrant_collection_prefix, brand_name, kind)
     try:
@@ -138,7 +152,7 @@ async def delete_knowledge_point(
             response = await client.post(
                 f"{base_url}/collections/{collection}/points/delete?wait=true",
                 headers=headers,
-                json={"points": [str(item_id)]},
+                json={"points": point_ids},
             )
             if response.status_code == 404:
                 return

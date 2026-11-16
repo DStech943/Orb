@@ -23,6 +23,7 @@ from app.services.llm import GenerationUnavailable, generate_json
 from app.services.qdrant import (
     PublishUnavailable,
     delete_knowledge_point,
+    delete_knowledge_points,
     publish_points,
     scroll_points,
 )
@@ -224,6 +225,11 @@ class ManualSopCreate(RequestModel):
 class BulkKnowledgeCreate(RequestModel):
     brand_name: str = Field(min_length=1, max_length=160)
     items: list[dict[str, Any]] = Field(min_length=1, max_length=1_000)
+
+
+class BulkKnowledgeDelete(RequestModel):
+    brand_name: str = Field(min_length=1, max_length=160)
+    ids: list[str] = Field(min_length=1, max_length=1_000)
 
 
 class OrbGuideRequest(RequestModel):
@@ -2985,67 +2991,35 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
 
 @router.patch("/knowledge/{kind}/{item_id}")
 async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    brand = await _remote_brand_by_name(request, payload.brand_name)
     stored_payload = dict(payload.payload)
     stored_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     if kind == "products":
+        brand = await _remote_brand_by_name(request, payload.brand_name)
         rows = await _supabase_service_write(request, "PATCH", "orb_products", params={
             "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "select": "id,payload",
         }, payload={"payload": stored_payload})
     else:
         content_kind = "sop" if kind == "sops" else "faq"
-        content_status = str(stored_payload.get("status") or "draft").strip().lower()
-        if content_status not in {"draft", "approved", "rejected"}:
-            content_status = "draft"
-
-        # Approval is the publishing action.  Keep the record as a draft until
-        # Qdrant has accepted the upsert, so the library can never report an
-        # item as approved while the agent's knowledge collection lacks it.
-        # Retrying after a transient failure is safe because Qdrant upserts by
-        # the stable Orb record UUID.
-        pending_status = "draft" if content_status == "approved" else content_status
-        rows = await _supabase_write(request, "PATCH", "orb_generated_content", params={
-            "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}", "select": "id,payload",
-        }, payload={"payload": stored_payload, "status": pending_status})
+        stored_payload["status"] = "published"
+        try:
+            collection = await publish_points(
+                request.app.state.db,
+                request.app.state.settings,
+                payload.brand_name,
+                content_kind,
+                [{"id": item_id, "payload": stored_payload}],
+            )
+        except PublishUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"Could not update the live Qdrant knowledge point: {exc}") from exc
+        return {
+            "point": {"id": item_id, "payload": stored_payload},
+            "qdrant_collection": collection,
+        }
     if not rows:
         raise HTTPException(status_code=404, detail="Knowledge item not found")
     row = rows[0]
-    if kind == "products" or content_status != "approved":
+    if kind == "products":
         return {"point": {"id": str(row["id"]), "payload": decode_jsonb(row["payload"])}}
-
-    stored_payload = decode_jsonb(row["payload"])
-    stored_payload = dict(stored_payload) if isinstance(stored_payload, dict) else {}
-    try:
-        collection = await publish_points(
-            request.app.state.db,
-            request.app.state.settings,
-            brand["name"],
-            content_kind,
-            [{"id": str(row["id"]), "payload": stored_payload}],
-        )
-    except PublishUnavailable as exc:
-        # Preserve the draft and surface the real publishing failure.  The user
-        # can correct the Qdrant/embedding configuration and approve again.
-        await _supabase_write(request, "PATCH", "orb_generated_content", params={
-            "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}",
-        }, payload={"qdrant_error": str(exc)[:2000]})
-        raise HTTPException(status_code=503, detail=f"Approval could not publish to Qdrant: {exc}") from exc
-
-    approved_rows = await _supabase_write(request, "PATCH", "orb_generated_content", params={
-        "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "kind": f"eq.{content_kind}", "select": "id,payload",
-    }, payload={
-        "status": "approved",
-        "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
-        "qdrant_error": None,
-    })
-    if not approved_rows:
-        # The point is already in Qdrant, but it is safe to retry approval: it
-        # will overwrite that same point and then complete the state update.
-        raise HTTPException(status_code=503, detail="Published to Qdrant, but Orb could not finalise the approval state. Try approving again.")
-    return {
-        "point": {"id": str(approved_rows[0]["id"]), "payload": decode_jsonb(approved_rows[0]["payload"])},
-        "qdrant_collection": collection,
-    }
 
 
 @router.post("/knowledge/{kind}/publish-approved")
@@ -3111,3 +3085,28 @@ async def delete_knowledge(kind: Literal["sops", "faqs", "products"], item_id: s
         except PublishUnavailable as exc:
             raise HTTPException(status_code=503, detail=f"Could not remove the live Qdrant knowledge point: {exc}") from exc
     return Response(status_code=204)
+
+
+@router.post("/knowledge/{kind}/delete")
+async def delete_knowledge_bulk(
+    kind: Literal["sops", "faqs"],
+    payload: BulkKnowledgeDelete,
+    request: Request,
+    _: User = Depends(_admin),
+) -> dict[str, int]:
+    """Hard-delete selected live SOP/FAQ points from Qdrant only."""
+    ids = list(dict.fromkeys(item_id.strip() for item_id in payload.ids if item_id.strip()))
+    if not ids:
+        raise HTTPException(status_code=422, detail="Choose at least one knowledge item to delete")
+    content_kind = "sop" if kind == "sops" else "faq"
+    try:
+        await delete_knowledge_points(
+            request.app.state.db,
+            request.app.state.settings,
+            payload.brand_name,
+            content_kind,
+            ids,
+        )
+    except PublishUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Could not remove the live Qdrant knowledge points: {exc}") from exc
+    return {"deleted": len(ids)}

@@ -384,7 +384,7 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
   </section>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null }) {
+export default function ContentListPage({ kind, list, update, remove, removeMany, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isFaq = kind === 'faq'
@@ -511,6 +511,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   }, [selected])
 
   const toggle = (id) => setChecked((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id])
+  const selectAllVisible = () => setChecked(rows.map((item) => item.id))
   const NEW_ITEM_ID = '__new__'
   const createBlank = () => {
     scrollPosition.current = window.scrollY
@@ -554,12 +555,14 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const deleteItems = async () => {
     try {
       const ids = selected ? [selected.id] : checked
-      await Promise.all(ids.map(remove))
+      if (!ids.length) return
+      if (removeMany && ids.length > 1) await removeMany(ids)
+      else await Promise.all(ids.map(remove))
       setSelected(null)
       setChecked([])
       setConfirm(false)
       reload()
-      showToast('Deleted.')
+      showToast(`${ids.length} ${ids.length === 1 ? 'item' : 'items'} deleted.`)
     } catch (deleteError) { showToast(deleteError.message || 'Could not delete this item.') }
   }
   const sync = async () => {
@@ -685,11 +688,11 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
         {extraFilterAction}
       </div>
-      {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
+      {!isReadOnly && !isProduct && rows.length > 0 && <div className="mt-4 flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" onClick={() => checked.length === rows.length && rows.every((item) => checked.includes(item.id)) ? setChecked([]) : selectAllVisible()}>{checked.length === rows.length && rows.every((item) => checked.includes(item.id)) ? 'Clear selection' : `Select all (${rows.length})`}</Button>{checked.length > 0 && <><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected ({checked.length})</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected ({checked.length})</Button></>}</div>}
       <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
     </section>
     <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{(selected.id === initialDraft?.id || selected.id === orbSopDraftId) && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
-    <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />
+    <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} title={selected || checked.length === 1 ? 'Delete this item?' : `Delete ${checked.length} items?`} description={selected || checked.length === 1 ? 'This item will be permanently removed from Qdrant.' : `These ${checked.length} selected items will be permanently removed from Qdrant.`} confirmLabel={selected || checked.length === 1 ? 'Delete' : 'Delete all selected'} />
     <ConfirmDialog open={confirmApproveAll} onClose={() => setConfirmApproveAll(false)} onConfirm={() => { setConfirmApproveAll(false); approve(draftIds) }} title="Approve all drafts?" description={`${draftIds.length} ${draftIds.length === 1 ? 'draft will' : 'drafts will'} be marked approved and become available to Create with Orb.`} confirmLabel="Approve all" />
     {!isProduct && (
       <BulkUploadModal

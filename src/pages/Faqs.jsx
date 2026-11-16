@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import ContentListPage from '../components/app/ContentListPage'
-import { deleteFaq, listFaqs, publishApprovedFaqs, updateFaq } from '../services/generation'
+import { deleteFaq, deleteFaqs, listFaqs, publishApprovedFaqs, updateFaq } from '../services/generation'
 import { activeBrandName, createAssistantFaq } from '../services/orbApi'
 
 export default function Faqs() {
@@ -20,5 +20,5 @@ export default function Faqs() {
 
   const createFaq = (faq) => createAssistantFaq({ question: faq.question, answer: faq.answer, category: faq.category || 'Support' }, activeBrandName())
 
-  return <ContentListPage kind="faq" list={listFaqs} update={saveFaq} remove={deleteFaq} publishApproved={publishApprovedFaqs} initialDraft={initialDraft} createItem={createFaq} />
+  return <ContentListPage kind="faq" list={listFaqs} update={saveFaq} remove={deleteFaq} removeMany={deleteFaqs} publishApproved={publishApprovedFaqs} initialDraft={initialDraft} createItem={createFaq} />
 }
