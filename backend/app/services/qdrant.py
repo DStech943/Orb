@@ -135,9 +135,8 @@ async def delete_knowledge_point(
     collection = collection_name(settings.qdrant_collection_prefix, brand_name, kind)
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.request(
-                "DELETE",
-                f"{base_url}/collections/{collection}/points?wait=true",
+            response = await client.post(
+                f"{base_url}/collections/{collection}/points/delete?wait=true",
                 headers=headers,
                 json={"points": [str(item_id)]},
             )

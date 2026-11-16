@@ -3088,8 +3088,8 @@ async def publish_existing_approved_knowledge(kind: Literal["sops", "faqs"], pay
 
 @router.delete("/knowledge/{kind}/{item_id}", status_code=204, response_class=Response)
 async def delete_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, brand_name: str, request: Request, _: User = Depends(_admin)) -> Response:
-    brand = await _remote_brand_by_name(request, brand_name)
     if kind == "products":
+        brand = await _remote_brand_by_name(request, brand_name)
         rows = await _supabase_service_write(request, "DELETE", "orb_products", params={
             "id": f"eq.{item_id}", "brand_id": f"eq.{brand['id']}", "select": "id",
         })
@@ -3097,31 +3097,17 @@ async def delete_knowledge(kind: Literal["sops", "faqs", "products"], item_id: s
             raise HTTPException(status_code=404, detail="Knowledge item not found")
         return Response(status_code=204)
     else:
+        # SOPs and FAQs are live knowledge only.  Deleting one is deliberately
+        # Qdrant-only: no Supabase record is read, updated, or deleted here.
         content_kind = "sop" if kind == "sops" else "faq"
         try:
-            # Qdrant deletes are idempotent. Removing it unconditionally also
-            # supports published rows created before the timestamp columns
-            # existed in a brand's content table.
             await delete_knowledge_point(
                 request.app.state.db,
                 request.app.state.settings,
-                brand["name"],
+                brand_name,
                 content_kind,
                 item_id,
             )
         except PublishUnavailable as exc:
             raise HTTPException(status_code=503, detail=f"Could not remove the live Qdrant knowledge point: {exc}") from exc
-        rows = await _supabase_service_write(
-            request,
-            "DELETE",
-            "orb_generated_content",
-            params={
-                "id": f"eq.{item_id}",
-                "brand_id": f"eq.{brand['id']}",
-                "kind": f"eq.{content_kind}",
-                "select": "id",
-            },
-        )
-        if not rows:
-            raise HTTPException(status_code=404, detail="Knowledge item not found")
     return Response(status_code=204)
