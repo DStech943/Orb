@@ -137,7 +137,7 @@ export default function AuthPage({ mode = "login" }) {
     }
   };
   return (
-    <main className="min-h-screen bg-peach px-5 py-8 sm:grid sm:place-items-center sm:p-8">
+    <main className="min-h-screen bg-[#E6E9EF] px-5 py-8 sm:grid sm:place-items-center sm:p-8">
       <div className="mx-auto grid w-full max-w-6xl overflow-hidden rounded-lg border-2 border-ink bg-white shadow-brutal-lg lg:grid-cols-[1.05fr_1fr]">
         <aside className="relative overflow-hidden bg-ink p-8 text-white sm:p-12">
           <div className="absolute -left-20 -top-16 h-64 w-64 rounded-full bg-purple/70 blur-3xl" />

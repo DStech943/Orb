@@ -41,6 +41,16 @@ const productPriceAmount = (product = {}) => {
   const amount = Number(String(product.price ?? '').replace(/[^\d.-]/g, ''))
   return Number.isFinite(amount) ? amount : null
 }
+const trackedVariantValues = (product = {}, tracker) => {
+  if (!tracker?.field) return []
+  const variantIds = new Set((Array.isArray(product.variants) ? product.variants : []).map((variant) => String(variant?.id || '')).filter(Boolean))
+  const productIds = new Set([product.id, product.shopify?.id, product.external_id].map((id) => String(id || '')).filter(Boolean))
+  const values = (Array.isArray(tracker.variants) ? tracker.variants : [])
+    .filter((variant) => productIds.has(String(variant?.product_id || '')) || variantIds.has(String(variant?.id || '')))
+    .map((variant) => String(variant?.values?.[tracker.field] ?? '').trim())
+    .filter((value) => tracker.mode === 'nonempty' ? Boolean(value) : ['true', '1', 'yes'].includes(value.toLowerCase()))
+  return [...new Set(values)]
+}
 
 const formatUpdatedAt = (value) => {
   if (!value || value === '—') return '—'
@@ -373,7 +383,7 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
   </section>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null }) {
+export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isFaq = kind === 'faq'
@@ -586,6 +596,21 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     : isProduct
       ? [{ key: 'name', label: 'Product', render: (item) => { const image = productThumbnail(item); return <div className="flex min-w-[220px] items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">{image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <span className="h-4 w-4 rounded bg-slate-200" />}</span><strong className="line-clamp-2 text-sm text-ink">{item.name || 'Untitled product'}</strong></div> } }, { key: 'status', label: 'Status', render: (item) => { const active = String(item.status || '').toLowerCase() === 'active'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{item.status ? String(item.status).charAt(0).toUpperCase() + String(item.status).slice(1).toLowerCase() : '—'}</span> } }, { key: 'inventory', label: 'Inventory', render: (item) => <span className="whitespace-nowrap text-sm text-slate-700">{productInventory(item)}</span> }, { key: 'price', label: 'Price', render: (item) => <span className="whitespace-nowrap text-sm font-semibold text-ink">{productPrice(item)}</span> }]
       : [{ key: 'question', label: 'Question', render: (item) => <strong>{item.question}</strong> }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated', render: (item) => <div className="whitespace-nowrap"><p className="text-sm font-medium text-ink">{formatUpdatedAt(item.updated)}</p><p className="mt-0.5 text-xs text-muted">by {updatedByLabel(item)}</p></div> }]
+
+  if (isProduct && trackedVariantMetafield?.field) {
+    columns.push({
+      key: 'tracked_variant_metafield',
+      label: trackedVariantMetafield.label || 'Metafield',
+      render: (item) => {
+        const values = trackedVariantValues(item, trackedVariantMetafield)
+        if (!values.length) return <span className="text-sm text-slate-400">—</span>
+        const label = trackedVariantMetafield.mode === 'true'
+          ? `${values.length} variant${values.length === 1 ? '' : 's'} marked`
+          : values.join(', ')
+        return <span className="inline-flex max-w-[180px] truncate rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-800" title={values.join(', ')}>{label}</span>
+      },
+    })
+  }
 
   if (loading) return <OrbLoader label={`Loading ${title}`} />
   if (error) return <KnowledgeAccessState error={error} title={title} onRetry={reload} />

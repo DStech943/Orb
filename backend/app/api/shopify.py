@@ -18,6 +18,18 @@ from app.scraper.shopify import ShopifyAdminUnavailable, _admin_query, _plain_ht
 router = APIRouter(prefix="/api/shopify", tags=["shopify"])
 
 
+async def _internal_shopify_user(request: Request, user: User) -> None:
+    """Order details are available only to Orb's internal roles."""
+    if request.app.state.settings.auth_disabled:
+        return
+    rows = await _supabase_service_rows(request, "orb_profiles", {
+        "select": "role", "id": f"eq.{user.id}", "limit": "1",
+    })
+    role = str(rows[0].get("role") or "").lower() if rows else ""
+    if role not in {"admin", "team", "agent", "pod_lead"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Shopify order lookup is available to internal roles only.")
+
+
 class ShopifyImport(BaseModel):
     brand_id: str | None = None
     brand_name: str | None = Field(default=None, max_length=160)
@@ -801,10 +813,10 @@ async def variant_metafield_tracker(
         pageInfo { hasNextPage endCursor }
         nodes {
           id title handle
-          variants(first: 100) {
+          variants(first: 50) {
             nodes {
               id title sku
-              metafields(first: 15) { nodes { id namespace key type value } }
+              metafields(first: 10) { nodes { id namespace key type value } }
             }
           }
         }
@@ -813,13 +825,14 @@ async def variant_metafield_tracker(
     """
     variants = []
     cursor: str | None = None
-    # Up to 5 pages of 50 products = 250 products max (well within cost limit per query)
+    # Keep each nested Shopify request well below the 1,000-cost ceiling.
+    # Pagination still covers up to 250 products without one oversized query.
     for _ in range(5):
         try:
             prod_data = await _admin_query(
                 request.app.state.settings,
                 products_query,
-                {"first": 50, "after": cursor},
+                {"first": 25, "after": cursor},
                 domain=admin_domain(domain),
                 access_token=access_token,
             )
@@ -853,6 +866,44 @@ async def variant_metafield_tracker(
         cursor = str(page_info["endCursor"])
 
     return {"definitions": definitions, "variants": variants}
+
+
+@router.get("/orders/search")
+async def search_shopify_orders(
+    request: Request,
+    brand_name: str = Query(min_length=1, max_length=160),
+    query: str = Query(min_length=1, max_length=80),
+    user: User = Depends(current_user),
+) -> dict:
+    """Search a brand's Shopify orders for internal Chatspace references."""
+    await _internal_shopify_user(request, user)
+    await _remote_brand_by_name(request, brand_name)
+    domain, access_token, _source = await _resolve_credentials(request, brand_name, True, user)
+    if not domain or not access_token:
+        raise HTTPException(status_code=503, detail="Shopify is not connected for this brand.")
+    safe_query = re.sub(r"[^A-Za-z0-9#_ -]", "", query).strip()
+    try:
+        data = await _admin_query(request.app.state.settings, """
+        query OrbOrderSearch($query: String!) {
+          orders(first: 10, query: $query, reverse: true) {
+            nodes { id name legacyResourceId displayFulfillmentStatus displayFinancialStatus }
+          }
+        }
+        """, {"query": f"name:{safe_query}"}, domain=admin_domain(domain), access_token=access_token)
+    except ShopifyAdminUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    orders = []
+    for order in ((data.get("orders") or {}).get("nodes") or []):
+        if not isinstance(order, dict):
+            continue
+        legacy_id = order.get("legacyResourceId")
+        orders.append({
+            "id": order.get("id"), "name": order.get("name") or "Order",
+            "fulfillment_status": order.get("displayFulfillmentStatus") or "Unknown",
+            "payment_status": order.get("displayFinancialStatus") or "Unknown",
+            "url": f"https://{admin_domain(domain)}/admin/orders/{legacy_id}" if legacy_id else "",
+        })
+    return {"orders": orders}
 
 
 @router.post("/products/metafields/save")

@@ -330,7 +330,7 @@ export default function AgentChat({ embedded = false }) {
       aria-modal={isFullscreen || undefined}
       aria-label={isFullscreen ? `${title} full screen` : undefined}
     >
-      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-0 border-b border-slate-200 bg-white px-4 py-3" : "mb-5"}`}>
+      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-0 border-b border-slate-200 bg-white px-5 pb-3 pt-5" : "mb-5"}`}>
         {!isFullscreen && <div>
           <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
             Agent tester
@@ -343,8 +343,8 @@ export default function AgentChat({ embedded = false }) {
             agent.
           </p>
         </div>}
-        <div className="ml-auto flex items-start gap-2">
-          <div className="flex flex-col items-end">
+        <div className="ml-auto flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setIsFullscreen((open) => !open)}
@@ -355,21 +355,23 @@ export default function AgentChat({ embedded = false }) {
               {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
               <span className="hidden sm:inline">{isFullscreen ? "Exit full screen" : "Full screen"}</span>
             </button>
-            <p className="mt-1 text-right text-[10px] font-medium text-slate-500">Press Esc to return to the smaller view.</p>
-            <label className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-[10px] font-medium text-slate-600">
+            <button
+              type="button"
+              onClick={clearChat}
+              disabled={!messages.length && !draft && !error}
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <Eraser size={15} />
+              Clear chat
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] font-medium text-slate-500">
+            {isFullscreen && <span>Press Esc to return to the smaller view.</span>}
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-slate-600">
               <input type="checkbox" checked={openFullscreenByDefault} onChange={(event) => setFullscreenDefault(event.target.checked)} className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary" />
               Open full screen by default
             </label>
           </div>
-          <button
-            type="button"
-            onClick={clearChat}
-            disabled={!messages.length && !draft && !error}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <Eraser size={15} />
-            Clear chat
-          </button>
         </div>
       </div>
       <section className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-white lg:flex-row ${isFullscreen ? "rounded-none border-0 shadow-none" : "rounded-2xl border border-slate-200 shadow-sm"}`}>

@@ -24,6 +24,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Avatar from '../components/ui/Avatar'
+import ChatReferenceCommands, { ChatReferenceCapsules } from '../components/chat/ChatReferences'
 import { activeBrandName } from '../services/orbApi'
 import {
   PRESET_REACTIONS,
@@ -53,6 +54,7 @@ export default function ClientChat() {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [inputMessage, setInputMessage] = useState('')
+  const [selectedReferences, setSelectedReferences] = useState([])
   const [sending, setSending] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
   const [justSentId, setJustSentId] = useState(null)
@@ -373,6 +375,20 @@ export default function ClientChat() {
     setAttachedFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove))
   }
 
+  const chooseReference = (kind, item) => {
+    if (kind === 'command') {
+      setInputMessage(`/${item} `)
+      window.setTimeout(() => inputRef.current?.focus(), 0)
+      return
+    }
+    const next = item.type === 'product-set'
+      ? item.products.map((product) => ({ type: 'product', id: product.id, title: product.name, subtitle: `${item.id === 'oos' ? 'Out of stock' : `${(product.variants || []).map((variant) => Number(variant.inventoryQuantity) || 0).reduce((total, quantity) => total + quantity, 0)} in stock`}`, image: product.featuredImage?.url || '', href: product.url || '/app/products', external: Boolean(product.url) }))
+      : [item]
+    setSelectedReferences((current) => [...current, ...next.filter((reference) => !current.some((existing) => existing.type === reference.type && existing.id === reference.id))])
+    setInputMessage('')
+    window.setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
   const handleInputChange = (e) => {
     const val = e.target.value
     setInputMessage(val)
@@ -414,11 +430,12 @@ export default function ClientChat() {
 
   const handleSend = async (e) => {
     e?.preventDefault()
-    if ((!inputMessage.trim() && attachedFiles.length === 0) || sending) return
+    if ((!inputMessage.trim() && attachedFiles.length === 0 && selectedReferences.length === 0) || sending) return
 
     const text = inputMessage
     const currentReply = replyingTo
     const mediaToSend = [...attachedFiles]
+    const referencesToSend = [...selectedReferences]
 
     // Extract any @mentions from the text using our comprehensive mention regex
     const mentionRegex = buildMentionRegex()
@@ -428,6 +445,7 @@ export default function ClientChat() {
     setInputMessage('')
     setReplyingTo(null)
     setAttachedFiles([])
+    setSelectedReferences([])
     setSending(true)
     setMentionMenuOpen(false)
 
@@ -436,6 +454,7 @@ export default function ClientChat() {
         brandName,
         content: text,
         media: mediaToSend,
+        references: referencesToSend,
         mentions: mentionMatches,
         currentUser: user,
         replyTo: currentReply,
@@ -448,6 +467,7 @@ export default function ClientChat() {
       setInputMessage(text)
       setReplyingTo(currentReply)
       setAttachedFiles(mediaToSend)
+      setSelectedReferences(referencesToSend)
     } finally {
       setSending(false)
       setTimeout(() => {
@@ -844,6 +864,8 @@ export default function ClientChat() {
                     >
                       {renderMessageContent(msg.content, fromClient, msg.mentions)}
 
+                      <ChatReferenceCapsules references={msg.references} tone={fromClient ? 'dark' : 'light'} />
+
                       {/* Attached Media Grid */}
                       {Array.isArray(msg.media) && msg.media.length > 0 && (
                         <div className={`grid gap-2 ${msg.content ? 'mt-2.5' : ''} ${msg.media.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -1107,6 +1129,11 @@ export default function ClientChat() {
           </div>
         )}
 
+        <ChatReferenceCapsules
+          references={selectedReferences}
+          onRemove={(reference) => setSelectedReferences((current) => current.filter((item) => !(item.type === reference.type && item.id === reference.id)))}
+        />
+
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -1119,6 +1146,7 @@ export default function ClientChat() {
 
         {/* Input box */}
         <form onSubmit={handleSend} className="relative flex items-end gap-2">
+          <ChatReferenceCommands value={inputMessage} brandName={brandName} role={user?.role} onChoose={chooseReference} />
           {/* Attach file button */}
           <button
             type="button"
@@ -1147,7 +1175,7 @@ export default function ClientChat() {
 
           <button
             type="submit"
-            disabled={(!inputMessage.trim() && attachedFiles.length === 0) || sending || uploading}
+            disabled={(!inputMessage.trim() && attachedFiles.length === 0 && selectedReferences.length === 0) || sending || uploading}
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm transition hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Send message"
           >

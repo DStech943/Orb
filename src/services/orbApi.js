@@ -335,6 +335,7 @@ export const listMessageTemplates = (brandName = activeBrandName()) =>
   brandName
     ? request(`/api/templates?brand_name=${encodeURIComponent(brandName)}`, { cacheTtl: 30_000 })
     : Promise.resolve({ templates: [] });
+export const searchShopifyOrders = (brandName, query) => request(`/api/shopify/orders/search?brand_name=${encodeURIComponent(brandName)}&query=${encodeURIComponent(query)}`, { cacheTtl: 0 });
 export const syncZokoTemplates = (brandName = activeBrandName(), action = "sync") =>
   request("/api/templates/sync", {
     method: "POST",

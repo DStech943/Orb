@@ -290,6 +290,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
               .toUpperCase(),
           },
           content: row.content,
+          references: Array.isArray(row.message_references) ? row.message_references : typeof row.message_references === 'string' ? JSON.parse(row.message_references) : [],
           media: Array.isArray(row.media) ? row.media : typeof row.media === 'string' ? JSON.parse(row.media) : [],
           mentions: Array.isArray(row.mentions) ? row.mentions : [],
           status: row.status || 'read',
@@ -327,11 +328,12 @@ export const sendClientChatMessage = async ({
   brandId = activeBrandId(),
   content,
   media = [],
+  references = [],
   mentions = [],
   currentUser,
   replyTo = null,
 }) => {
-  if ((!content || !content.trim()) && (!media || media.length === 0)) {
+  if ((!content || !content.trim()) && (!media || media.length === 0) && (!references || references.length === 0)) {
     throw new Error('Message cannot be empty')
   }
   const brand = brandName || 'default_brand'
@@ -375,6 +377,7 @@ export const sendClientChatMessage = async ({
     sender: userSender,
     content: (content || '').trim(),
     media: media || [],
+    references: references || [],
     mentions: mentions || [],
     createdAt: new Date().toISOString(),
     status: 'sent',
@@ -403,6 +406,7 @@ export const sendClientChatMessage = async ({
       sender_avatar: currentUser?.avatarKey || userSender.avatar,
       content: newMessage.content,
       media: newMessage.media,
+      message_references: newMessage.references,
       mentions: newMessage.mentions,
       status: 'sent',
       reply_to_id: newMessage.replyToId,
@@ -417,7 +421,7 @@ export const sendClientChatMessage = async ({
         .insert(payload)
       if (error) {
         // Fallback without mentions column if it hasn't been migrated yet
-        const { mentions, ...fallbackPayload } = payload
+        const { mentions, message_references, ...fallbackPayload } = payload
         await supabase
           .schema('cx_copilot')
           .from('orb_client_chat_messages')

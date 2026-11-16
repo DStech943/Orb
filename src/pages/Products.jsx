@@ -10,8 +10,14 @@ import { saveTrackedVariantMetafield } from '../services/overviewBlocks'
 const trackerStorageKey = (brandName) => `orb:variant-metafield-tracker:${String(brandName || '').trim().toLowerCase()}`
 const fieldId = (field) => `${field?.namespace || ''}.${field?.key || ''}`
 const truthyMetafieldValue = (value) => ['true', '1', 'yes'].includes(String(value || '').trim().toLowerCase())
+const readTrackedMetafield = (brandName) => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(trackerStorageKey(brandName)) || 'null')
+    return stored?.field ? { field: stored.field, mode: stored.mode === 'nonempty' ? 'nonempty' : 'true', label: stored.label || stored.field } : null
+  } catch { return null }
+}
 
-function VariantMetafieldTrackerModal({ open, onClose, brandName, connected }) {
+function VariantMetafieldTrackerModal({ open, onClose, brandName, connected, onTrackerChange }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [data, setData] = useState(null)
@@ -20,8 +26,9 @@ function VariantMetafieldTrackerModal({ open, onClose, brandName, connected }) {
 
   useEffect(() => {
     const saved = JSON.parse(window.localStorage.getItem(trackerStorageKey(brandName)) || 'null')
-    setSelectedField(saved?.field || null)
-    setMode(saved?.mode === 'nonempty' ? 'nonempty' : 'true')
+    const tracker = readTrackedMetafield(brandName)
+    setSelectedField(tracker?.field || null)
+    setMode(tracker?.mode || 'true')
     setData(null)
     setError('')
   }, [brandName])
@@ -33,17 +40,23 @@ function VariantMetafieldTrackerModal({ open, onClose, brandName, connected }) {
   }
   useEffect(() => { if (open && !data && !loading) load() }, [open, brandName, connected]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const persistTracker = (field, nextMode, definitions = data?.definitions || []) => {
+    const definition = definitions.find((item) => fieldId(item) === field)
+    const next = field ? { field, mode: nextMode, label: definition?.name || field } : null
+    if (next) window.localStorage.setItem(trackerStorageKey(brandName), JSON.stringify(next))
+    else window.localStorage.removeItem(trackerStorageKey(brandName))
+    onTrackerChange?.(next)
+    saveTrackedVariantMetafield(activeBrandId(), next || {}).catch(() => {})
+  }
   const selectField = (event) => {
     const next = event.target.value || null
     setSelectedField(next)
-    window.localStorage.setItem(trackerStorageKey(brandName), JSON.stringify({ field: next, mode }))
-    saveTrackedVariantMetafield(activeBrandId(), { field: next, mode }).catch(() => {})
+    persistTracker(next, mode)
   }
   const selectMode = (event) => {
     const next = event.target.value
     setMode(next)
-    window.localStorage.setItem(trackerStorageKey(brandName), JSON.stringify({ field: selectedField, mode: next }))
-    saveTrackedVariantMetafield(activeBrandId(), { field: selectedField, mode: next }).catch(() => {})
+    persistTracker(selectedField, next)
   }
   const activeDefinition = data?.definitions?.find((field) => fieldId(field) === selectedField)
   const matchingVariants = (data?.variants || []).filter((variant) => {
@@ -170,6 +183,8 @@ export default function Products() {
   const [brandName, setBrandName] = useState(() => activeBrandName())
   const [shopifyConnected, setShopifyConnected] = useState(false)
   const [trackerModalOpen, setTrackerModalOpen] = useState(false)
+  const [trackedMetafield, setTrackedMetafield] = useState(() => readTrackedMetafield(activeBrandName()))
+  const [trackerVariants, setTrackerVariants] = useState([])
   const backgroundSyncInFlight = useRef(false)
   const assistantDraft = useMemo(() => ({ message: search.get('draft') || '', target: search.get('target') || '', fieldHint: search.get('field') || '' }), [search])
 
@@ -188,6 +203,19 @@ export default function Products() {
     window.addEventListener('orb:brand-changed', checkConnection)
     return () => { active = false; window.removeEventListener('orb:brand-changed', checkConnection) }
   }, [])
+
+  useEffect(() => {
+    setTrackedMetafield(readTrackedMetafield(brandName))
+  }, [brandName])
+
+  useEffect(() => {
+    let active = true
+    if (!shopifyConnected || !brandName || !trackedMetafield?.field) { setTrackerVariants([]); return undefined }
+    getShopifyVariantMetafieldTracker({ brandName })
+      .then((result) => { if (active) setTrackerVariants(Array.isArray(result?.variants) ? result.variants : []) })
+      .catch(() => { if (active) setTrackerVariants([]) })
+    return () => { active = false }
+  }, [brandName, shopifyConnected, trackedMetafield?.field])
 
   // Refresh Shopify data when Products is opened, then once per hour for as
   // long as this screen is mounted. Failures stay quiet so browsing products
@@ -232,6 +260,7 @@ export default function Products() {
         onClose={() => setTrackerModalOpen(false)}
         brandName={brandName}
         connected={shopifyConnected}
+        onTrackerChange={(next) => { setTrackedMetafield(next); setTrackerVariants([]) }}
       />
       <ContentListPage
         kind="product"
@@ -239,6 +268,7 @@ export default function Products() {
         update={saveProduct}
         remove={deleteProduct}
         extraFilterAction={spannerAction}
+        trackedVariantMetafield={trackedMetafield ? { ...trackedMetafield, variants: trackerVariants } : null}
         assistantDraft={assistantDraft.message ? assistantDraft : null}
         syncProducts={shopifyConnected ? () => syncProductsForActiveBrand(brandName) : null}
         saveProductMetafields={shopifyConnected ? (product) => saveProductMetafieldsToShopify(product, brandName) : null}

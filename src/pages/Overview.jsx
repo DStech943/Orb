@@ -479,7 +479,6 @@ const OVERVIEW_BLOCK_OPTIONS = [
   { id: 'operations', label: 'Active operations', description: 'Offers, notices, and restock updates currently used by the agent.' },
   { id: 'faqs', label: 'FAQs', description: 'Published FAQ count and drafts.' },
   { id: 'sops', label: 'SOPs', description: 'Published SOP count and drafts.' },
-  { id: 'tracked_variant_metafield', label: 'Tracked variant metafield', description: 'The Shopify variant metafield selected in Products.' },
 ]
 
 function OverviewBlockCustomizer({ blocks, onChange, saving }) {
@@ -717,7 +716,6 @@ function BrandOverview({ overview, onRetry }) {
         {blocks.includes('operations') && <ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} />}
         {blocks.includes('faqs') && <MetricBox config={optionalMetric('faqs')} data={overview.counts?.faqs} brandName={brandName} />}
         {blocks.includes('sops') && <MetricBox config={optionalMetric('sops')} data={overview.counts?.sops} brandName={brandName} />}
-        {blocks.includes('tracked_variant_metafield') && <TrackedVariantMetafield brandName={brandName} />}
       </div>
     </main>}
   </div>
