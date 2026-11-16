@@ -22,22 +22,26 @@ export function ChatReferenceCapsules({ references = [], tone = 'light', onRemov
 }
 
 export default function ChatReferenceCommands({ value, brandName, role, onChoose }) {
-  const [data, setData] = useState({ products: [], flows: [], operations: [], templates: [], sheetUrl: '', orders: [], loaded: false })
+  const [data, setData] = useState({ products: [], flows: [], operations: [], templates: [], sheetUrl: '', orders: [], loaded: {} })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectedIndex, setSelectedIndex] = useState(0)
   const match = String(value || '').match(/^\/(\w*)(?:\s+(.*))?$/)
   const command = match?.[1]?.toLowerCase() || ''
   const query = match?.[2]?.toLowerCase().trim() || ''
   const commands = COMMANDS.filter((item) => !item.internal || isInternal(role))
   const active = commands.find((item) => item.id === command)
 
-  useEffect(() => { setData({ products: [], flows: [], operations: [], templates: [], sheetUrl: '', orders: [], loaded: false }) }, [brandName])
+  useEffect(() => { setData({ products: [], flows: [], operations: [], templates: [], sheetUrl: '', orders: [], loaded: {} }) }, [brandName])
 
   useEffect(() => {
-    if (!active || data.loaded || loading || active.id === 'order') return
+    if (!active || loading || active.id === 'order') return
+    const resource = ['products', 'oos', 'nos'].includes(active.id) ? 'products' : active.id === 'flows' ? 'flows' : active.id === 'operation' ? 'operations' : active.id === 'template' ? 'templates' : 'sheet'
+    if (data.loaded?.[resource]) return
     let live = true; setLoading(true); setError('')
-    Promise.all([listProducts(), listFlows(brandName), listOperationalUpdates(brandName), listMessageTemplates(brandName), getBrandMastersheetUrl(brandName)])
-      .then(([products, flows, operations, templates, sheetUrl]) => { if (live) setData({ products: Array.isArray(products) ? products : [], flows: flows?.points || [], operations: operations?.updates || [], templates: templates?.templates || [], sheetUrl: sheetUrl || '', orders: [], loaded: true }) })
+    const load = resource === 'products' ? listProducts() : resource === 'flows' ? listFlows(brandName) : resource === 'operations' ? listOperationalUpdates(brandName) : resource === 'templates' ? listMessageTemplates(brandName) : getBrandMastersheetUrl(brandName)
+    Promise.resolve(load)
+      .then((result) => { if (!live) return; setData((current) => ({ ...current, ...(resource === 'products' ? { products: Array.isArray(result) ? result : [] } : resource === 'flows' ? { flows: result?.points || [] } : resource === 'operations' ? { operations: result?.updates || [] } : resource === 'templates' ? { templates: result?.templates || [] } : { sheetUrl: result || '' }), loaded: { ...current.loaded, [resource]: true } })) })
       .catch((reason) => { if (live) setError(reason.message || 'Could not load references.') })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -69,8 +73,31 @@ export default function ChatReferenceCommands({ value, brandName, role, onChoose
     return []
   }, [active, command, data, query])
 
+  const commandOptions = commands.filter((item) => item.label.slice(1).startsWith(command)).slice(0, 7)
+  const menuItems = active ? options : commandOptions
+  const chooseMenuItem = (item) => onChoose(active ? 'reference' : 'command', active ? item : item.id)
+
+  useEffect(() => { setSelectedIndex(0) }, [command, query, active?.id, menuItems.length])
+  useEffect(() => {
+    if (!match || loading || error || !menuItems.length) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault(); event.stopPropagation()
+        setSelectedIndex((current) => event.key === 'ArrowDown' ? (current + 1) % menuItems.length : (current - 1 + menuItems.length) % menuItems.length)
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault(); event.stopPropagation()
+        chooseMenuItem(menuItems[selectedIndex] || menuItems[0])
+      } else if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation()
+        onChoose('command', '')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [active, error, loading, match, menuItems, onChoose, selectedIndex])
+
   if (!match) return null
-  if (!active) return <Menu>{commands.filter((item) => item.label.slice(1).startsWith(command)).slice(0, 7).map((item) => <button key={item.id} type="button" onClick={() => onChoose('command', item.id)} className="menu-item"><b>{item.label}</b><span>{item.hint}</span></button>)}</Menu>
+  if (!active) return <Menu>{commandOptions.map((item, index) => <button key={item.id} type="button" onClick={() => chooseMenuItem(item)} className={`menu-item ${index === selectedIndex ? 'bg-primary/10' : ''}`}><b>{item.label}</b><span>{item.hint}</span></button>)}</Menu>
   return <Menu>{loading ? <p className="px-3 py-3 text-xs text-slate-500">Loading {active.label.slice(1)}…</p> : error ? <p className="px-3 py-3 text-xs text-red-600">{error}</p> : options.length ? options.map((item) => <button key={item.id} type="button" onClick={() => onChoose('reference', item)} className="menu-item"><Search size={14} className="text-primary" /><span className="min-w-0"><b className="block truncate">{item.title}</b><span className="block truncate">{item.subtitle}</span></span></button>) : <p className="px-3 py-3 text-xs text-slate-500">No matches found.</p>}</Menu>
 }
 

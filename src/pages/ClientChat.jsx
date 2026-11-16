@@ -377,7 +377,7 @@ export default function ClientChat() {
 
   const chooseReference = (kind, item) => {
     if (kind === 'command') {
-      setInputMessage(`/${item} `)
+      setInputMessage(item ? `/${item} ` : '')
       window.setTimeout(() => inputRef.current?.focus(), 0)
       return
     }
