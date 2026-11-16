@@ -615,7 +615,7 @@ function makeImportedFlows(text, label) {
         if (item.message) {
           const message = add(
             "message",
-            "Customer message",
+            "Message to Customer",
             item.message,
             1430,
             branchY,

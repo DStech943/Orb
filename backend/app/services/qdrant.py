@@ -119,6 +119,35 @@ async def scroll_points(
     return [point for point in points if isinstance(point, dict) and point.get("id") is not None and isinstance(point.get("payload"), dict)]
 
 
+async def delete_knowledge_point(
+    pool: asyncpg.Pool,
+    settings: Settings,
+    brand_name: str,
+    kind: str,
+    item_id: UUID | str,
+) -> None:
+    """Delete one published SOP/FAQ/product point from its brand collection.
+
+    The operation is deliberately idempotent: an already-missing collection
+    means there is no live knowledge point left to remove.
+    """
+    base_url, headers = await _client(pool)
+    collection = collection_name(settings.qdrant_collection_prefix, brand_name, kind)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.request(
+                "DELETE",
+                f"{base_url}/collections/{collection}/points?wait=true",
+                headers=headers,
+                json={"points": [str(item_id)]},
+            )
+            if response.status_code == 404:
+                return
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise PublishUnavailable(f"Qdrant knowledge delete failed: {exc}") from exc
+
+
 async def _ensure_display_collection(client: httpx.AsyncClient, base_url: str, headers: dict[str, str], collection: str, vector_size: int) -> None:
     exists = await client.get(f"{base_url}/collections/{collection}", headers=headers)
     if exists.status_code != 404:
