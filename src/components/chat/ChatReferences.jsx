@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import { ClipboardList, FileSpreadsheet, Package, Search, Workflow, X } from 'lucide-react'
 import { listProducts } from '../../services/generation'
 import { getBrandMastersheetUrl, listFlows, listMessageTemplates, listOperationalUpdates, searchShopifyOrders } from '../../services/orbApi'
@@ -21,7 +21,7 @@ export function ChatReferenceCapsules({ references = [], tone = 'light', onRemov
   })}</div>
 }
 
-export default function ChatReferenceCommands({ value, brandName, role, onChoose }) {
+const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value, brandName, role, onChoose, commandSelectedIndex = 0 }, ref) {
   const [data, setData] = useState({ products: [], flows: [], operations: [], templates: [], sheetUrl: '', orders: [], loaded: {} })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -45,7 +45,7 @@ export default function ChatReferenceCommands({ value, brandName, role, onChoose
       .catch((reason) => { if (live) setError(reason.message || 'Could not load references.') })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [active, brandName, data.loaded, loading])
+  }, [active, brandName, data.loaded])
 
   useEffect(() => {
     if (command !== 'order' || !query || !isInternal(role)) return undefined
@@ -78,27 +78,29 @@ export default function ChatReferenceCommands({ value, brandName, role, onChoose
   const chooseMenuItem = (item) => onChoose(active ? 'reference' : 'command', active ? item : item.id)
 
   useEffect(() => { setSelectedIndex(0) }, [command, query, active?.id, menuItems.length])
-  useEffect(() => {
-    if (!match || loading || error || !menuItems.length) return undefined
-    const onKeyDown = (event) => {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault(); event.stopPropagation()
-        setSelectedIndex((current) => event.key === 'ArrowDown' ? (current + 1) % menuItems.length : (current - 1 + menuItems.length) % menuItems.length)
-      } else if (event.key === 'Enter' || event.key === 'Tab') {
-        event.preventDefault(); event.stopPropagation()
-        chooseMenuItem(menuItems[selectedIndex] || menuItems[0])
-      } else if (event.key === 'Escape') {
-        event.preventDefault(); event.stopPropagation()
-        onChoose('command', '')
-      }
+  const handleMenuKeyDown = useCallback((key) => {
+    if (!match || loading || error || !menuItems.length) return false
+    if (key === 'ArrowDown' || key === 'ArrowUp') {
+      setSelectedIndex((current) => key === 'ArrowDown' ? (current + 1) % menuItems.length : (current - 1 + menuItems.length) % menuItems.length)
+      return true
     }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [active, error, loading, match, menuItems, onChoose, selectedIndex])
+    if (key === 'Enter' || key === 'Tab') {
+      chooseMenuItem(menuItems[selectedIndex] || menuItems[0])
+      return true
+    }
+    if (key === 'Escape') {
+      onChoose('command', '')
+      return true
+    }
+    return false
+  }, [error, loading, match, menuItems, onChoose, selectedIndex])
+  useImperativeHandle(ref, () => ({ handleKeyDown: handleMenuKeyDown }), [handleMenuKeyDown])
 
   if (!match) return null
-  if (!active) return <Menu>{commandOptions.map((item, index) => <button key={item.id} type="button" onClick={() => chooseMenuItem(item)} className={`menu-item ${index === selectedIndex ? 'bg-primary/10' : ''}`}><b>{item.label}</b><span>{item.hint}</span></button>)}</Menu>
+  if (!active) return <Menu>{commandOptions.map((item, index) => <button key={item.id} type="button" onClick={() => chooseMenuItem(item)} className={`menu-item ${index === commandSelectedIndex ? 'bg-primary/10' : ''}`}><b>{item.label}</b><span>{item.hint}</span></button>)}</Menu>
   return <Menu>{loading ? <p className="px-3 py-3 text-xs text-slate-500">Loading {active.label.slice(1)}…</p> : error ? <p className="px-3 py-3 text-xs text-red-600">{error}</p> : options.length ? options.map((item) => <button key={item.id} type="button" onClick={() => onChoose('reference', item)} className="menu-item"><Search size={14} className="text-primary" /><span className="min-w-0"><b className="block truncate">{item.title}</b><span className="block truncate">{item.subtitle}</span></span></button>) : <p className="px-3 py-3 text-xs text-slate-500">No matches found.</p>}</Menu>
-}
+})
+
+export default ChatReferenceCommands
 
 function Menu({ children }) { return <div className="absolute bottom-full left-0 z-30 mb-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl [&_.menu-item]:flex [&_.menu-item]:w-full [&_.menu-item]:items-center [&_.menu-item]:justify-between [&_.menu-item]:gap-3 [&_.menu-item]:border-b [&_.menu-item]:border-slate-100 [&_.menu-item]:px-3 [&_.menu-item]:py-2.5 [&_.menu-item]:text-left [&_.menu-item]:text-xs [&_.menu-item]:hover:bg-primary/5 [&_.menu-item_b]:font-extrabold [&_.menu-item_b]:text-primary [&_.menu-item_span]:text-[11px] [&_.menu-item_span]:text-slate-500">{children}</div> }

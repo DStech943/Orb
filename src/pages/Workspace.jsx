@@ -91,7 +91,7 @@ export default function Workspace() {
               <h3 className="mt-1 text-xl font-extrabold">Useful context for Orb</h3>
               <p className="mt-1 text-sm text-muted">The brand name is managed from the top bar. Category is saved above and controls SOP templates.</p>
             </div>
-            <div className="rounded-md border border-ink/15 bg-peach px-4 py-3 text-sm"><span className="font-bold">Active brand:</span> {business.name || 'Choose a brand in the top bar'}</div>
+            <div className="rounded-md border border-ink/15 bg-[#E6E9EF] px-4 py-3 text-sm"><span className="font-bold">Active brand:</span> {business.name || 'Choose a brand in the top bar'}</div>
             <Input label="Primary website" type="url" placeholder="https://yourbrand.com" value={business.website_url} onChange={(event) => setBusiness({ ...business, website_url: event.target.value })} disabled={businessLoading || !business.id} />
             <Input label="Support email" type="email" placeholder="support@yourbrand.com" value={business.support_email} onChange={(event) => setBusiness({ ...business, support_email: event.target.value })} disabled={businessLoading || !business.id} />
             <Textarea label="About this brand" placeholder="What the brand sells, key policies, or useful context for drafted content." value={business.description} onChange={(event) => setBusiness({ ...business, description: event.target.value })} disabled={businessLoading || !business.id} />

@@ -12,10 +12,11 @@ import {
   Image as ImageIcon,
   Loader2,
   MessageSquare,
-  Paperclip,
+  Mic,
+  MicOff,
+  Plus,
   Quote,
   Search,
-  Send,
   Smile,
   Video,
   X,
@@ -26,6 +27,7 @@ import { useToast } from '../context/ToastContext'
 import Avatar from '../components/ui/Avatar'
 import ChatReferenceCommands, { ChatReferenceCapsules } from '../components/chat/ChatReferences'
 import { activeBrandName } from '../services/orbApi'
+import { startBrowserDictation } from '../lib/browserDictation'
 import {
   PRESET_REACTIONS,
   getClientChatMessages,
@@ -44,6 +46,8 @@ const PRESET_MENTIONS = [
   { id: 'client', handle: 'Client', label: '@Client', role: 'Brand Team', description: 'Brand owners & client team members', icon: '👤' },
   { id: 'parthavi', handle: 'Parthavi Gaikwad', label: '@Parthavi Gaikwad', role: 'Orb Team', description: 'Orb team specialist', icon: '👤' },
 ]
+
+const SLASH_COMMAND_IDS = ['products', 'oos', 'nos', 'flows', 'operation', 'template', 'sheet']
 
 export default function ClientChat() {
   const { user } = useAuth()
@@ -69,13 +73,49 @@ export default function ClientChat() {
   const [showScrollBottom, setShowScrollBottom] = useState(false)
   const [mediaPanelOpen, setMediaPanelOpen] = useState(false)
   const [mediaFilter, setMediaFilter] = useState('all')
+  const [dictating, setDictating] = useState(false)
+  const [dictationError, setDictationError] = useState('')
+  const [slashCommandIndex, setSlashCommandIndex] = useState(0)
 
   const fileInputRef = useRef(null)
+  const slashMenuRef = useRef(null)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const inputMessageRef = useRef('')
+  const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
   const searchInputRef = useRef(null)
   const isFirstLoad = useRef(true)
+
+  useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
+  useEffect(() => { setSlashCommandIndex(0) }, [inputMessage])
+  useEffect(() => () => { dictationRef.current?.stop() }, [])
+
+  const startDictation = useCallback(() => {
+    if (sending) return
+    if (dictationRef.current) {
+      dictationRef.current.stop()
+      return
+    }
+    const base = inputMessageRef.current.trim()
+    setDictationError('')
+    setDictating(true)
+    const session = startBrowserDictation({
+      onTranscript: (transcript) => {
+        const nextMessage = [base, transcript].filter(Boolean).join(base && transcript ? ' ' : '')
+        inputMessageRef.current = nextMessage
+        setInputMessage(nextMessage)
+        window.setTimeout(() => inputRef.current?.focus(), 0)
+      },
+      onError: (error) => setDictationError(error === 'unsupported'
+        ? 'Speech-to-text is not supported in this browser.'
+        : error === 'not-allowed' || error === 'service-not-allowed'
+          ? 'Allow microphone access to dictate a message.'
+          : 'Could not start speech-to-text.'),
+      onEnd: () => { dictationRef.current = null; setDictating(false) },
+    })
+    if (session) dictationRef.current = session
+  }, [sending])
 
   const handleScroll = () => {
     const el = scrollContainerRef.current
@@ -478,6 +518,37 @@ export default function ClientChat() {
   }
 
   const handleKeyDown = (e) => {
+    // Own the top-level command list here, so keyboard navigation works even
+    // before React has mounted the suggestion menu on the first `/` press.
+    const partialSlash = inputMessage.match(/^\/(\w*)$/)?.[1]?.toLowerCase()
+    if (partialSlash !== undefined) {
+      const commands = SLASH_COMMAND_IDS.filter((command) => command.startsWith(partialSlash))
+      if (commands.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault()
+        setSlashCommandIndex((current) => e.key === 'ArrowDown' ? (current + 1) % commands.length : (current - 1 + commands.length) % commands.length)
+        return
+      }
+      if (commands.length && (e.key === 'Enter' || e.key === 'Tab')) {
+        e.preventDefault()
+        setInputMessage(`/${commands[slashCommandIndex % commands.length]} `)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setInputMessage('')
+        return
+      }
+    }
+    if (slashMenuRef.current?.handleKeyDown(e.key)) {
+      e.preventDefault()
+      return
+    }
+    // Never let an in-progress slash command fall through to the form submit
+    // while its picker is mounting or loading its options.
+    if (/^\/\w*(?:\s.*)?$/.test(inputMessage) && ['Enter', 'Tab', 'ArrowDown', 'ArrowUp', 'Escape'].includes(e.key)) {
+      e.preventDefault()
+      return
+    }
     if (mentionMenuOpen && filteredMentions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -1145,43 +1216,57 @@ export default function ClientChat() {
         />
 
         {/* Input box */}
-        <form onSubmit={handleSend} className="relative flex items-end gap-2">
-          <ChatReferenceCommands value={inputMessage} brandName={brandName} role={user?.role} onChoose={chooseReference} />
-          {/* Attach file button */}
-          <button
-            type="button"
-            disabled={uploading || sending}
-            onClick={() => fileInputRef.current?.click()}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-2xs hover:border-purple/40 hover:bg-slate-50 hover:text-purple transition disabled:opacity-40"
-            title="Attach image or document (Supabase Storage)"
-            aria-label="Attach file"
-          >
-            {uploading ? <Loader2 size={18} className="animate-spin text-purple" /> : <Paperclip size={18} />}
-          </button>
-
-          <textarea
-            ref={inputRef}
-            rows={2}
-            value={inputMessage}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              replyingTo
-                ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
-                : `Message our team about ${brandName}... (@ to mention, paste text, attach files)`
-            }
-            className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-2.5 text-sm focus:border-purple focus:outline-none focus:ring-2 focus:ring-purple/10"
-          />
-
-          <button
-            type="submit"
-            disabled={(!inputMessage.trim() && attachedFiles.length === 0 && selectedReferences.length === 0) || sending || uploading}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-white shadow-sm transition hover:bg-primary-dark disabled:opacity-40 disabled:cursor-not-allowed"
-            aria-label="Send message"
-          >
-            <Send size={18} className={sending ? 'translate-x-1 opacity-50' : ''} />
-          </button>
+        <form onSubmit={handleSend} className="relative">
+          <ChatReferenceCommands ref={slashMenuRef} value={inputMessage} brandName={brandName} role={user?.role} commandSelectedIndex={slashCommandIndex} onChoose={chooseReference} />
+          <div className="rounded-2xl border border-[#bdc6ff] bg-[#eef0ff] p-2 shadow-sm transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/10">
+            <textarea
+              ref={inputRef}
+              rows={2}
+              value={inputMessage}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                replyingTo
+                  ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
+                  : `Message our team about ${brandName}...`
+              }
+              className="block min-h-[50px] w-full resize-none bg-transparent px-2 py-1 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
+            />
+            <div className="flex items-center justify-between px-1">
+              <button
+                type="button"
+                disabled={uploading || sending}
+                onClick={() => fileInputRef.current?.click()}
+                className="grid h-8 w-8 place-items-center rounded-lg text-primary transition hover:bg-white/70 disabled:opacity-40"
+                title="Attach image or document"
+                aria-label="Attach image or document"
+              >
+                {uploading ? <Loader2 size={17} className="animate-spin" /> : <Plus size={19} />}
+              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={startDictation}
+                  disabled={sending || uploading}
+                  className={`grid h-8 w-8 place-items-center rounded-lg text-primary/70 transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 ${dictating ? 'bg-white text-primary ring-1 ring-primary/25' : ''}`}
+                  title={dictating ? 'Stop dictation' : 'Dictate your message'}
+                  aria-label={dictating ? 'Stop dictation' : 'Dictate your message'}
+                >
+                  {dictating ? <MicOff size={16} /> : <Mic size={16} />}
+                </button>
+                <button
+                  type="submit"
+                  disabled={(!inputMessage.trim() && attachedFiles.length === 0 && selectedReferences.length === 0) || sending || uploading}
+                  className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Send message"
+                >
+                  <ArrowUp size={17} strokeWidth={2.5} className={sending ? 'translate-y-0.5 opacity-50' : ''} />
+                </button>
+              </div>
+            </div>
+          </div>
         </form>
+        {dictationError && <p role="alert" className="mt-1.5 px-1 text-[11px] font-medium text-red-600">{dictationError}</p>}
         <div className="flex justify-between items-center mt-1.5 px-1 text-[11px] text-slate-400">
           <span>Type @ to mention teams or members • Press Enter to send • Files stored in Supabase</span>
           <span>Right-click any message to react or reply</span>

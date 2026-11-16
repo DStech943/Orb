@@ -271,8 +271,8 @@ export default function BrandVoiceSetup({ isAdmin }) {
     }
   }
 
-  if (!isAdmin) return <p className="rounded-md border border-ink/15 bg-peach p-3 text-sm text-muted">An administrator can import and approve the brand voice used for drafting.</p>
-  if (!hasOrbApi) return <p className="rounded-md border border-ink/15 bg-peach p-3 text-sm text-muted">Start the Orb backend to import and approve a brand voice.</p>
+  if (!isAdmin) return <p className="rounded-md border border-ink/15 bg-[#E6E9EF] p-3 text-sm text-muted">An administrator can import and approve the brand voice used for drafting.</p>
+  if (!hasOrbApi) return <p className="rounded-md border border-ink/15 bg-[#E6E9EF] p-3 text-sm text-muted">Start the Orb backend to import and approve a brand voice.</p>
 
   return <section className="grid max-w-3xl gap-6">
     <div>
@@ -317,7 +317,7 @@ export default function BrandVoiceSetup({ isAdmin }) {
       </div>
     </section>
 
-    <div className="rounded-lg border border-ink/15 bg-peach p-4">
+    <div className="rounded-lg border border-ink/15 bg-[#E6E9EF] p-4">
       <p className="font-extrabold">Import onboarding material</p>
       <p className="mt-1 text-sm text-muted">Paste a voice guide or upload a Google Form CSV, TXT, or Markdown export. Raw material is sent to the configured model only when you select Generate voice profile.</p>
       <input className="mt-4 w-full rounded-md border-2 border-ink bg-white px-3 py-2 text-sm" value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Source label" />

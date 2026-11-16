@@ -158,7 +158,7 @@ export default function Sidebar({
                     ? 'justify-center p-2.5 text-xs'
                     : 'gap-3 px-3 py-3 text-sm'
                 } ${
-                  isActive ? 'bg-purple text-white' : 'hover:bg-peach text-ink'
+                  isActive ? 'bg-purple text-white' : 'hover:bg-[#E6E9EF] text-ink'
                 }`
               }
             >
@@ -228,7 +228,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="rounded-md border border-slate-200 p-2 text-slate-500 transition hover:border-ink hover:bg-peach hover:text-ink"
+            className="rounded-md border border-slate-200 p-2 text-slate-500 transition hover:border-ink hover:bg-[#E6E9EF] hover:text-ink"
             title="Expand sidebar"
             aria-label="Expand sidebar"
           >
