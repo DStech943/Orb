@@ -642,15 +642,16 @@ export default function ClientChat() {
     )
   }
 
-  const renderMessageContent = (content, fromClient, explicitMentions = []) => {
+  const renderMessageContent = (content, fromClient, explicitMentions = [], inline = false) => {
     if (!content) return null
     const mentionRegex = buildMentionRegex(explicitMentions)
     const parts = content.split(mentionRegex)
     const query = (searchQuery || '').trim()
     const queryRegex = query ? new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi') : null
 
+    const TextElement = inline ? 'span' : 'p'
     return (
-      <p className="whitespace-pre-wrap leading-relaxed">
+      <TextElement className="whitespace-pre-wrap leading-relaxed">
         {parts.map((part, i) => {
           if (part && part.startsWith('@')) {
             return (
@@ -686,7 +687,7 @@ export default function ClientChat() {
 
           return part
         })}
-      </p>
+      </TextElement>
     )
   }
 
@@ -951,9 +952,10 @@ export default function ClientChat() {
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
-                      {renderMessageContent(msg.content, fromClient, msg.mentions)}
-
-                      <ChatReferenceCapsules references={msg.references} tone={fromClient ? 'dark' : 'light'} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {renderMessageContent(msg.content, fromClient, msg.mentions, true)}
+                        <ChatReferenceCapsules references={msg.references} tone={fromClient ? 'dark' : 'light'} inline className="mt-0" />
+                      </div>
 
                       {/* Attached Media Grid */}
                       {Array.isArray(msg.media) && msg.media.length > 0 && (
