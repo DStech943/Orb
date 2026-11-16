@@ -3098,34 +3098,30 @@ async def delete_knowledge(kind: Literal["sops", "faqs", "products"], item_id: s
         return Response(status_code=204)
     else:
         content_kind = "sop" if kind == "sops" else "faq"
-        existing = await request.app.state.supabase_db.fetchrow(
-            """SELECT id,status,qdrant_published_at
-               FROM cx_copilot.orb_generated_content
-               WHERE id=$1::uuid AND brand_id=$2::uuid AND kind=$3""",
-            item_id,
-            brand["id"],
-            content_kind,
+        try:
+            # Qdrant deletes are idempotent. Removing it unconditionally also
+            # supports published rows created before the timestamp columns
+            # existed in a brand's content table.
+            await delete_knowledge_point(
+                request.app.state.db,
+                request.app.state.settings,
+                brand["name"],
+                content_kind,
+                item_id,
+            )
+        except PublishUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"Could not remove the live Qdrant knowledge point: {exc}") from exc
+        rows = await _supabase_service_write(
+            request,
+            "DELETE",
+            "orb_generated_content",
+            params={
+                "id": f"eq.{item_id}",
+                "brand_id": f"eq.{brand['id']}",
+                "kind": f"eq.{content_kind}",
+                "select": "id",
+            },
         )
-        if not existing:
+        if not rows:
             raise HTTPException(status_code=404, detail="Knowledge item not found")
-        was_published = (
-            str(existing["status"] or "").lower() in {"approved", "published"}
-            or existing["qdrant_published_at"] is not None
-        )
-        if was_published:
-            try:
-                await delete_knowledge_point(
-                    request.app.state.db,
-                    request.app.state.settings,
-                    brand["name"],
-                    content_kind,
-                    item_id,
-                )
-            except PublishUnavailable as exc:
-                # Do not delete the database source while it could still be
-                # live in the agent's Qdrant collection.
-                raise HTTPException(status_code=503, detail=f"Could not remove the live Qdrant knowledge point: {exc}") from exc
-        result = await request.app.state.supabase_db.execute("DELETE FROM cx_copilot.orb_generated_content WHERE id=$1::uuid AND brand_id=$2::uuid AND kind=$3", item_id, brand["id"], content_kind)
-    if result.endswith("0"):
-        raise HTTPException(status_code=404, detail="Knowledge item not found")
     return Response(status_code=204)
