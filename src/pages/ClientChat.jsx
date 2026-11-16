@@ -136,7 +136,24 @@ export default function ClientChat() {
   const loadMessages = async () => {
     try {
       const data = await getClientChatMessages(brandName, user)
-      setMessages(data)
+      setMessages((current) => {
+        const currentById = new Map(current.map((message) => [message.id, message]))
+        const merged = data.map((message) => {
+          const local = currentById.get(message.id)
+          // A Supabase read can arrive before its reference column is visible
+          // (or before an older WebSocket service is deployed). Retain the
+          // locally-sent capsule rather than replacing it with an empty row.
+          if ((!message.references || !message.references.length) && local?.references?.length) {
+            return { ...message, references: local.references }
+          }
+          return message
+        })
+        const fetchedIds = new Set(merged.map((message) => message.id))
+        current.forEach((message) => {
+          if (!fetchedIds.has(message.id) && message.references?.length) merged.push(message)
+        })
+        return merged.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
+      })
     } finally {
       setLoading(false)
     }
@@ -500,6 +517,7 @@ export default function ClientChat() {
         replyTo: currentReply,
       })
       setJustSentId(sent.id)
+      setMessages((current) => current.some((message) => message.id === sent.id) ? current : [...current, sent])
       await loadMessages()
       setTimeout(() => scrollToBottom(true), 40)
     } catch (err) {
@@ -1200,11 +1218,6 @@ export default function ClientChat() {
           </div>
         )}
 
-        <ChatReferenceCapsules
-          references={selectedReferences}
-          onRemove={(reference) => setSelectedReferences((current) => current.filter((item) => !(item.type === reference.type && item.id === reference.id)))}
-        />
-
         {/* Hidden file input */}
         <input
           ref={fileInputRef}
@@ -1219,19 +1232,26 @@ export default function ClientChat() {
         <form onSubmit={handleSend} className="relative">
           <ChatReferenceCommands ref={slashMenuRef} value={inputMessage} brandName={brandName} role={user?.role} commandSelectedIndex={slashCommandIndex} onChoose={chooseReference} />
           <div className="rounded-2xl border border-[#bdc6ff] bg-[#eef0ff] p-2 shadow-sm transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/10">
-            <textarea
-              ref={inputRef}
-              rows={2}
-              value={inputMessage}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                replyingTo
-                  ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
-                  : `Message our team about ${brandName}...`
-              }
-              className="block min-h-[50px] w-full resize-none bg-transparent px-2 py-1 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
-            />
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              <ChatReferenceCapsules
+                references={selectedReferences}
+                className="mt-0"
+                onRemove={(reference) => setSelectedReferences((current) => current.filter((item) => !(item.type === reference.type && item.id === reference.id)))}
+              />
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={inputMessage}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  replyingTo
+                    ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
+                    : `Message our team about ${brandName}...`
+                }
+                className="min-h-[32px] min-w-[180px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
+              />
+            </div>
             <div className="flex items-center justify-between px-1">
               <button
                 type="button"

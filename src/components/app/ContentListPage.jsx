@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 
 const titles = { sop: 'SOPs', faq: 'FAQs', product: 'Products' }
+const SOP_DRAFT_HANDOFF_KEY = 'orb:pending-sop-edit'
 
 const productThumbnail = (product = {}) => product.featuredImage?.url
   || (Array.isArray(product.media) ? product.media.map((asset) => asset?.image?.url || asset?.preview?.image?.url).find(Boolean) : '')
@@ -405,6 +406,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const [publishingApproved, setPublishingApproved] = useState(false)
   const [savingShopify, setSavingShopify] = useState(false)
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false)
+  const [orbSopDraftId, setOrbSopDraftId] = useState('')
   const scrollPosition = useRef(0)
   const handledHandoffRef = useRef('')
 
@@ -428,6 +430,24 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     scrollPosition.current = window.scrollY
     setSelected(initialDraft)
   }, [initialDraft])
+  useEffect(() => {
+    if (!isSop || !data.length) return
+    try {
+      const handoff = JSON.parse(window.sessionStorage.getItem(SOP_DRAFT_HANDOFF_KEY) || 'null')
+      if (!handoff?.sopId || !handoff?.draft) return
+      const handoffKey = `sop-edit:${handoff.sopId}:${handoff.createdAt || ''}`
+      if (handledHandoffRef.current === handoffKey) return
+      const savedSop = data.find((item) => item.id === handoff.sopId)
+      if (!savedSop) return
+      handledHandoffRef.current = handoffKey
+      window.sessionStorage.removeItem(SOP_DRAFT_HANDOFF_KEY)
+      scrollPosition.current = window.scrollY
+      setOrbSopDraftId(savedSop.id)
+      setSelected({ ...savedSop, ...handoff.draft, id: savedSop.id })
+    } catch {
+      window.sessionStorage.removeItem(SOP_DRAFT_HANDOFF_KEY)
+    }
+  }, [data, isSop])
   useEffect(() => {
     if (!isProduct || !assistantDraft?.message || !data.length) return
     const handoffKey = `${assistantDraft.target}|${assistantDraft.message}`
@@ -668,7 +688,7 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
       <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
     </section>
-    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{(selected.id === initialDraft?.id || selected.id === orbSopDraftId) && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
     <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />
     <ConfirmDialog open={confirmApproveAll} onClose={() => setConfirmApproveAll(false)} onConfirm={() => { setConfirmApproveAll(false); approve(draftIds) }} title="Approve all drafts?" description={`${draftIds.length} ${draftIds.length === 1 ? 'draft will' : 'drafts will'} be marked approved and become available to Create with Orb.`} confirmLabel="Approve all" />
     {!isProduct && (

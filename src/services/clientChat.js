@@ -207,6 +207,7 @@ class ChatspaceWebSocketClient {
         sender: { ...data.sender, avatar: avatarUrlFromKey(data.sender?.avatar), avatarSources: avatarUrlsFromKey(data.sender?.avatar) },
         content: data.content,
         media: data.media || [],
+        references: data.references || data.message_references || [],
         mentions: data.mentions || [],
         status: data.status || 'read',
         replyToId: data.replyToId || null,
@@ -420,8 +421,13 @@ export const sendClientChatMessage = async ({
         .from('orb_client_chat_messages')
         .insert(payload)
       if (error) {
-        // Fallback without mentions column if it hasn't been migrated yet
+        // Keep a concise textual fallback for installations that have not run
+        // the reference migration yet. This preserves the shared product even
+        // when the old table only accepts text messages.
         const { mentions, message_references, ...fallbackPayload } = payload
+        if (!fallbackPayload.content && newMessage.references.length) {
+          fallbackPayload.content = `Shared: ${newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'}`
+        }
         await supabase
           .schema('cx_copilot')
           .from('orb_client_chat_messages')

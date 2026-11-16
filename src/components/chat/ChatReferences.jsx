@@ -11,10 +11,10 @@ const imageFor = (product) => product?.featuredImage?.url || product?.media?.fin
 const isInternal = (role) => ['admin', 'team', 'agent', 'pod_lead'].includes(String(role || '').toLowerCase())
 const expiry = (value) => { if (!value) return 'No expiry'; const days = Math.ceil((new Date(value).getTime() - Date.now()) / 86400000); return days <= 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}` }
 
-export function ChatReferenceCapsules({ references = [], tone = 'light', onRemove }) {
+export function ChatReferenceCapsules({ references = [], tone = 'light', onRemove, className = 'mt-2' }) {
   if (!references.length) return null
   const inverse = tone === 'dark'
-  return <div className="mt-2 flex flex-wrap gap-2">{references.map((reference) => {
+  return <div className={`${className} flex flex-wrap gap-2`}>{references.map((reference) => {
     const content = <><span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md bg-slate-100 text-slate-500">{reference.image ? <img src={reference.image} alt="" className="h-full w-full object-cover" /> : reference.type === 'flow' ? <Workflow size={14} /> : reference.type === 'sheet' ? <FileSpreadsheet size={14} /> : reference.type === 'operation' ? <ClipboardList size={14} /> : <Package size={14} />}</span><span className="min-w-0"><span className="block max-w-48 truncate text-xs font-bold">{reference.title}</span><span className={`block max-w-48 truncate text-[10px] ${inverse ? 'text-white/70' : 'text-slate-500'}`}>{reference.subtitle}</span></span></>
     const classes = `group/reference inline-flex max-w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition ${inverse ? 'border-white/25 bg-white/10 hover:bg-white/20' : 'border-slate-200 bg-slate-50 hover:border-primary/35 hover:bg-primary/5'}`
     return <div key={reference.id || `${reference.type}-${reference.title}`} className="relative max-w-full">{reference.href ? <a href={reference.href} target={reference.external ? '_blank' : undefined} rel={reference.external ? 'noreferrer' : undefined} className={classes}>{content}</a> : <div className={classes}>{content}</div>}{onRemove ? <button type="button" onClick={() => onRemove(reference)} aria-label={`Remove ${reference.title}`} className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-slate-700 text-white shadow-sm hover:bg-black"><X size={10} /></button> : null}</div>
