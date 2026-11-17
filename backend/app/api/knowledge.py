@@ -905,6 +905,9 @@ def _brand_out(record: asyncpg.Record) -> dict[str, Any]:
         # Only expose the display name. The rest of platform_config can contain
         # provider tokens and must remain server-side.
         "ai_agent_name": str(platform_config.get("ai_agent_name") or "").strip(),
+        # The guide only needs to know whether the selected brand is connected;
+        # never expose the endpoint or its credentials to the browser.
+        "ai_agent_configured": bool(str(platform_config.get("ai_support_agent_url") or "").strip()),
     }
 
 

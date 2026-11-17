@@ -40,7 +40,7 @@ export default function Sidebar({
       const brands = await listBrands()
       if (!live) return
       const selectedId = window.localStorage.getItem('orb_selected_brand') || ''
-      const brand = brands.find((item) => item.id === selectedId) || brands[0]
+      const brand = brands.find((item) => item.id === selectedId)
       setAgentName(String(brand?.ai_agent_name || 'AI').trim() || 'AI')
     }
     loadAgentName()
