@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 import asyncpg
@@ -1631,7 +1631,20 @@ async def chat_with_deployed_agent(
     if parsed.scheme != "https" or not parsed.netloc:
         raise HTTPException(status_code=409, detail="This brand does not have a deployed AI agent configured.")
 
-    endpoint = configured_url if parsed.path.rstrip("/").endswith("/api/widget/chat") else f"{configured_url}/api/widget/chat"
+    # The diagnostic-capable brand endpoint is the canonical tester contract.
+    # Older brand connections stored the legacy widget URL, so strip that
+    # route before attaching the current endpoint rather than silently losing
+    # sources, route decisions, tools, usage, and handoff data.
+    configured_path = parsed.path.rstrip("/")
+    if configured_path.startswith("/api/v1/brands/") and configured_path.endswith("/chat"):
+        endpoint = configured_url
+    else:
+        agent_base_url = (
+            f"{parsed.scheme}://{parsed.netloc}"
+            if configured_path.endswith("/api/widget/chat")
+            else configured_url
+        )
+        endpoint = f"{agent_base_url}/api/v1/brands/{quote(brand_id, safe='')}/chat"
     headers = {"Accept": "application/json"}
     gateway_secret = str(platform_config.get("ai_support_agent_gateway_secret") or "").strip()
     if gateway_secret:
@@ -2176,6 +2189,18 @@ def _flow_values(payload: dict[str, Any]) -> tuple[str, str | None, str, list[An
     return title, lifecycle_stage, status_value, nodes, edges, import_source
 
 
+def _knowledge_editor(user: User) -> str:
+    """Store the signed-in editor in Qdrant metadata, not a generic label."""
+    return user.name or user.email or str(user.id)
+
+
+def _knowledge_updated_metadata(user: User) -> dict[str, str]:
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": _knowledge_editor(user),
+    }
+
+
 def _flow_out(record: Any) -> dict[str, Any]:
     value = dict(record)
     created_at = value["created_at"]
@@ -2562,7 +2587,7 @@ async def list_knowledge(
 
 
 @router.post("/knowledge/faqs/manual", status_code=status.HTTP_201_CREATED)
-async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+async def create_manual_faq(payload: ManualFaqCreate, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     """Create a manual FAQ and publish it to the brand's live Qdrant knowledge."""
     faq_id = str(uuid4())
     faq = {
@@ -2571,6 +2596,7 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User 
         "status": "Published",
         "source": "Manual",
         "source_urls": [],
+        **_knowledge_updated_metadata(user),
     }
     try:
         collection = await publish_points(
@@ -2585,7 +2611,7 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User 
     return {"point": {"id": faq_id, "payload": faq}, "published": True, "collection": collection}
 
 @router.post("/knowledge/sops/manual", status_code=status.HTTP_201_CREATED)
-async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+async def create_manual_sop(payload: ManualSopCreate, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     """Create a manual SOP and publish it to the brand's live Qdrant knowledge."""
     sop_id = str(uuid4())
     title = payload.title.strip()
@@ -2596,12 +2622,12 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User 
         "lifecycle_stage": "",
         "status": "Published",
         "source": "Manual",
-        "updated_by": "Orb user",
         "check_first": payload.check_first.strip(),
         "what_to_do": payload.what_to_do.strip(),
         "what_to_say": payload.what_to_say.strip(),
         "escalate_to": payload.escalate_to.strip(),
         "source_urls": [],
+        **_knowledge_updated_metadata(user),
     }
     try:
         collection = await publish_points(
@@ -2620,7 +2646,7 @@ async def create_bulk_knowledge(
     kind: Literal["sops", "faqs"],
     payload: BulkKnowledgeCreate,
     request: Request,
-    _: User = Depends(_admin),
+    user: User = Depends(_admin),
 ) -> dict[str, Any]:
     """Create multiple FAQs or SOPs directly in their Qdrant collection."""
     qdrant_items: list[dict[str, Any]] = []
@@ -2637,6 +2663,7 @@ async def create_bulk_knowledge(
                         "status": "Published",
                         "source": "Bulk upload",
                         "source_urls": [],
+                        **_knowledge_updated_metadata(user),
                     },
                 })
     else:
@@ -2655,12 +2682,12 @@ async def create_bulk_knowledge(
                     "lifecycle_stage": str(item.get("lifecycle_stage") or "").strip(),
                     "status": "Published",
                     "source": "Bulk upload",
-                    "updated_by": "Orb user",
                     "check_first": str(item.get("check_first") or item.get("checkFirst") or "").strip(),
                     "what_to_do": what_to_do or situation,
                     "what_to_say": str(item.get("what_to_say") or item.get("whatToSay") or "").strip(),
                     "escalate_to": str(item.get("escalate_to") or item.get("escalateTo") or "").strip(),
                     "source_urls": [],
+                    **_knowledge_updated_metadata(user),
                 },
             })
     if not qdrant_items:
@@ -2715,7 +2742,7 @@ def _flow_sop_snapshot(flow: dict[str, Any]) -> tuple[list[dict[str, Any]], list
 
 
 @router.post("/knowledge/sops/from-flow", status_code=status.HTTP_201_CREATED)
-async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     """Convert an editable visual flow into a published SOP for the brand library.
 
     The source canvas is retained in the SOP payload so the team can always
@@ -2770,13 +2797,13 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
         "lifecycle_stage": str(flow.get("lifecycleStage") or flow.get("lifecycle_stage") or "").strip(),
         "status": "Published",
         "source": "Visual flow",
-        "updated_by": "Orb",
         "check_first": "\n".join(f"• {item}" for item in checks) or "Follow the flow's trigger and required checks.",
         "what_to_do": "\n".join(f"{index}. {item}" for index, item in enumerate(actions, start=1)) or "Follow the connected actions in the visual flow.",
         "what_to_say": "\n".join(messages),
         "escalate_to": "\n".join(handoffs),
         "source_flow": flow_snapshot,
         "source_urls": [],
+        **_knowledge_updated_metadata(user),
     }
     sop_id = str(uuid4())
     try:
@@ -2792,9 +2819,9 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
     return {"point": {"id": sop_id, "payload": sop}, "published": True, "collection": collection}
 
 @router.patch("/knowledge/{kind}/{item_id}")
-async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
+async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     stored_payload = dict(payload.payload)
-    stored_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    stored_payload.update(_knowledge_updated_metadata(user))
     if kind == "products":
         brand = await _remote_brand_by_name(request, payload.brand_name)
         rows = await _supabase_service_write(request, "PATCH", "orb_products", params={

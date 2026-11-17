@@ -26,6 +26,8 @@ class User:
 
     id: UUID
     org_id: UUID
+    email: str | None = None
+    name: str | None = None
 
 
 def _decode_part(value: str) -> dict[str, object]:
@@ -55,7 +57,14 @@ def _verify_token(token: str, settings: Settings) -> User:
     if expires_at is not None and (not isinstance(expires_at, (int, float)) or expires_at <= time.time()):
         raise HTTPException(status_code=401, detail="Bearer token has expired")
     try:
-        return User(id=UUID(str(payload["sub"])), org_id=UUID(str(payload["org_id"])))
+        metadata = payload.get("user_metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        return User(
+            id=UUID(str(payload["sub"])),
+            org_id=UUID(str(payload["org_id"])),
+            email=str(payload.get("email") or "").strip() or None,
+            name=str(metadata.get("full_name") or metadata.get("name") or "").strip() or None,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Bearer token must include sub and org_id") from exc
 
@@ -78,10 +87,24 @@ async def _verify_supabase_token(token: str, settings: Settings) -> User:
     try:
         payload = response.json()
         user_id = UUID(str(payload["id"]))
-        app_metadata = payload.get("app_metadata") or {}
-        user_metadata = payload.get("user_metadata") or {}
+        app_metadata = payload.get("app_metadata")
+        app_metadata = app_metadata if isinstance(app_metadata, dict) else {}
+        user_metadata = payload.get("user_metadata")
+        user_metadata = user_metadata if isinstance(user_metadata, dict) else {}
         org_id = app_metadata.get("org_id") or user_metadata.get("org_id") or settings.default_org_id
-        return User(id=user_id, org_id=UUID(str(org_id)))
+        return User(
+            id=user_id,
+            org_id=UUID(str(org_id)),
+            email=str(payload.get("email") or "").strip() or None,
+            name=str(
+                user_metadata.get("full_name")
+                or user_metadata.get("name")
+                or app_metadata.get("full_name")
+                or app_metadata.get("name")
+                or ""
+            ).strip()
+            or None,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Supabase user record is invalid") from exc
 

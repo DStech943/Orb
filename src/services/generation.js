@@ -28,7 +28,7 @@ const createGeneratedContent = (data, job) => { if (job.createdContent) return d
 export async function startGeneration({ sources, outputs }) { await wait(); const data = read(); const job = { id: uid('job'), startedAt: Date.now(), requested: outputs, sources, status: 'Queued', outputs: outputs.map((name) => ({ name, status: 'Queued', progress: 0, count: '0 of 40 pages read' })), createdContent: false }; data.jobs = [job, ...data.jobs]; write(data); return { jobId: job.id } }
 export async function getJobStatus(jobId) { await wait(120); let data = read(); const job = data.jobs.find((item) => item.id === jobId); if (!job) return null; const nextJob = updateJob(job); data.jobs = data.jobs.map((item) => item.id === jobId ? nextJob : item); if (nextJob.status === 'Done') data = createGeneratedContent(data, nextJob); write(data); return clone(nextJob) }
 const mapSop = ({ id, payload = {}, source }) => ({ id, title: payload.title || payload.situation || 'Untitled SOP', situation: payload.situation || '', category: payload.category || 'Uncategorised', lifecycle: payload.lifecycle_stage || payload.lifecycle || '—', status: payload.status || 'Published', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—', updatedBy: payload.updated_by || payload.updatedBy || payload.updated_by_name || payload.updatedByName || '', checkFirst: payload.check_first || payload.checkFirst || '', whatToDo: payload.what_to_do || payload.whatToDo || '', whatToSay: payload.what_to_say || payload.whatToSay || '', escalateTo: payload.escalate_to || payload.escalateTo || '' })
-const mapFaq = ({ id, payload = {}, source }) => ({ id, question: payload.question || payload.title || 'Untitled FAQ', answer: payload.answer || payload.what_to_say || '', status: payload.status || 'Published', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—' })
+const mapFaq = ({ id, payload = {}, source }) => ({ id, question: payload.question || payload.title || 'Untitled FAQ', answer: payload.answer || payload.what_to_say || '', status: payload.status || 'Published', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—', updatedBy: payload.updated_by || payload.updatedBy || payload.updated_by_name || payload.updatedByName || '' })
 const mapSopWithPayload = (record, source) => ({ ...mapSop({ ...record, source }), sourcePayload: record.payload || {} })
 const productCurrency = (payload = {}, shopify = {}) => payload.currency || payload.currency_code || payload.currencyCode || shopify._orb_currency || graphNodes(shopify.variants)[0]?.price?.currencyCode || ''
 const formatProductPrice = (payload = {}, fallbackCurrency = '') => {
@@ -66,7 +66,7 @@ const mapProduct = ({ id, payload = {} }) => {
   }
 }
 const sopPayload = (sop) => ({ title: sop.title, situation: sop.situation, category: sop.category, lifecycle_stage: sop.lifecycle, status: sop.status, updated_by: sop.updatedBy || '', check_first: sop.checkFirst, what_to_do: sop.whatToDo, what_to_say: sop.whatToSay, escalate_to: sop.escalateTo })
-const faqPayload = (faq) => ({ question: faq.question, answer: faq.answer, category: faq.category, status: faq.status })
+const faqPayload = (faq) => ({ question: faq.question, answer: faq.answer, category: faq.category, status: faq.status, updated_by: faq.updatedBy || '' })
 const productPayload = (product) => {
   const shopify = {
     ...(product.shopify || {}),

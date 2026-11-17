@@ -63,7 +63,7 @@ const formatUpdatedAt = (value) => {
   return `${parts.day}-${parts.month}-${parts.year} ${parts.hour}:${parts.minute}`
 }
 
-const updatedByLabel = (item = {}) => item.updatedBy || item.updated_by || (String(item.source || '').toLowerCase().includes('orb') || String(item.source || '').toLowerCase().includes('qdrant') ? 'Orb' : 'Unknown')
+const updatedByLabel = (item = {}) => item.updatedBy || item.updated_by || (String(item.source || '').toLowerCase().includes('orb') ? 'Orb' : 'Not recorded')
 
 function ProductEditor({ product, onChange }) {
   const metafields = Array.isArray(product.metafields) ? product.metafields : []
