@@ -1644,7 +1644,18 @@ async def chat_with_deployed_agent(
             if configured_path.endswith("/api/widget/chat")
             else configured_url
         )
-        endpoint = f"{agent_base_url}/api/v1/brands/{quote(brand_id, safe='')}/chat"
+        # Orb stores a UUID for its own brand record, while the deployed agent
+        # identifies brands by their stable URL-style key (for example,
+        # "laani"). Keep the UUID inside Orb and use the agent's key only for
+        # its route.
+        agent_brand_id = re.sub(
+            r"[^a-z0-9]+",
+            "-",
+            str(platform_config.get("ai_agent_brand_id") or brand.get("name") or "").lower(),
+        ).strip("-")
+        if not agent_brand_id:
+            raise HTTPException(status_code=409, detail="This brand has no usable deployed-agent identifier.")
+        endpoint = f"{agent_base_url}/api/v1/brands/{quote(agent_brand_id, safe='')}/chat"
     headers = {"Accept": "application/json"}
     gateway_secret = str(platform_config.get("ai_support_agent_gateway_secret") or "").strip()
     if gateway_secret:
@@ -1663,7 +1674,20 @@ async def chat_with_deployed_agent(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=503, detail="Could not reach the deployed AI agent.") from exc
     if response.is_error:
-        raise HTTPException(status_code=502, detail=f"The deployed AI agent rejected the test message ({response.status_code}).")
+        agent_detail = ""
+        try:
+            error_body = response.json()
+            if isinstance(error_body, dict):
+                raw_detail = error_body.get("detail") or error_body.get("message") or error_body.get("error")
+                if isinstance(raw_detail, str):
+                    agent_detail = raw_detail.strip()[:500]
+        except ValueError:
+            pass
+        suffix = f": {agent_detail}" if agent_detail else ""
+        raise HTTPException(
+            status_code=502,
+            detail=f"The deployed AI agent rejected the test message ({response.status_code}){suffix}",
+        )
     try:
         agent_result = response.json()
     except ValueError as exc:
