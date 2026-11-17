@@ -52,6 +52,21 @@ const chatspaceScrollMemory = new Map()
 const referenceKey = (reference = {}) => `${reference.type || 'reference'}:${reference.id || reference.title || 'item'}`
 const referenceToken = (reference) => `[[orb-reference:${encodeURIComponent(reference.type || 'reference')}:${encodeURIComponent(reference.id || reference.title || 'item')}]]`
 const referenceTokenPattern = /\[\[orb-reference:([^:\]]+):([^\]]+)\]\]/g
+const escapeComposerHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;')
+const composerTextHtml = (value) => escapeComposerHtml(value).replace(/\n/g, '<br>')
+const composerReferenceHtml = (reference) => {
+  const key = referenceKey(reference)
+  const title = String(reference.title || reference.name || 'Reference').trim()
+  const subtitle = String(reference.subtitle || '').trim()
+  const image = String(reference.image || '').trim()
+  const safeImage = /^https?:\/\//i.test(image) ? image : ''
+  return `<span data-reference-key="${escapeComposerHtml(key)}" contenteditable="false" class="mx-0.5 inline-flex max-w-[13rem] select-none items-center gap-1.5 rounded-full border border-primary/20 bg-white px-1.5 py-1 align-middle text-xs font-bold text-slate-800 shadow-sm">${safeImage ? `<img src="${escapeComposerHtml(safeImage)}" alt="" class="h-4 w-4 shrink-0 rounded object-cover">` : ''}<span class="min-w-0 truncate">${escapeComposerHtml(title)}</span>${subtitle ? `<span class="shrink-0 text-[10px] font-medium text-slate-500">${escapeComposerHtml(subtitle)}</span>` : ''}<button type="button" tabindex="-1" data-remove-reference="${escapeComposerHtml(key)}" contenteditable="false" aria-label="Remove ${escapeComposerHtml(title)}" class="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-slate-600 text-[11px] leading-none text-white hover:bg-slate-800">×</button></span>`
+}
 const serializeRichMessage = (text, references = []) => {
   const value = String(text || '')
   const orderedReferences = [...references]
@@ -138,7 +153,10 @@ export default function ClientChat() {
         text += '\n'
         return
       }
+      const isBlock = element && ['DIV', 'P'].includes(element.tagName)
+      if (isBlock && text && !text.endsWith('\n')) text += '\n'
       Array.from(node.childNodes).forEach(walk)
+      if (isBlock && text && !text.endsWith('\n')) text += '\n'
     }
     Array.from(root?.childNodes || []).forEach(walk)
     return { text, positions }
@@ -212,6 +230,7 @@ export default function ClientChat() {
         const nextMessage = [base, transcript].filter(Boolean).join(base && transcript ? ' ' : '')
         inputMessageRef.current = nextMessage
         setInputMessage(nextMessage)
+        setComposerRevision((revision) => revision + 1)
         window.setTimeout(() => inputRef.current?.focus(), 0)
       },
       onError: (error) => setDictationError(error === 'unsupported'
@@ -633,6 +652,7 @@ export default function ClientChat() {
         : reference
     )))
     setInputMessage(newText)
+    setComposerRevision((revision) => revision + 1)
     setMentionMenuOpen(false)
 
     setTimeout(() => {
@@ -929,35 +949,40 @@ export default function ClientChat() {
     return parts.length ? parts : null
   }
 
-  const renderComposerContent = () => {
+  // Native contenteditable owns its DOM while a person is typing. React only
+  // rebuilds it after a deliberate programmatic edit, preventing duplicated
+  // capsules, reversed text, and cursor jumps.
+  const composerHtml = useMemo(() => {
     const orderedReferences = [...selectedReferences]
       .map((reference, index) => ({ reference, index, position: Number.isFinite(reference.position) ? reference.position : 0 }))
       .sort((left, right) => left.position - right.position || left.index - right.index)
     const parts = []
     let cursor = 0
 
-    orderedReferences.forEach(({ reference, position }, index) => {
+    orderedReferences.forEach(({ reference, position }) => {
       const insertionPoint = Math.max(cursor, Math.min(inputMessage.length, position))
       if (insertionPoint > cursor) {
-        parts.push(<React.Fragment key={`composer-text-${cursor}`}>{inputMessage.slice(cursor, insertionPoint)}</React.Fragment>)
+        parts.push(composerTextHtml(inputMessage.slice(cursor, insertionPoint)))
       }
-      parts.push(
-        <span key={`composer-reference-${referenceKey(reference)}-${index}`} data-reference-key={referenceKey(reference)} contentEditable={false} className="inline-flex align-middle">
-          <ChatReferenceCapsules
-            references={[reference]}
-            inline
-            tone="composer"
-            className="mt-0"
-            onRemove={(removed) => setSelectedReferences((current) => current.filter((item) => referenceKey(item) !== referenceKey(removed)))}
-          />
-        </span>,
-      )
+      parts.push(composerReferenceHtml(reference))
       cursor = insertionPoint
     })
     if (cursor < inputMessage.length) {
-      parts.push(<React.Fragment key={`composer-text-${cursor}`}>{inputMessage.slice(cursor)}</React.Fragment>)
+      parts.push(composerTextHtml(inputMessage.slice(cursor)))
     }
-    return parts
+    return parts.join('')
+    // composerRevision is the intentional DOM refresh boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerRevision])
+
+  const removeComposerReference = (event) => {
+    const button = event.target instanceof Element ? event.target.closest('[data-remove-reference]') : null
+    const key = button?.getAttribute('data-remove-reference')
+    if (!key) return
+    event.preventDefault()
+    setSelectedReferences((current) => current.filter((reference) => referenceKey(reference) !== key))
+    setComposerRevision((revision) => revision + 1)
+    window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   return (
@@ -1513,6 +1538,7 @@ export default function ClientChat() {
                 aria-label={replyingTo ? `Type your reply to #${replyingTo.id.slice(0, 6)}` : `Message our team about ${brandName}`}
                 onInput={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onClick={removeComposerReference}
                 onFocus={() => { composerCursorRef.current = composerCursorPosition() }}
                 className="min-h-[32px] w-full whitespace-pre-wrap break-words bg-transparent px-1 py-1.5 text-sm leading-6 text-slate-700 empty:before:pointer-events-none empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)] focus:outline-none"
                 data-placeholder={
@@ -1520,9 +1546,8 @@ export default function ClientChat() {
                     ? `Type your reply to #${replyingTo.id.slice(0, 6)}...`
                     : `Message our team about ${brandName}...`
                 }
-              >
-                {renderComposerContent()}
-              </div>
+                dangerouslySetInnerHTML={{ __html: composerHtml }}
+              />
             </div>
             <div className="flex items-center justify-between px-1">
               <button

@@ -384,7 +384,7 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
   </section>
 }
 
-export default function ContentListPage({ kind, list, update, remove, removeMany, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null }) {
+export default function ContentListPage({ kind, list, update, remove, removeMany, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null, reference = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isFaq = kind === 'faq'
@@ -406,6 +406,7 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
   const [orbSopDraftId, setOrbSopDraftId] = useState('')
   const scrollPosition = useRef(0)
   const handledHandoffRef = useRef('')
+  const handledReferenceRef = useRef('')
 
   useEffect(() => {
     const reloadForBrand = () => setBrandVersion((version) => version + 1)
@@ -469,6 +470,30 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
       return () => { active = false }
     }
   }, [assistantDraft, data, isProduct, loadProductMetafields])
+  useEffect(() => {
+    if (isProduct || !data.length) return
+    const referenceId = String(reference?.id || '').trim()
+    const referenceTerms = [reference?.title, reference?.detail]
+      .map((value) => String(value || '').trim().toLocaleLowerCase())
+      .filter(Boolean)
+    const referenceKey = `${referenceId}|${referenceTerms.join('|')}`
+    if (!referenceKey || handledReferenceRef.current === referenceKey) return
+    handledReferenceRef.current = referenceKey
+
+    const primary = (item) => String(isFaq ? item.question : item.title || '').trim().toLocaleLowerCase()
+    const secondary = (item) => String(isFaq ? item.answer : item.situation || '').trim().toLocaleLowerCase()
+    const exactMatches = data.filter((item) => referenceId
+      ? String(item.id) === referenceId
+      : referenceTerms.some((term) => term === primary(item) || term === secondary(item)))
+    const fuzzyMatches = exactMatches.length ? exactMatches : data.filter((item) => referenceTerms.some((term) => term.length >= 8 && (primary(item).includes(term) || secondary(item).includes(term))))
+    const matchedItem = fuzzyMatches.length === 1 ? fuzzyMatches[0] : null
+    if (matchedItem) {
+      scrollPosition.current = window.scrollY
+      setSelected(matchedItem)
+    } else if (referenceTerms[0]) {
+      setQuery(referenceTerms[0])
+    }
+  }, [data, isFaq, isProduct, reference?.detail, reference?.id, reference?.title])
   const rows = useMemo(() => {
     const filtered = data.filter((item) => {
       const text = [item.title, item.question, item.name, item.description, item.category].filter(Boolean).join(' ').toLowerCase()

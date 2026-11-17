@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   ArrowUp,
   Eraser,
+  ExternalLink,
   Loader2,
   Maximize2,
   MessageCircleMore,
@@ -88,6 +89,19 @@ const diagnosticSources = (diagnostic) =>
   (Array.isArray(diagnostic?.sources) ? diagnostic.sources : []).filter(
     (source) => source?.collection === "FAQ" || source?.collection === "SOP",
   );
+
+const diagnosticSourceHref = (source = {}) => {
+  const params = new URLSearchParams({
+    tab: source.collection === "FAQ" ? "faqs" : "sops",
+  });
+  const sourceId = String(source.id || source.orb_id || source.point_id || "").trim();
+  const title = String(source.title || "").trim();
+  const detail = String(source.detail || "").trim();
+  if (sourceId) params.set("reference_id", sourceId);
+  if (title) params.set("reference_title", title);
+  if (detail) params.set("reference_detail", detail);
+  return `/app/brain?${params.toString()}`;
+};
 
 function AgentOrb({ className = "" }) {
   return (
@@ -614,7 +628,7 @@ export default function AgentChat({ embedded = false }) {
               </div>
               <details className="mt-3 border-t border-slate-100 pt-2.5">
                 <summary className="cursor-pointer text-[10px] font-extrabold uppercase tracking-[0.1em] text-slate-500">FAQs &amp; SOPs used ({qdrantSources.length})</summary>
-                {qdrantSources.length ? <div className="mt-2 space-y-1.5">{qdrantSources.map((source, index) => { const detail = String(source.detail || source.title || "Untitled").trim(); return <div key={`${source.collection}-${detail}-${index}`} className="rounded-lg bg-slate-50 px-2.5 py-2"><div className="flex items-center gap-1.5"><span className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold ${source.collection === "FAQ" ? "bg-sky-100 text-sky-700" : "bg-violet-100 text-violet-700"}`}>{source.collection}</span><span className="min-w-0 flex-1 truncate text-[11px] font-bold text-slate-800">{detail}</span><span className="text-[10px] font-semibold text-slate-500">{Number(source.score || 0).toFixed(2)}</span></div></div> })}</div> : <p className="mt-2 text-[11px] text-slate-500">None</p>}
+                {qdrantSources.length ? <div className="mt-2 space-y-1.5">{qdrantSources.map((source, index) => { const sourceLabel = String(source.title || source.detail || "Untitled").trim(); return <a key={`${source.collection}-${sourceLabel}-${index}`} href={diagnosticSourceHref(source)} target="_blank" rel="noreferrer" title={`Open this ${String(source.collection || "knowledge").toLowerCase()} in AI's Brain`} className="block rounded-lg bg-slate-50 px-2.5 py-2 transition hover:bg-indigo-50 hover:ring-1 hover:ring-indigo-200"><div className="flex items-center gap-1.5"><span className={`rounded px-1.5 py-0.5 text-[9px] font-extrabold ${source.collection === "FAQ" ? "bg-sky-100 text-sky-700" : "bg-violet-100 text-violet-700"}`}>{source.collection}</span><span className="min-w-0 flex-1 truncate text-[11px] font-bold text-slate-800">{sourceLabel}</span><span className="text-[10px] font-semibold text-slate-500">{Number(source.score || 0).toFixed(2)}</span><ExternalLink size={12} className="shrink-0 text-slate-400" aria-hidden="true" /></div></a> })}</div> : <p className="mt-2 text-[11px] text-slate-500">None</p>}
               </details>
             </section>
           )}

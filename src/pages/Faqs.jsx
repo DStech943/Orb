@@ -3,8 +3,8 @@ import ContentListPage from '../components/app/ContentListPage'
 import { deleteFaq, deleteFaqs, listFaqs, updateFaq } from '../services/generation'
 import { activeBrandName, createAssistantFaq } from '../services/orbApi'
 
-export default function Faqs() {
+export default function Faqs({ reference }) {
   const createFaq = (faq) => createAssistantFaq({ question: faq.question, answer: faq.answer }, activeBrandName())
 
-  return <ContentListPage kind="faq" list={listFaqs} update={updateFaq} remove={deleteFaq} removeMany={deleteFaqs} createItem={createFaq} />
+  return <ContentListPage kind="faq" list={listFaqs} update={updateFaq} remove={deleteFaq} removeMany={deleteFaqs} createItem={createFaq} reference={reference} />
 }

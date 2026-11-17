@@ -15,6 +15,11 @@ export default function AIsBrain() {
   const [search, setSearch] = useSearchParams()
   const [agentName, setAgentName] = useState('AI')
   const active = ['sops', 'faqs', 'chat'].includes(search.get('tab')) ? search.get('tab') : 'sops'
+  const reference = {
+    id: search.get('reference_id') || '',
+    title: search.get('reference_title') || '',
+    detail: search.get('reference_detail') || '',
+  }
 
   useEffect(() => {
     let live = true
@@ -74,8 +79,8 @@ export default function AIsBrain() {
           )
         })}
       </nav>
-      {active === 'sops' && <Sops />}
-      {active === 'faqs' && <Faqs />}
+      {active === 'sops' && <Sops reference={reference} />}
+      {active === 'faqs' && <Faqs reference={reference} />}
       {active === 'chat' && <AgentChat embedded />}
     </div>
   )
