@@ -2855,24 +2855,19 @@ function Builder({
             className="min-w-[220px] flex-1 bg-transparent text-lg font-extrabold outline-none"
             aria-label="Flow title"
           />
-          {templateMode ? (
-            <select
-              value={draft.status}
-              onChange={(event) =>
-                setDraft({ ...draft, status: event.target.value })
-              }
-              className="rounded-full border border-primary/20 bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary outline-none"
-              aria-label="Template status"
-            >
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="archived">Archived</option>
-            </select>
-          ) : (
-            <span className="rounded-full bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary">
-              {draft.templateId ? "brand version" : draft.status}
-            </span>
-          )}
+          <select
+            value={draft.status || "draft"}
+            onChange={(event) =>
+              setDraft({ ...draft, status: event.target.value })
+            }
+            className="rounded-full border border-primary/20 bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary outline-none"
+            aria-label="Flow status"
+            title="Choose the flow status, then save the flow"
+          >
+            <option value="draft">Draft</option>
+            <option value="published">Published</option>
+            {templateMode && <option value="archived">Archived</option>}
+          </select>
           {isAdmin && !templateMode && (
             <Button
               size="sm"

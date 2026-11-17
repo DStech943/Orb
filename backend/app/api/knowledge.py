@@ -198,6 +198,7 @@ class AgentFeedbackCreate(RequestModel):
     tags: list[str] = Field(default_factory=list, max_length=6)
     note: str = Field(default="", max_length=5_000)
     ideal_reply: str = Field(default="", max_length=5_000)
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list, max_length=250)
 
 
 class AgentFeedbackStatusPatch(RequestModel):
@@ -1620,7 +1621,7 @@ async def draft_orb_work(payload: OrbDraftRequest, request: Request, _: User = D
 @router.post("/brands/{brand_id}/agent/chat")
 async def chat_with_deployed_agent(
     brand_id: str, payload: AgentChatRequest, request: Request, _: User = Depends(current_user)
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Proxy a safe tester conversation to a brand's deployed support agent."""
     brand = await _remote_brand(request, brand_id)
     platform_config = decode_jsonb(brand.get("platform_config"))
@@ -1651,16 +1652,41 @@ async def chat_with_deployed_agent(
     if response.is_error:
         raise HTTPException(status_code=502, detail=f"The deployed AI agent rejected the test message ({response.status_code}).")
     try:
-        reply = _agent_reply(response.json())
+        agent_result = response.json()
     except ValueError as exc:
         raise HTTPException(status_code=502, detail="The deployed AI agent returned an invalid response.") from exc
+    if not isinstance(agent_result, dict):
+        raise HTTPException(status_code=502, detail="The deployed AI agent returned an invalid response.")
+    reply = _agent_reply(agent_result)
     if not reply:
         raise HTTPException(status_code=502, detail="The deployed AI agent returned no chat reply.")
-    return {"reply": reply}
+    # Preserve non-sensitive diagnostic fields (route, sources, usage, etc.)
+    # from newer deployed-agent responses instead of collapsing them to reply.
+    return {**agent_result, "reply": reply, "response": str(agent_result.get("response") or reply)}
+
+
+def _feedback_conversation_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Keep a bounded, display-safe snapshot of an overall tester chat."""
+    history: list[dict[str, str]] = []
+    for message in messages[:250]:
+        role = str(message.get("role") or "").lower()
+        if role not in {"user", "agent"}:
+            continue
+        text = str(message.get("text") or "").strip()
+        if not text:
+            continue
+        timestamp = str(message.get("created_at") or "").strip()
+        history.append({
+            "role": role,
+            "text": text[:10_000],
+            "created_at": timestamp[:80],
+        })
+    return history
 
 
 def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
     tags = row.get("tags") if isinstance(row.get("tags"), list) else []
+    history = row.get("conversation_history") if isinstance(row.get("conversation_history"), list) else []
     return {
         "id": str(row.get("id") or ""),
         "session_id": str(row.get("session_id") or ""),
@@ -1670,6 +1696,7 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
         "tags": [str(tag) for tag in tags if str(tag).strip()],
         "note": str(row.get("note") or ""),
         "ideal_reply": str(row.get("ideal_reply") or ""),
+        "conversation_history": _feedback_conversation_history(history),
         "status": str(row.get("status") or "open"),
         "submitted_by": str(row.get("submitted_by") or ""),
         "created_at": row.get("created_at"),
@@ -1691,7 +1718,7 @@ async def list_agent_feedback(
         await _admin(request, user)
     brand = await _remote_brand(request, brand_id)
     params = {
-        "select": "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at",
+        "select": "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,conversation_history,status,created_at",
         "brand_id": f"eq.{brand['id']}",
         "order": "created_at.desc" if not session_id else "created_at.asc",
         "limit": str(limit),
@@ -1719,6 +1746,11 @@ async def create_agent_feedback(
         raise HTTPException(status_code=422, detail="Reply feedback must include the AI response it refers to.")
     brand = await _remote_brand(request, brand_id)
     tags = list(dict.fromkeys(tag.strip()[:80] for tag in payload.tags if tag.strip()))
+    conversation_history = (
+        _feedback_conversation_history(payload.conversation_history)
+        if payload.scope == "conversation"
+        else []
+    )
     rows = await _supabase_write(
         request,
         "POST",
@@ -1733,6 +1765,7 @@ async def create_agent_feedback(
             "tags": tags,
             "note": payload.note.strip(),
             "ideal_reply": payload.ideal_reply.strip(),
+            "conversation_history": conversation_history,
         },
     )
     if not rows:
