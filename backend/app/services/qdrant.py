@@ -56,7 +56,10 @@ async def publish_points(pool: asyncpg.Pool, settings: Settings, brand_name: str
             payload.update({"brand_name": brand_name, "kind": kind, "orb_id": str(item["id"]), "status": "published"})
             source_text = "\n".join(str(value) for value in payload.values() if isinstance(value, str))
             points.append({"id": str(item["id"]), "vector": await embed_text(pool, settings, source_text), "payload": payload})
-        vector_size = len(points[0]["vector"])
+        # embed_text validates every vector against this configured contract.
+        # Keep collection creation explicit so a provider default can never
+        # silently produce a 1536-dimension Qdrant collection.
+        vector_size = settings.embedding_dimensions
         async with httpx.AsyncClient(timeout=60) as client:
             exists = await client.get(f"{base_url}/collections/{collection}", headers=headers)
             if exists.status_code == 404:
@@ -194,7 +197,13 @@ async def upsert_display_point(
     try:
         vector = await embed_text(pool, settings, source_text)
         async with httpx.AsyncClient(timeout=60) as client:
-            await _ensure_display_collection(client, base_url, headers, collection, len(vector))
+            await _ensure_display_collection(
+                client,
+                base_url,
+                headers,
+                collection,
+                settings.embedding_dimensions,
+            )
             response = await client.put(
                 f"{base_url}/collections/{collection}/points?wait=true",
                 headers=headers,

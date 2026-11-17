@@ -208,7 +208,6 @@ class ManualFaqCreate(RequestModel):
     brand_name: str = Field(min_length=1, max_length=160)
     question: str = Field(min_length=6, max_length=1_000)
     answer: str = Field(min_length=8, max_length=5_000)
-    category: str = Field(default="Customer support", max_length=200)
 
 
 class ManualSopCreate(RequestModel):
@@ -2444,6 +2443,28 @@ async def list_knowledge(
                 points.append({"id": str(row["id"]), "payload": point_payload})
             return {"points": points, "source": "supabase"}
 
+    # SOPs and FAQs are live Qdrant knowledge only. They never fall back to
+    # Supabase drafts, so an empty collection is simply an empty library.
+    if kind in {"sops", "faqs"}:
+        content_kind = "sop" if kind == "sops" else "faq"
+        try:
+            qdrant_points = await scroll_points(
+                request.app.state.db,
+                request.app.state.settings,
+                brand_name,
+                content_kind,
+                limit=limit,
+            )
+        except PublishUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        points = []
+        for point in qdrant_points:
+            point_payload = dict(point["payload"])
+            point_payload.setdefault("status", "Published")
+            point_payload.setdefault("source", "Qdrant")
+            points.append({"id": str(point["id"]), "payload": point_payload})
+        return {"points": points, "source": "qdrant"}
+
     # Published knowledge lives in Qdrant and is the canonical first read for
     # SOPs and FAQs. This also keeps existing brands available if the newer
     # Supabase draft table has a restrictive RLS policy.
@@ -2507,76 +2528,30 @@ async def list_knowledge(
 @router.post("/knowledge/faqs/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_faq(payload: ManualFaqCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
     """Create a manual FAQ and publish it to the brand's live Qdrant knowledge."""
-    brand = await _remote_brand_by_name(request, payload.brand_name)
+    faq_id = str(uuid4())
     faq = {
         "question": payload.question.strip(),
         "answer": payload.answer.strip(),
-        "category": payload.category.strip() or "Customer support",
         "status": "Published",
-        "source": "Orb assistant",
+        "source": "Manual",
         "source_urls": [],
     }
-    rows = await _supabase_service_write(
-        request,
-        "POST",
-        "orb_generated_content",
-        params={"select": "id,payload,status,created_at"},
-        payload={"brand_id": brand["id"], "kind": "faq", "payload": faq, "evidence": []},
-    )
-    if not rows:
-        raise HTTPException(status_code=503, detail="Supabase did not return the new FAQ")
-    row = rows[0]
-    stored = decode_jsonb(row.get("payload"))
-    faq_id = str(row["id"])
-    published_payload = stored if isinstance(stored, dict) else faq
     try:
         collection = await publish_points(
             request.app.state.db,
             request.app.state.settings,
-            brand["name"],
+            payload.brand_name,
             "faq",
-            [{"id": faq_id, "payload": published_payload}],
+            [{"id": faq_id, "payload": faq}],
         )
     except PublishUnavailable as exc:
-        # Keep a recoverable record for an administrator, but never represent
-        # it as live knowledge when Qdrant did not acknowledge the write.
-        await _supabase_service_write(
-            request,
-            "PATCH",
-            "orb_generated_content",
-            params={"id": f"eq.{faq_id}"},
-            payload={
-                "status": "draft",
-                "payload": {**published_payload, "status": "Draft"},
-                "qdrant_error": str(exc)[:2000],
-            },
-            prefer="return=minimal",
-        )
-        raise HTTPException(status_code=503, detail=f"FAQ was saved as a draft, but could not be published to Qdrant: {exc}") from exc
-
-    await _supabase_service_write(
-        request,
-        "PATCH",
-        "orb_generated_content",
-        params={"id": f"eq.{faq_id}"},
-        payload={
-            "status": "published",
-            "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
-            "qdrant_error": None,
-        },
-        prefer="return=minimal",
-    )
-    return {
-        "point": {"id": faq_id, "payload": published_payload},
-        "published": True,
-        "collection": collection,
-    }
-
+        raise HTTPException(status_code=503, detail=f"FAQ could not be published to Qdrant: {exc}") from exc
+    return {"point": {"id": faq_id, "payload": faq}, "published": True, "collection": collection}
 
 @router.post("/knowledge/sops/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
     """Create a manual SOP and publish it to the brand's live Qdrant knowledge."""
-    brand = await _remote_brand_by_name(request, payload.brand_name)
+    sop_id = str(uuid4())
     title = payload.title.strip()
     sop = {
         "title": title,
@@ -2592,60 +2567,17 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, _: User 
         "escalate_to": payload.escalate_to.strip(),
         "source_urls": [],
     }
-    rows = await _supabase_service_write(
-        request,
-        "POST",
-        "orb_generated_content",
-        params={"select": "id,payload,status,created_at"},
-        payload={"brand_id": brand["id"], "kind": "sop", "status": "draft", "payload": sop, "evidence": []},
-    )
-    if not rows:
-        raise HTTPException(status_code=503, detail="Supabase did not return the new SOP")
-    row = rows[0]
-    stored = decode_jsonb(row.get("payload"))
-    sop_id = str(row["id"])
-    published_payload = stored if isinstance(stored, dict) else sop
     try:
         collection = await publish_points(
             request.app.state.db,
             request.app.state.settings,
-            brand["name"],
+            payload.brand_name,
             "sop",
-            [{"id": sop_id, "payload": published_payload}],
+            [{"id": sop_id, "payload": sop}],
         )
     except PublishUnavailable as exc:
-        await _supabase_service_write(
-            request,
-            "PATCH",
-            "orb_generated_content",
-            params={"id": f"eq.{sop_id}"},
-            payload={
-                "status": "draft",
-                "payload": {**published_payload, "status": "Draft"},
-                "qdrant_error": str(exc)[:2000],
-            },
-            prefer="return=minimal",
-        )
-        raise HTTPException(status_code=503, detail=f"SOP was saved as a draft, but could not be published to Qdrant: {exc}") from exc
-
-    await _supabase_service_write(
-        request,
-        "PATCH",
-        "orb_generated_content",
-        params={"id": f"eq.{sop_id}"},
-        payload={
-            "status": "published",
-            "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
-            "qdrant_error": None,
-        },
-        prefer="return=minimal",
-    )
-    return {
-        "point": {"id": sop_id, "payload": published_payload},
-        "published": True,
-        "collection": collection,
-    }
-
+        raise HTTPException(status_code=503, detail=f"SOP could not be published to Qdrant: {exc}") from exc
+    return {"point": {"id": sop_id, "payload": sop}, "published": True, "collection": collection}
 
 @router.post("/knowledge/{kind}/bulk", status_code=status.HTTP_201_CREATED)
 async def create_bulk_knowledge(
@@ -2654,178 +2586,61 @@ async def create_bulk_knowledge(
     request: Request,
     _: User = Depends(_admin),
 ) -> dict[str, Any]:
-    """Create multiple reviewable FAQs or SOPs in bulk from a CSV or pasted tabular text."""
-    brand = await _remote_brand_by_name(request, payload.brand_name)
-    brand_id = brand["id"]
-    db_rows: list[dict[str, Any]] = []
-
+    """Create multiple FAQs or SOPs directly in their Qdrant collection."""
+    qdrant_items: list[dict[str, Any]] = []
     if kind == "faqs":
         for item in payload.items:
             question = str(item.get("question") or "").strip()
             answer = str(item.get("answer") or "").strip()
-            if not question or not answer:
-                continue
-            category = str(item.get("category") or "").strip() or "Customer support"
-            status_val = str(item.get("status") or "Draft").strip().capitalize()
-            if status_val not in ("Draft", "Approved"):
-                status_val = "Draft"
-            faq = {
-                "question": question,
-                "answer": answer,
-                "category": category,
-                "status": status_val,
-                "source": "Bulk upload",
-                "source_urls": [],
-            }
-            db_rows.append({
-                "brand_id": brand_id,
-                "kind": "faq",
-                "status": status_val.lower(),
-                "payload": faq,
-                "evidence": [],
-            })
-    elif kind == "sops":
+            if question and answer:
+                qdrant_items.append({
+                    "id": str(uuid4()),
+                    "payload": {
+                        "question": question,
+                        "answer": answer,
+                        "status": "Published",
+                        "source": "Bulk upload",
+                        "source_urls": [],
+                    },
+                })
+    else:
         for item in payload.items:
             title = str(item.get("title") or item.get("name") or "").strip()
-            if not title:
+            what_to_do = str(item.get("what_to_do") or item.get("whatToDo") or "").strip()
+            if not title and not what_to_do:
                 continue
             situation = str(item.get("situation") or "").strip() or title
-            check_first = str(item.get("check_first") or item.get("checkFirst") or "").strip()
-            what_to_do = str(item.get("what_to_do") or item.get("whatToDo") or "").strip()
-            what_to_say = str(item.get("what_to_say") or item.get("whatToSay") or "").strip()
-            escalate_to = str(item.get("escalate_to") or item.get("escalateTo") or "").strip()
-            category = str(item.get("category") or "").strip() or "Support"
-            status_val = str(item.get("status") or "Draft").strip().capitalize()
-            if status_val not in ("Draft", "Approved"):
-                status_val = "Draft"
-            sop = {
-                "title": title,
-                "situation": situation,
-                "category": category,
-                "lifecycle_stage": str(item.get("lifecycle_stage") or "").strip(),
-                "status": status_val,
-                "source": "Bulk upload",
-                "updated_by": "Orb user",
-                "check_first": check_first,
-                "what_to_do": what_to_do,
-                "what_to_say": what_to_say,
-                "escalate_to": escalate_to,
-                "source_urls": [],
-            }
-            db_rows.append({
-                "brand_id": brand_id,
-                "kind": "sop",
-                "status": status_val.lower(),
-                "payload": sop,
-                "evidence": [],
+            qdrant_items.append({
+                "id": str(uuid4()),
+                "payload": {
+                    "title": title or situation or "Untitled SOP",
+                    "situation": situation or title,
+                    "category": str(item.get("category") or "").strip() or "Support",
+                    "lifecycle_stage": str(item.get("lifecycle_stage") or "").strip(),
+                    "status": "Published",
+                    "source": "Bulk upload",
+                    "updated_by": "Orb user",
+                    "check_first": str(item.get("check_first") or item.get("checkFirst") or "").strip(),
+                    "what_to_do": what_to_do or situation,
+                    "what_to_say": str(item.get("what_to_say") or item.get("whatToSay") or "").strip(),
+                    "escalate_to": str(item.get("escalate_to") or item.get("escalateTo") or "").strip(),
+                    "source_urls": [],
+                },
             })
-
-    if not db_rows:
+    if not qdrant_items:
         raise HTTPException(status_code=400, detail=f"No valid {kind} entries were found in the uploaded data.")
-
-    inserted_rows = []
-    batch_size = 50
-    for i in range(0, len(db_rows), batch_size):
-        chunk = db_rows[i:i + batch_size]
-        try:
-            rows = await _supabase_write(
-                request,
-                "POST",
-                "orb_generated_content",
-                params={"select": "id,payload,status,created_at"},
-                payload=chunk,
-            )
-        except Exception as write_err:
-            logger.info("Falling back to service-role write for bulk knowledge: %s", write_err)
-            rows = await _supabase_service_write(
-                request,
-                "POST",
-                "orb_generated_content",
-                params={"select": "id,payload,status,created_at"},
-                payload=chunk,
-            )
-        if rows:
-            inserted_rows.extend(rows)
-
-    inserted = len(inserted_rows) or len(db_rows)
-
-    # If any items were directly uploaded as Approved, publish them to Qdrant immediately!
-    approved_items = [
-        {"id": str(r["id"]), "payload": decode_jsonb(r.get("payload")) or {}}
-        for r in inserted_rows
-        if str(r.get("status") or "").lower() == "approved" and "id" in r
-    ]
-    published_count = 0
-    qdrant_error: str | None = None
-    if approved_items:
-        try:
-            content_kind = "sop" if kind == "sops" else "faq"
-            await publish_points(
-                request.app.state.db,
-                request.app.state.settings,
-                brand["name"],
-                content_kind,
-                approved_items,
-            )
-            published_count = len(approved_items)
-            approved_ids = [item["id"] for item in approved_items]
-            patch_payload = {
-                "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
-                "qdrant_error": None,
-            }
-            try:
-                await _supabase_write(
-                    request,
-                    "PATCH",
-                    "orb_generated_content",
-                    params={"id": f"in.({','.join(approved_ids)})"},
-                    payload=patch_payload,
-                    prefer="return=minimal",
-                )
-            except Exception:
-                await _supabase_service_write(
-                    request,
-                    "PATCH",
-                    "orb_generated_content",
-                    params={"id": f"in.({','.join(approved_ids)})"},
-                    payload=patch_payload,
-                    prefer="return=minimal",
-                )
-        except Exception as exc:
-            qdrant_error = str(exc)
-            logger.warning("Could not automatically publish bulk approved points to Qdrant: %s", exc)
-            approved_ids = [item["id"] for item in approved_items]
-            if approved_ids:
-                error_payload = {"qdrant_error": str(exc)[:2000]}
-                try:
-                    await _supabase_write(
-                        request,
-                        "PATCH",
-                        "orb_generated_content",
-                        params={"id": f"in.({','.join(approved_ids)})"},
-                        payload=error_payload,
-                        prefer="return=minimal",
-                    )
-                except Exception:
-                    try:
-                        await _supabase_service_write(
-                            request,
-                            "PATCH",
-                            "orb_generated_content",
-                            params={"id": f"in.({','.join(approved_ids)})"},
-                            payload=error_payload,
-                            prefer="return=minimal",
-                        )
-                    except Exception:
-                        pass
-
-    return {
-        "created": inserted,
-        "published": published_count,
-        "kind": kind,
-        "qdrant_error": qdrant_error,
-    }
-
+    content_kind = "sop" if kind == "sops" else "faq"
+    try:
+        collection = await publish_points(
+            request.app.state.db,
+            request.app.state.settings,
+            payload.brand_name,
+            content_kind,
+            qdrant_items,
+        )
+    except PublishUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Could not publish {kind} to Qdrant: {exc}") from exc
+    return {"created": len(qdrant_items), "published": len(qdrant_items), "kind": kind, "collection": collection}
 
 def _flow_sop_node_text(node: dict[str, Any]) -> str:
     """Make a concise, human-readable SOP fragment from one canvas card."""
@@ -2870,7 +2685,6 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
     The source canvas is retained in the SOP payload so the team can always
     trace a written procedure back to the exact flow that produced it.
     """
-    brand = await _remote_brand_by_name(request, payload.brand_name)
     flow = payload.flow
     nodes, edges = _flow_sop_snapshot(flow)
 
@@ -2928,66 +2742,18 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, _: Us
         "source_flow": flow_snapshot,
         "source_urls": [],
     }
-    rows = await _supabase_service_write(
-        request,
-        "POST",
-        "orb_generated_content",
-        params={"select": "id,payload,status,created_at"},
-        payload={
-            "brand_id": brand["id"],
-            "kind": "sop",
-            "status": "draft",
-            "payload": sop,
-            "evidence": [],
-        },
-    )
-    if not rows:
-        raise HTTPException(status_code=503, detail="Supabase did not return the new SOP")
-    row = rows[0]
-    stored = decode_jsonb(row.get("payload"))
-    sop_id = str(row["id"])
-    published_payload = stored if isinstance(stored, dict) else sop
+    sop_id = str(uuid4())
     try:
         collection = await publish_points(
             request.app.state.db,
             request.app.state.settings,
-            brand["name"],
+            payload.brand_name,
             "sop",
-            [{"id": sop_id, "payload": published_payload}],
+            [{"id": sop_id, "payload": sop}],
         )
     except PublishUnavailable as exc:
-        await _supabase_service_write(
-            request,
-            "PATCH",
-            "orb_generated_content",
-            params={"id": f"eq.{sop_id}"},
-            payload={
-                "status": "draft",
-                "payload": {**published_payload, "status": "Draft"},
-                "qdrant_error": str(exc)[:2000],
-            },
-            prefer="return=minimal",
-        )
-        raise HTTPException(status_code=503, detail=f"SOP was saved as a draft, but could not be published to Qdrant: {exc}") from exc
-
-    await _supabase_service_write(
-        request,
-        "PATCH",
-        "orb_generated_content",
-        params={"id": f"eq.{sop_id}"},
-        payload={
-            "status": "published",
-            "qdrant_published_at": datetime.now(timezone.utc).isoformat(),
-            "qdrant_error": None,
-        },
-        prefer="return=minimal",
-    )
-    return {
-        "point": {"id": sop_id, "payload": published_payload},
-        "published": True,
-        "collection": collection,
-    }
-
+        raise HTTPException(status_code=503, detail=f"SOP could not be published to Qdrant: {exc}") from exc
+    return {"point": {"id": sop_id, "payload": sop}, "published": True, "collection": collection}
 
 @router.patch("/knowledge/{kind}/{item_id}")
 async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
@@ -3024,40 +2790,12 @@ async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: s
 
 @router.post("/knowledge/{kind}/publish-approved")
 async def publish_existing_approved_knowledge(kind: Literal["sops", "faqs"], payload: KnowledgePublishRequest, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
-    """Backfill older approved drafts that predate approval-time publishing."""
-    brand = await _remote_brand_by_name(request, payload.brand_name)
-    content_kind = "sop" if kind == "sops" else "faq"
-    # Publishing is an idempotent Qdrant upsert.  Do not trust a historic
-    # timestamp alone: a prior deployment could have recorded it before a
-    # collection/point was lost or before its write completed.
-    rows = await _supabase_rows(request, "orb_generated_content", {
-        "select": "id,payload",
-        "brand_id": f"eq.{brand['id']}",
-        "kind": f"eq.{content_kind}",
-        "status": "eq.approved",
-        "order": "created_at.asc",
-    })
-    if not rows:
-        return {"published": 0, "collection": None}
-    items = [
-        {"id": str(row["id"]), "payload": decode_jsonb(row["payload"]) or {}}
-        for row in rows
-    ]
-    try:
-        collection = await publish_points(
-            request.app.state.db, request.app.state.settings, brand["name"], content_kind, items,
-        )
-    except PublishUnavailable as exc:
-        ids = [str(row["id"]) for row in rows]
-        await _supabase_write(request, "PATCH", "orb_generated_content", params={
-            "id": f"in.({','.join(ids)})",
-        }, payload={"qdrant_error": str(exc)[:2000]}, prefer="return=minimal")
-        raise HTTPException(status_code=503, detail=f"Could not publish approved {kind} to Qdrant: {exc}") from exc
-    ids = [str(row["id"]) for row in rows]
-    await _supabase_write(request, "PATCH", "orb_generated_content", params={
-        "id": f"in.({','.join(ids)})",
-    }, payload={"qdrant_published_at": datetime.now(timezone.utc).isoformat(), "qdrant_error": None}, prefer="return=minimal")
-    return {"published": len(items), "collection": collection}
+    """Compatibility response for the former draft-approval action.
+
+    New SOPs and FAQs are written to Qdrant at creation time, so there is no
+    approval queue to backfill or a Supabase draft to inspect.
+    """
+    return {"published": 0, "collection": None, "detail": "Knowledge is published directly to Qdrant."}
 
 
 @router.delete("/knowledge/{kind}/{item_id}", status_code=204, response_class=Response)

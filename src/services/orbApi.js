@@ -279,10 +279,10 @@ export const updateKnowledge = (
     method: "PATCH",
     body: JSON.stringify({ brand_name: brandName, payload }),
   });
-export const createAssistantFaq = ({ question, answer, category = "Customer support" }, brandName = activeBrandName()) =>
+export const createAssistantFaq = ({ question, answer }, brandName = activeBrandName()) =>
   request("/api/knowledge/faqs/manual", {
     method: "POST",
-    body: JSON.stringify({ brand_name: brandName, question, answer, category }),
+    body: JSON.stringify({ brand_name: brandName, question, answer }),
   });
 export const createManualSop = ({ title, situation, checkFirst, whatToDo, whatToSay, escalateTo, category = "Support" }, brandName = activeBrandName()) =>
   request("/api/knowledge/sops/manual", {
