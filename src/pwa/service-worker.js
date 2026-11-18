@@ -4,7 +4,13 @@ const PRECACHE_URLS = __ORB_PWA_PRECACHE_URLS__
 const isSuccess = (response) => response && response.ok
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)))
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      // Do not leave a newly deployed Orb bundle waiting behind an open tab.
+      // The registration code reloads once when this worker takes control.
+      .then(() => self.skipWaiting()),
+  )
 })
 
 self.addEventListener('activate', (event) => {
