@@ -1,0 +1,28 @@
+{
+  "name": "Orb — Knowledge ready for your AI",
+  "short_name": "Orb",
+  "description": "Orb turns scattered business knowledge into clear, AI-ready instructions.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#E6E9EF",
+  "theme_color": "#384BFF",
+  "icons": [
+    {
+      "src": "/orb-favicon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Overview",
+      "url": "/app"
+    },
+    {
+      "name": "Chatspace",
+      "url": "/app/client-chat"
+    }
+  ]
+}
