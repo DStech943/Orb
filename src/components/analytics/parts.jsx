@@ -16,6 +16,16 @@ export function duration(seconds) {
   return hours < 48 ? `${hours.toFixed(1)} hr` : `${(hours / 24).toFixed(1)} days`
 }
 
+/** "3m 32s", "6h 20m", "1d 4h": exact, for response times that are averages of many conversations. */
+export function preciseDuration(seconds) {
+  if (seconds == null) return '—'
+  const total = Math.max(0, Math.round(Number(seconds)))
+  if (total < 60) return `${total}s`
+  if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`
+  if (total < 86400) return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`
+  return `${Math.floor(total / 86400)}d ${Math.floor((total % 86400) / 3600)}h`
+}
+
 export const hours = (value) => (value == null ? '—' : Number(value) < 1 ? `${Math.round(Number(value) * 60)} min` : `${value} hr`)
 
 export const dayLabel = (iso) => {

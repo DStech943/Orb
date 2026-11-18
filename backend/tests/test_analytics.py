@@ -1,6 +1,7 @@
 """Brand analytics and conversations: access control, calculations and query safety."""
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -19,7 +20,7 @@ USER = User(id=uuid4(), org_id=uuid4())
 @pytest.fixture(autouse=True)
 def _fresh_caches():
     """The module keeps short-lived caches; every test starts with them empty."""
-    for cache in (an._cache, an._auth_cache, an._catalog_cache):
+    for cache in (an._cache, an._auth_cache, an._catalog_cache, an._support_cache):
         cache.clear()
     yield
 
@@ -78,6 +79,78 @@ def test_empty_brand_yields_none_not_fake_defaults() -> None:
     assert s["median_hours_to_resolve"] is None and s["first_reply"]["median_seconds"] is None
     assert out["comparison"]["conversations_started"]["change_pct"] is None
     assert out["topics"]["coverage_pct"] is None and out["trends"] == []
+
+
+# ------------------------------------------------------------------ support performance (Pixie's numbers)
+PIXIE_RAW = {"total_chats": 23, "resolved_chats": 14, "incoming_chats": 19, "replies_sent": 126, "frt_seconds": 212, "aht_seconds": 22838,
+             "fast_replies": 0, "ai_generate": 0, "ai_tweak": 0, "channel_distribution": {"instagram": 8, "zoko": 15}}
+PIXIE_PREVIOUS = {"total_chats": 20, "resolved_chats": 10, "incoming_chats": 25, "replies_sent": 100, "frt_seconds": 424, "aht_seconds": None, "channel_distribution": {}}
+WINDOW = an.resolve_window("yesterday", now=datetime(2026, 11, 18, 12, 30, tzinfo=timezone(timedelta(hours=5, minutes=30))))
+
+
+def test_support_numbers_are_exactly_what_the_pixie_function_returns() -> None:
+    out = an.shape_support_kpis(BRAND, "yesterday", PIXIE_RAW, PIXIE_PREVIOUS, WINDOW)
+    s = out["summary"]
+    assert (s["incoming_chats"], s["handled_chats"], s["resolved_chats"], s["replies_sent"]) == (19, 23, 14, 126)
+    assert (s["first_response_seconds"], s["average_handle_seconds"]) == (212, 22838)
+    assert s["resolved_share"] == 60.9                                    # 14 of 23, the "61% resolved" Pixie shows
+    assert s["channels"] == [{"channel": "zoko", "chats": 15}, {"channel": "instagram", "chats": 8}]
+    assert out["source"] == "pixie" and out["period"]["from"] and out["previous_period"]["from"]
+
+
+def test_support_comparison_uses_the_previous_period_and_never_divides_by_zero() -> None:
+    c = an.shape_support_kpis(BRAND, "yesterday", PIXIE_RAW, PIXIE_PREVIOUS, WINDOW)["comparison"]
+    assert c["incoming_chats"] == {"previous": 25, "change_pct": -24.0}
+    assert c["first_response_seconds"] == {"previous": 424, "change_pct": -50.0}
+    assert c["average_handle_seconds"] == {"previous": None, "change_pct": None}    # no earlier average to compare with
+
+
+def test_support_numbers_are_never_invented_when_there_is_no_data() -> None:
+    out = an.shape_support_kpis(BRAND, "today", {}, {}, WINDOW)["summary"]
+    assert out["incoming_chats"] == 0 and out["resolved_share"] is None
+    assert out["first_response_seconds"] is None and out["average_handle_seconds"] is None and out["channels"] == []
+    junk = an._support_numbers({"total_chats": "x", "frt_seconds": "soon", "channel_distribution": ["not", "a", "dict"]})
+    assert junk["handled_chats"] == 0 and junk["first_response_seconds"] is None and junk["channels"] == []
+
+
+@pytest.mark.asyncio
+async def test_pixie_function_is_called_for_every_agent_with_an_inclusive_range(respx_mock) -> None:
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(supabase_url="https://db.example.com", supabase_service_role_key="service-key"))))
+    route = respx_mock.post("https://db.example.com/rest/v1/rpc/get_agent_chat_stats").respond(200, json=PIXIE_RAW)
+    out = await an._rpc_support_stats(request, BRAND, WINDOW["start"], WINDOW["end"])
+    assert out == PIXIE_RAW
+    body = json.loads(route.calls[0].request.content)
+    assert body["p_agent_email"] is None and body["p_brand_id"] == str(BRAND)         # all agents, this brand only
+    assert body["p_from"].startswith("2026-11-16T18:30:00") and body["p_to"].startswith("2026-11-17T18:29:59.999")   # IST midnight to 23:59:59.999
+    assert (body["p_from_date"], body["p_to_date"]) == ("2026-11-17", "2026-11-17")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,detail_part", [(404, "not available"), (500, "right now")])
+async def test_pixie_function_failures_become_plain_503s(respx_mock, status, detail_part) -> None:
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(supabase_url="https://db.example.com", supabase_service_role_key="service-key"))))
+    respx_mock.post("https://db.example.com/rest/v1/rpc/get_agent_chat_stats").respond(status, text="permission denied for table secrets")
+    with pytest.raises(HTTPException) as caught:
+        await an._rpc_support_stats(request, BRAND, WINDOW["start"], WINDOW["end"])
+    assert caught.value.status_code == 503 and detail_part in caught.value.detail and "secrets" not in caught.value.detail
+
+
+def test_support_endpoint_is_scoped_cached_and_compares_two_periods(api) -> None:
+    first = api.get(f"/api/brands/{BRAND}/support-kpis?range=yesterday")
+    assert first.status_code == 200 and first.json()["summary"]["incoming_chats"] == 19
+    assert first.json()["comparison"]["incoming_chats"]["change_pct"] == -24.0
+    assert len(api.state.support) == 2 and api.state.authorized == [BRAND]
+    api.get(f"/api/brands/{BRAND}/support-kpis?range=yesterday")
+    assert len(api.state.support) == 2                                  # served from the short cache
+    api.get(f"/api/brands/{BRAND}/support-kpis?range=custom&from=2026-11-01&to=2026-11-03")
+    assert len(api.state.support) == 4
+
+
+def test_support_endpoint_requires_access_and_a_valid_range(api) -> None:
+    assert api.get(f"/api/brands/{BRAND}/support-kpis?range=custom").status_code == 422
+    assert api.get(f"/api/brands/{BRAND}/support-kpis?range=90d").status_code == 422
+    api.state.denied = True
+    assert api.get(f"/api/brands/{BRAND}/support-kpis").status_code == 403 and not api.state.support
 
 
 # ------------------------------------------------------------------ date ranges
@@ -301,7 +374,7 @@ async def test_a_database_permission_error_never_reaches_the_customer(monkeypatc
 @pytest.fixture
 def api(monkeypatch):
     an._cache.clear()
-    state = SimpleNamespace(rpc=[], gets=[], authorized=[], denied=False)
+    state = SimpleNamespace(rpc=[], gets=[], authorized=[], denied=False, support=[])
 
     async def authorize(request, user, brand_id):
         state.authorized.append(brand_id)
@@ -312,6 +385,10 @@ def api(monkeypatch):
     async def rpc(request, brand_id, start, end):
         state.rpc.append((brand_id, start, end))
         return raw()
+
+    async def support(request, brand_id, start, end):
+        state.support.append((brand_id, start, end))
+        return PIXIE_RAW if len(state.support) % 2 == 1 else PIXIE_PREVIOUS
 
     async def get(request, table, params, *, count=False):
         state.gets.append((table, dict(params)))
@@ -328,6 +405,7 @@ def api(monkeypatch):
     state.missing_thread = False
     monkeypatch.setattr(an, "_authorize_brand", authorize)
     monkeypatch.setattr(an, "_rpc_analytics", rpc)
+    monkeypatch.setattr(an, "_rpc_support_stats", support)
     monkeypatch.setattr(an, "_service_get", get)
     app = FastAPI(); app.state.settings = SimpleNamespace(auth_disabled=False); app.include_router(an.router)
     app.dependency_overrides[current_user] = lambda: USER

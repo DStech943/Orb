@@ -7,6 +7,7 @@ import Button from '../components/ui/Button'
 import { useBrand } from '../context/BrandContext'
 import { DEFAULT_RANGE } from '../services/aiAnalytics'
 import DateRangeFilter from '../components/analytics/DateRangeFilter'
+import SupportPerformance from '../components/analytics/SupportPerformance'
 import useBrandAnalytics from '../hooks/useBrandAnalytics'
 import { AnalyticsGate, CHART_TOOLTIP, NotAvailable, SENDER_META, SENDER_ORDER, StatCard, dayLabel, duration, hourLabel, hours, num, percent, periodLabel } from '../components/analytics/parts'
 
@@ -137,6 +138,8 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
                       sub={s.resolution_rate == null ? 'No conversations started in this period' : `${num(s.resolved_conversations)} of ${num(s.conversations_started)} conversations${s.median_hours_to_resolve != null ? ` · median ${hours(s.median_hours_to_resolve)} to resolve` : ''}`}
                     />
                   </div>
+
+                  <SupportPerformance range={range} />
 
                   <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                     <Card className="lg:col-span-2" title="Conversation Volume" subtitle="Daily conversations started, customer messages and messages sent to customers">

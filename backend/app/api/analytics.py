@@ -40,6 +40,7 @@ MAX_CUSTOM_DAYS = 180
 ANALYTICS_TIMEZONE = "Asia/Kolkata"
 _CACHE_SECONDS = 60
 _cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_support_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
 # A successful access check is remembered briefly: each dashboard load makes several calls and
 # every one would otherwise repeat 3 to 5 database reads. Only grants are cached, never refusals,
 # and access removed from someone stops working within AUTH_CACHE_SECONDS.
@@ -381,6 +382,121 @@ async def brand_analytics(
     if len(_cache) > 300:
         _cache.clear()
     _cache[key] = (time.monotonic(), result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Support performance (the numbers on the Pixie agent dashboard)
+# ---------------------------------------------------------------------------
+# Pixie's agent dashboard reads these KPIs from the database function ``get_agent_chat_stats``.
+# Calling the same function here means Orb and Pixie always agree on them. The function is built
+# around human support work: "incoming chats" are customers who wrote in, "handled chats" are
+# conversations a person replied in or resolved, replies exclude template and failed messages,
+# and response times are averages adjusted to the brand's support hours.
+async def _rpc_support_stats(request: Request, brand_id: UUID, start: datetime, end: datetime) -> dict[str, Any]:
+    settings = request.app.state.settings
+    tz = _analytics_tz()
+    last_moment = end - timedelta(milliseconds=1)          # Pixie's ranges are inclusive, ending at 23:59:59.999
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{settings.supabase_url.rstrip('/')}/rest/v1/rpc/get_agent_chat_stats",
+                headers=_supabase_service_headers(request, write=True, prefer="return=representation"),
+                json={
+                    "p_agent_email": None,                  # every agent: a client never sees one person's numbers
+                    "p_brand_id": str(brand_id),
+                    "p_from": start.isoformat(),
+                    "p_to": last_moment.isoformat(),
+                    "p_from_date": start.astimezone(tz).date().isoformat(),
+                    "p_to_date": last_moment.astimezone(tz).date().isoformat(),
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Support performance could not be reached.") from exc
+    if response.status_code == 404:
+        raise HTTPException(status_code=503, detail="Support performance is not available on this database.")
+    if response.is_error:
+        logger.warning("get_agent_chat_stats failed (%s): %s", response.status_code, response.text[:300])
+        raise HTTPException(status_code=503, detail="Support performance could not be calculated right now.")
+    data = response.json()
+    return data if isinstance(data, dict) else {}
+
+
+def _count(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _seconds(value: Any) -> int | None:
+    try:
+        return None if value is None else int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _support_numbers(raw: dict[str, Any]) -> dict[str, Any]:
+    handled = _count(raw.get("total_chats"))
+    resolved = _count(raw.get("resolved_chats"))
+    channels = raw.get("channel_distribution") if isinstance(raw.get("channel_distribution"), dict) else {}
+    return {
+        "incoming_chats": _count(raw.get("incoming_chats")),
+        "handled_chats": handled,
+        "resolved_chats": resolved,
+        "resolved_share": _pct(resolved, handled),
+        "replies_sent": _count(raw.get("replies_sent")),
+        "first_response_seconds": _seconds(raw.get("frt_seconds")),
+        "average_handle_seconds": _seconds(raw.get("aht_seconds")),
+        "channels": sorted(
+            ({"channel": str(name), "chats": _count(count)} for name, count in channels.items()),
+            key=lambda item: (-item["chats"], item["channel"]),
+        ),
+    }
+
+
+def shape_support_kpis(brand_id: UUID, range_id: str, current: dict[str, Any], previous: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
+    now = _support_numbers(current)
+    before = _support_numbers(previous)
+    return {
+        "brand_id": str(brand_id),
+        "range": range_id,
+        "timezone": ANALYTICS_TIMEZONE,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "period": {"from": window["start"].isoformat(), "to": window["end"].isoformat()},
+        "previous_period": {"from": window["previous_start"].isoformat(), "to": window["previous_end"].isoformat()},
+        "source": "pixie",
+        "summary": now,
+        "comparison": {
+            key: _change(now[key], before[key])
+            for key in ("incoming_chats", "handled_chats", "resolved_chats", "replies_sent", "first_response_seconds", "average_handle_seconds")
+        },
+    }
+
+
+@router.get("/brands/{brand_id}/support-kpis")
+async def brand_support_kpis(
+    brand_id: UUID,
+    request: Request,
+    range: RangeId = Query(default="30d"),
+    from_date: date | None = Query(default=None, alias="from"),
+    to_date: date | None = Query(default=None, alias="to"),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    await _authorize_brand(request, user, brand_id)
+    window = resolve_window(range, from_date, to_date)
+    key = (str(brand_id), range, str(from_date) if range == "custom" else "", str(to_date) if range == "custom" else "")
+    cached = _support_cache.get(key)
+    if cached and time.monotonic() - cached[0] < _CACHE_SECONDS:
+        return cached[1]
+    current, previous = await asyncio.gather(
+        _rpc_support_stats(request, brand_id, window["start"], window["end"]),
+        _rpc_support_stats(request, brand_id, window["previous_start"], window["previous_end"]),
+    )
+    result = shape_support_kpis(brand_id, range, current, previous, window)
+    if len(_support_cache) > 300:
+        _support_cache.clear()
+    _support_cache[key] = (time.monotonic(), result)
     return result
 
 

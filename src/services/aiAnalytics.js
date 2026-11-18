@@ -7,7 +7,7 @@
  * `availability` and the pages show "Not available" instead of a value.
  */
 
-import { getBrandAnalytics } from './orbApi'
+import { getBrandAnalytics, getBrandSupportKpis } from './orbApi'
 
 // Presets are calendar days in the workspace timezone: "Today" is midnight until now,
 // "Yesterday" is the whole previous day, and "Last N days" ends today. A custom range is a
@@ -27,5 +27,12 @@ export async function getAiPerformanceMetrics(brandId, range = DEFAULT_RANGE) {
   if (!brandId) throw new Error('Choose a brand to see its analytics.')
   const data = await getBrandAnalytics(brandId, range)
   if (!data) throw new Error('The Orb API is not connected, so analytics are unavailable.')
+  return data
+}
+
+export async function getSupportPerformance(brandId, range = DEFAULT_RANGE) {
+  if (!brandId) throw new Error('Choose a brand to see its support performance.')
+  const data = await getBrandSupportKpis(brandId, range)
+  if (!data) throw new Error('The Orb API is not connected, so support performance is unavailable.')
   return data
 }

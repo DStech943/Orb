@@ -286,6 +286,13 @@ export const getBrandAnalytics = (brandId, range = "30d") =>
     // The database aggregates thousands of messages, which can take a few seconds.
     timeout: 75_000,
   });
+// Support performance: the agent dashboard's numbers (incoming, handled and resolved chats,
+// replies, first response and handle time) for the same ranges as the analytics.
+export const getBrandSupportKpis = (brandId, range = "30d") =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/support-kpis?${rangeQuery(range)}`, {
+    cacheTtl: 60_000,
+    timeout: 75_000,
+  });
 // A light view of the synced catalog (name, handle, stock). The full product records run to
 // megabytes, which is far more than a dashboard card needs.
 export const getBrandCatalogSummary = (brandId) =>
