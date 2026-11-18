@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowDown,
@@ -54,6 +54,7 @@ const PRESET_MENTIONS = [
 
 const SLASH_COMMAND_IDS = ['products', 'oos', 'nos', 'flows', 'operation', 'template', 'sheet']
 const chatspaceScrollMemory = new Map()
+const chatspaceScrollKey = (brandName) => `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
 const referenceKey = (reference = {}) => `${reference.type || 'reference'}:${reference.id || reference.title || 'item'}`
 // Keep a small reference snapshot in the text token as well as the JSONB
 // column. The JSONB column is the canonical source, but this means a rich
@@ -127,8 +128,14 @@ const saveChatspaceScroll = (key, element, lastKnownSnapshot = null, preferLastK
     || captureChatspaceScroll(element)
     || lastKnownSnapshot
   if (!snapshot || !Number.isFinite(snapshot.top)) return
-  chatspaceScrollMemory.set(key, snapshot)
-  try { window.sessionStorage.setItem(key, JSON.stringify(snapshot)) } catch {}
+  // An anchor makes the saved position resilient to messages whose height
+  // changes while the room is not mounted (images, reactions, receipts).
+  // Never persist the old top-only format: it is what caused a room to reopen
+  // at the beginning of a conversation.
+  if (!snapshot.anchorId) return
+  const savedSnapshot = { ...snapshot, savedAt: Date.now() }
+  chatspaceScrollMemory.set(key, savedSnapshot)
+  try { window.sessionStorage.setItem(key, JSON.stringify(savedSnapshot)) } catch {}
 }
 
 export default function ClientChat() {
@@ -173,15 +180,14 @@ export default function ClientChat() {
   const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
   const lastKnownScrollRef = useRef(null)
-  const restoreTimersRef = useRef([])
   const searchInputRef = useRef(null)
-  const isFirstLoad = useRef(true)
-  const restoredScrollTopRef = useRef(null)
+  const initialScrollAppliedRef = useRef(false)
+  const pendingScrollRestoreRef = useRef(null)
   const messageLoadRequestRef = useRef(0)
   const brandNameRef = useRef(brandName)
   const typingStopTimerRef = useRef(null)
   const isTypingRef = useRef(false)
-  const chatScrollStorageKey = `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
+  const chatScrollStorageKey = chatspaceScrollKey(brandName)
 
   useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
   useEffect(() => { brandNameRef.current = brandName }, [brandName])
@@ -195,6 +201,14 @@ export default function ClientChat() {
     const onBrandChanged = (event) => {
       const nextBrand = String(event.detail?.name || activeBrandName() || 'Your Brand')
       if (brandNameRef.current === nextBrand) return
+      // Capture before React clears/unmounts the current room. This avoids a
+      // transient scrollTop=0 from overwriting the actual reading position.
+      saveChatspaceScroll(
+        chatspaceScrollKey(brandNameRef.current),
+        scrollContainerRef.current,
+        lastKnownScrollRef.current,
+        true,
+      )
       // Do not leave the previous brand's messages visible while the new room
       // is being fetched.
       setMessages([])
@@ -436,45 +450,75 @@ export default function ClientChat() {
   const goToPrevMatch = () => setSearchActiveIndex((i) => (i - 1 + searchMatchIds.length) % searchMatchIds.length)
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
-      if (isFirstLoad.current) {
-        // A room should always open on its latest activity. Restoring an old
-        // offset after a tab switch was the path that could leave users at the
-        // top of the conversation.
-        scrollToBottom(false)
-        isFirstLoad.current = false
-      } else {
-        const el = scrollContainerRef.current
-        if (el) {
-          const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-          if (distanceFromBottom < 220) {
-            scrollToBottom(true)
-          }
-        }
-      }
-    }
-  }, [messages.length, loading])
-
-  useEffect(() => {
     try {
       const stored = chatspaceScrollMemory.has(chatScrollStorageKey)
         ? chatspaceScrollMemory.get(chatScrollStorageKey)
         : window.sessionStorage.getItem(chatScrollStorageKey)
       const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored
-      // Retain support for scroll positions saved by the previous build.
-      restoredScrollTopRef.current = Number.isFinite(parsed)
-        ? { top: parsed, anchorId: '', anchorOffset: 0 }
-        : parsed && Number.isFinite(parsed.top) ? parsed : null
+      // Snapshots from the old implementation contained just a numeric top
+      // offset. They can be stale (often 0), so only restore snapshots tied
+      // to a message that is still visible in the loaded conversation.
+      pendingScrollRestoreRef.current = parsed
+        && Number.isFinite(parsed.top)
+        && typeof parsed.anchorId === 'string'
+        && parsed.anchorId
+        ? parsed
+        : null
+      if (!pendingScrollRestoreRef.current) {
+        try { window.sessionStorage.removeItem(chatScrollStorageKey) } catch {}
+      }
     } catch {
-      restoredScrollTopRef.current = null
+      pendingScrollRestoreRef.current = null
     }
-    isFirstLoad.current = true
+    initialScrollAppliedRef.current = false
     return () => {
-      restoreTimersRef.current.forEach((timer) => window.clearTimeout(timer))
-      restoreTimersRef.current = []
       saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current, lastKnownScrollRef.current, true)
     }
   }, [chatScrollStorageKey])
+
+  // Apply the initial position after the message DOM exists, before the
+  // browser paints it. A valid saved anchor wins; first-time visits fall back
+  // to the newest message at the bottom. This is deliberately separate from
+  // updates below so receiving a message never resets someone reading older
+  // history back to the beginning.
+  useLayoutEffect(() => {
+    if (loading || initialScrollAppliedRef.current) return
+    const element = scrollContainerRef.current
+    if (!element) return
+
+    const snapshot = pendingScrollRestoreRef.current
+    let nextTop = null
+    if (snapshot?.anchorId) {
+      const anchor = [...element.querySelectorAll('[data-msg-id]')]
+        .find((node) => node.dataset.msgId === snapshot.anchorId)
+      if (anchor) {
+        const containerTop = element.getBoundingClientRect().top
+        nextTop = element.scrollTop + anchor.getBoundingClientRect().top - containerTop - snapshot.anchorOffset
+      }
+    }
+
+    // Missing/deleted anchors and first visits should always start at the
+    // latest activity, never at the top.
+    if (!Number.isFinite(nextTop)) nextTop = element.scrollHeight
+    const maxTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    element.scrollTop = Math.max(0, Math.min(nextTop, maxTop))
+
+    pendingScrollRestoreRef.current = null
+    initialScrollAppliedRef.current = true
+    lastKnownScrollRef.current = captureChatspaceScroll(element)
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    setShowScrollBottom(distanceFromBottom > 160)
+  }, [chatScrollStorageKey, loading, messages.length])
+
+  // Stay pinned only when the reader was already near the latest message.
+  // If they are reading older history, retain their exact scroll position.
+  useEffect(() => {
+    if (loading || !initialScrollAppliedRef.current || !messages.length) return
+    const element = scrollContainerRef.current
+    if (!element) return
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    if (distanceFromBottom < 220) scrollToBottom(false)
+  }, [messages.length, loading])
 
   useEffect(() => {
     setLoading(true)
@@ -1517,11 +1561,11 @@ export default function ClientChat() {
                             name={reader.reader_name}
                             src={reader.avatar}
                             sources={reader.avatarSources}
-                            className="h-4 w-4 rounded-full border-2 border-[#FBFBFC] text-[7px] shadow-none"
+                            className="h-5 w-5 rounded-full border-2 border-[#FBFBFC] text-[8px] shadow-none"
                             fallbackClassName="border-[#FBFBFC] bg-slate-500"
                           />
                         ))}
-                        {readers.length > 4 && <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-[#FBFBFC] bg-slate-200 text-[7px] font-bold text-slate-600">+{readers.length - 4}</span>}
+                        {readers.length > 4 && <span className="grid h-5 w-5 place-items-center rounded-full border-2 border-[#FBFBFC] bg-slate-200 text-[8px] font-bold text-slate-600">+{readers.length - 4}</span>}
                       </div>
                     </div>
                   )}
@@ -1621,29 +1665,22 @@ export default function ClientChat() {
         )}
 
         {typingUsers.length > 0 && (
-          <div className="mb-2 flex items-center gap-2 px-1 text-xs text-slate-500" aria-live="polite">
-            <div className="flex -space-x-1.5">
+          <div className="absolute bottom-full left-5 z-20 mb-2 flex items-center gap-2" aria-live="polite" aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}>
+            <div className="flex -space-x-2">
               {typingUsers.slice(0, 3).map((person) => (
                 <Avatar
                   key={person.id}
                   name={person.name}
                   src={person.avatar}
-                  className="h-5 w-5 rounded-full border-2 border-white text-[8px] shadow-sm"
+                  className="h-8 w-8 rounded-full border-2 border-white text-[10px] shadow-sm"
                   fallbackClassName="border-white bg-slate-500"
                 />
               ))}
             </div>
-            <span className="font-medium">
-              {typingUsers.length === 1
-                ? `${typingUsers[0].name} is typing`
-                : typingUsers.length === 2
-                  ? `${typingUsers[0].name} and ${typingUsers[1].name} are typing`
-                  : `${typingUsers.length} people are typing`}
-            </span>
-            <span className="inline-flex items-center gap-0.5" aria-label="Typing">
-              <i className="h-1 w-1 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
-              <i className="h-1 w-1 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
-              <i className="h-1 w-1 animate-bounce rounded-full bg-primary" />
+            <span className="inline-flex h-10 items-center gap-1 rounded-full bg-slate-100 px-4 shadow-sm">
+              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.2s]" />
+              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.1s]" />
+              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500" />
             </span>
           </div>
         )}
