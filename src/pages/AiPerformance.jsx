@@ -124,19 +124,10 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
 
               {activeTab === 'overview' && (
                 <div className="space-y-6">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <StatCard title="Conversations Started" icon={Users} value={num(s.conversations_started)} change={c.conversations_started.change_pct} sub={`${num(s.active_conversations)} conversations had customer messages`} />
                     <StatCard title="Customer Messages" icon={MessageSquare} value={num(s.customer_messages)} change={c.customer_messages.change_pct} sub="Messages received from customers" />
                     <StatCard title="Messages Sent" icon={UserCheck} tone="bg-sky-50 text-sky-600" value={num(s.replies_sent)} change={c.replies_sent.change_pct} sub={s.reply_split_available ? splitText(s.replies) : `Replies plus automated and proactive messages · ${num(s.replies_from_dashboard)} typed by your team in the dashboard`} />
-                    <StatCard
-                      title="Resolved"
-                      icon={CheckCircle2}
-                      tone="bg-emerald-50 text-success"
-                      value={percent(s.resolution_rate)}
-                      change={c.resolution_rate.change_points}
-                      unit=" pts"
-                      sub={s.resolution_rate == null ? 'No conversations started in this period' : `${num(s.resolved_conversations)} of ${num(s.conversations_started)} conversations${s.median_hours_to_resolve != null ? ` · median ${hours(s.median_hours_to_resolve)} to resolve` : ''}`}
-                    />
                   </div>
 
                   <SupportPerformance range={range} />
@@ -400,12 +391,7 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
                   </NotAvailable>
 
                   <Card title="What we can show today" subtitle="Real signals about how conversations are going. These are not customer ratings.">
-                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <div className="rounded-xl border border-line bg-subtle/50 p-3.5">
-                        <span className="text-xs font-semibold text-fg-muted">Conversations resolved</span>
-                        <p className="mt-1 text-2xl font-bold text-ink">{percent(s.resolution_rate)}</p>
-                        <p className="mt-1 text-[11px] text-fg-muted">{num(s.resolved_conversations)} of {num(s.conversations_started)} started</p>
-                      </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-line bg-subtle/50 p-3.5">
                         <span className="text-xs font-semibold text-fg-muted">Handed over to your team</span>
                         <p className="mt-1 text-2xl font-bold text-ink">{percent(s.escalation_rate)}</p>

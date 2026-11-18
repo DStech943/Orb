@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { useBrand } from '../../context/BrandContext'
 import useBrandAnalytics from '../../hooks/useBrandAnalytics'
+import useSupportKpis from '../../hooks/useSupportKpis'
 import { getBusinessIntelligence } from '../../services/businessIntelligence'
 import { listBrandConversations } from '../../services/conversations'
 import { loadFeedback } from '../../lib/feedbackData'
@@ -33,6 +34,7 @@ export default function ClientOverview({ overview = {} }) {
   const firstName = overview.user?.firstName || user?.name?.split(' ')[0] || 'there'
 
   const analytics = useBrandAnalytics('30d')
+  const support = useSupportKpis('30d')
   // 'loading' and 'error' are not "not connected": only a finished check can say that.
   const [store, setStore] = useState({ status: 'loading', data: null })
   const commerce = store.data
@@ -125,7 +127,7 @@ export default function ClientOverview({ overview = {} }) {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard title="Conversations" icon={Users} value={num(s.conversations_started)} change={c.conversations_started.change_pct} sub={`${num(s.active_conversations)} had customer messages`} />
             <StatCard title="Customer Messages" icon={MessageSquare} value={num(s.customer_messages)} change={c.customer_messages.change_pct} sub={s.reply_split_available ? `${num(s.replies_sent)} sent: ${num(s.replies.ai)} by AI, ${num(s.replies.team)} by human agents` : `${num(s.replies_sent)} messages sent to customers`} />
-            <StatCard title="Resolved" icon={CheckCircle2} tone="bg-emerald-50 text-success" value={percent(s.resolution_rate)} change={c.resolution_rate.change_points} unit=" pts" sub={`${num(s.resolved_conversations)} of ${num(s.conversations_started)} conversations`} />
+            <StatCard title="Chats Resolved" icon={CheckCircle2} tone="bg-emerald-50 text-success" value={support.data ? num(support.data.summary.resolved_chats) : '—'} change={support.data ? support.data.comparison.resolved_chats.change_pct : undefined} sub={support.data ? (support.data.summary.resolved_share != null ? `${percent(support.data.summary.resolved_share)} of handled chats` : 'No handled chats') : support.status === 'error' ? 'Could not be loaded' : 'Loading…'} />
             <StatCard title="Handed to Team" icon={UserCheck} tone="bg-sky-50 text-sky-600" value={num(s.escalated_conversations)} sub={s.escalation_rate != null ? `${s.escalation_rate}% of active conversations` : 'No active conversations'} />
           </div>
         ) : null}
