@@ -6,7 +6,13 @@ import { getBrandMastersheetUrl, listFlows, listMessageTemplates, listOperationa
 const COMMANDS = [
   { id: 'products', label: '/products', hint: 'Search a product' }, { id: 'oos', label: '/oos', hint: 'Add all out-of-stock products' }, { id: 'nos', label: '/nos', hint: 'Add products with fewer than 7 in stock' }, { id: 'flows', label: '/flows', hint: 'Search a flow' }, { id: 'operation', label: '/operation', hint: 'Search active operations' }, { id: 'template', label: '/template', hint: 'Search a brand template' }, { id: 'sheet', label: '/sheet refunds', hint: 'Link a master-sheet tab' }, { id: 'order', label: '/order 1234', hint: 'Shopify order (internal only)', internal: true },
 ]
-const stock = (product) => (Array.isArray(product?.variants) ? product.variants : []).map((variant) => Number(variant?.inventoryQuantity)).filter(Number.isFinite).reduce((total, quantity) => total + quantity, 0)
+const variantsFor = (product) => Array.isArray(product?.variants)
+  ? product.variants
+  : Array.isArray(product?.variants?.nodes)
+    ? product.variants.nodes
+    : []
+const stock = (product) => variantsFor(product).map((variant) => Number(variant?.inventoryQuantity)).filter(Number.isFinite).reduce((total, quantity) => total + quantity, 0)
+const isActiveProduct = (product) => String(product?.status || 'active').toLowerCase() === 'active'
 const imageFor = (product) => product?.featuredImage?.url || product?.media?.find((item) => item?.image?.url)?.image?.url || ''
 const isInternal = (role) => ['admin', 'team', 'agent', 'pod_lead'].includes(String(role || '').toLowerCase())
 const expiry = (value) => { if (!value) return 'No expiry'; const days = Math.ceil((new Date(value).getTime() - Date.now()) / 86400000); return days <= 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}` }
@@ -17,6 +23,10 @@ const flowData = (flow = {}) => {
 }
 const flowTitle = (flow) => { const data = flowData(flow); return data.title || data.name || flow?.title || flow?.name || 'Untitled flow' }
 const flowSteps = (flow) => { const data = flowData(flow); return (Array.isArray(data.steps) ? data.steps : Array.isArray(data.nodes) ? data.nodes : []).length }
+const resultItems = (result, key) => Array.isArray(result) ? result : Array.isArray(result?.[key]) ? result[key] : []
+const mastersheetUrl = (result) => typeof result === 'string'
+  ? result
+  : result?.url || result?.mastersheet_url || result?.master_sheet_url || result?.sheets_mastersheet_url || ''
 
 export function ChatReferenceCapsules({ references = [], tone = 'light', onRemove, className = 'mt-2', inline = false }) {
   if (!references.length) return null
@@ -49,13 +59,30 @@ const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value,
   useEffect(() => { setData({ products: [], flows: [], operations: [], templates: [], sheetUrl: '', orders: [], loaded: {} }) }, [brandName])
 
   useEffect(() => {
-    if (!active || loading || active.id === 'order') return
+    // Each resource has its own cache. Do not let an in-flight request for one
+    // slash command prevent the next command from loading its own references.
+    if (!active || active.id === 'order') return
     const resource = ['products', 'oos', 'nos'].includes(active.id) ? 'products' : active.id === 'flows' ? 'flows' : active.id === 'operation' ? 'operations' : active.id === 'template' ? 'templates' : 'sheet'
     if (data.loaded?.[resource]) return
     let live = true; setLoading(true); setError('')
     const load = resource === 'products' ? listProducts() : resource === 'flows' ? listFlows(brandName) : resource === 'operations' ? listOperationalUpdates(brandName) : resource === 'templates' ? listMessageTemplates(brandName) : getBrandMastersheetUrl(brandName)
     Promise.resolve(load)
-      .then((result) => { if (!live) return; setData((current) => ({ ...current, ...(resource === 'products' ? { products: Array.isArray(result) ? result : [] } : resource === 'flows' ? { flows: result?.points || [] } : resource === 'operations' ? { operations: result?.updates || [] } : resource === 'templates' ? { templates: result?.templates || [] } : { sheetUrl: result || '' }), loaded: { ...current.loaded, [resource]: true } })) })
+      .then((result) => {
+        if (!live) return
+        setData((current) => ({
+          ...current,
+          ...(resource === 'products'
+            ? { products: resultItems(result, 'products') }
+            : resource === 'flows'
+              ? { flows: resultItems(result, 'points') }
+              : resource === 'operations'
+                ? { operations: resultItems(result, 'updates') }
+                : resource === 'templates'
+                  ? { templates: resultItems(result, 'templates') }
+                  : { sheetUrl: mastersheetUrl(result) }),
+          loaded: { ...current.loaded, [resource]: true },
+        }))
+      })
       .catch((reason) => { if (live) setError(reason.message || 'Could not load references.') })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
@@ -78,7 +105,7 @@ const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value,
     if (!active) return []
     const has = (item) => String(item || '').toLowerCase().includes(query)
     if (command === 'products') return data.products.filter((item) => has(item.name)).slice(0, 6).map((item) => ({ type: 'product', id: item.id, title: item.name, subtitle: item.price || 'Product', image: imageFor(item), href: item.url || '/app/products', external: Boolean(item.url) }))
-    if (command === 'oos' || command === 'nos') { const products = data.products.filter((item) => command === 'oos' ? stock(item) === 0 : stock(item) > 0 && stock(item) < 7); return [{ type: 'product-set', id: command, title: command === 'oos' ? `Add ${products.length} out-of-stock products` : `Add ${products.length} near-out-of-stock products`, subtitle: command === 'oos' ? 'Inventory is 0' : 'Inventory below 7', products }] }
+    if (command === 'oos' || command === 'nos') { const products = data.products.filter((item) => isActiveProduct(item) && (command === 'oos' ? stock(item) === 0 : stock(item) > 0 && stock(item) < 7)); return [{ type: 'product-set', id: command, title: command === 'oos' ? `Add ${products.length} out-of-stock products` : `Add ${products.length} near-out-of-stock products`, subtitle: command === 'oos' ? 'Inventory is 0' : 'Inventory below 7', products }] }
     if (command === 'flows') return data.flows.filter((item) => has(flowTitle(item))).slice(0, 6).map((item) => { const flow = flowData(item); return ({ type: 'flow', id: item.id, title: flowTitle(item), subtitle: `${flow.status || item.status || 'Draft'} · ${flowSteps(item)} steps`, href: '/app/flows' }) })
     if (command === 'operation') return data.operations.filter((item) => (!item.expires_at || new Date(item.expires_at) >= new Date()) && has(item.title || item.message)).slice(0, 6).map((item) => ({ type: 'operation', id: item.id, title: item.title || item.message || 'Operational update', subtitle: expiry(item.expires_at), href: '/app/operations' }))
     if (command === 'template') return data.templates.filter((item) => has(item.name || item.title)).slice(0, 6).map((item) => ({ type: 'template', id: item.id, title: item.name || item.title || 'Untitled template', subtitle: 'Template', href: '/app/templates' }))

@@ -78,6 +78,10 @@ async def _ensure_chatspace_table(pool: asyncpg.Pool) -> None:
               reply_to_id uuid,
               reply_to_snippet text,
               reactions jsonb NOT NULL DEFAULT '{}'::jsonb,
+              pinned_until timestamptz,
+              pinned_by uuid,
+              pinned_by_name text,
+              edited_at timestamptz,
               created_at timestamptz NOT NULL DEFAULT now(),
               updated_at timestamptz NOT NULL DEFAULT now()
             );
@@ -85,6 +89,11 @@ async def _ensure_chatspace_table(pool: asyncpg.Pool) -> None:
               ADD COLUMN IF NOT EXISTS media jsonb NOT NULL DEFAULT '[]'::jsonb;
             ALTER TABLE cx_copilot.orb_client_chat_messages
               ADD COLUMN IF NOT EXISTS message_references jsonb NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE cx_copilot.orb_client_chat_messages
+              ADD COLUMN IF NOT EXISTS pinned_until timestamptz,
+              ADD COLUMN IF NOT EXISTS pinned_by uuid,
+              ADD COLUMN IF NOT EXISTS pinned_by_name text,
+              ADD COLUMN IF NOT EXISTS edited_at timestamptz;
             CREATE INDEX IF NOT EXISTS orb_client_chat_brand_name_idx
               ON cx_copilot.orb_client_chat_messages (brand_name, created_at ASC);
         """)
@@ -243,11 +252,17 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
                 })
 
             elif action == "typing":
+                user_id = str(data.get("userId") or "").strip()
                 user_name = data.get("userName") or "Someone"
+                avatar = data.get("avatar") or ""
+                if not user_id:
+                    continue
                 is_typing = bool(data.get("isTyping"))
                 await manager.broadcast(brand_name, {
                     "type": "typing",
+                    "userId": user_id,
                     "userName": user_name,
+                    "avatar": avatar,
                     "isTyping": is_typing,
                 })
 

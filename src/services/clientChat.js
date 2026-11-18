@@ -213,6 +213,10 @@ class ChatspaceWebSocketClient {
         replyToId: data.replyToId || null,
         replyToSnippet: data.replyToSnippet || null,
         reactions: data.reactions || {},
+        pinnedUntil: data.pinnedUntil || data.pinned_until || null,
+        pinnedBy: data.pinnedBy || data.pinned_by || null,
+        pinnedByName: data.pinnedByName || data.pinned_by_name || null,
+        editedAt: data.editedAt || data.edited_at || null,
         createdAt: data.createdAt,
       }
 
@@ -256,6 +260,19 @@ class ChatspaceWebSocketClient {
 
 export const wsClient = new ChatspaceWebSocketClient()
 
+// Typing presence is deliberately WebSocket-only: it is transient UI state,
+// not a message or audit record, so it never reaches Supabase.
+export const sendChatspaceTyping = (currentUser, isTyping) => {
+  if (!currentUser?.id) return false
+  return wsClient.send({
+    type: 'typing',
+    userId: String(currentUser.id),
+    userName: currentUser.name || currentUser.email?.split('@')[0] || 'Someone',
+    avatar: currentUser.avatar || '',
+    isTyping: Boolean(isTyping),
+  })
+}
+
 // Mention targets are deliberately scoped to the selected brand. The database
 // policy permits this read only when the signed-in person belongs to that same
 // brand (or is internal Orb staff).
@@ -287,6 +304,27 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
 
+  // Keep locally received rich-reference details while an older deployment or
+  // a PostgREST schema refresh returns an empty JSONB column. This recovery is
+  // keyed by the durable message UUID and is replaced as soon as the database
+  // returns its canonical references.
+  let cachedById = new Map()
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(key) || '[]')
+    cachedById = new Map((Array.isArray(cached) ? cached : []).map((message) => [message.id, message]))
+  } catch {}
+
+  const jsonArray = (value) => {
+    if (Array.isArray(value)) return value
+    if (typeof value !== 'string') return []
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? [parsed] : []
+    } catch {
+      return []
+    }
+  }
+
   // Ensure WebSocket is connected for active brand
   wsClient.connect(brand)
 
@@ -301,7 +339,10 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
         .order('created_at', { ascending: true })
 
       if (!error && Array.isArray(data)) {
-        const mapped = data.map((row) => ({
+        const mapped = data.map((row) => {
+          const databaseReferences = jsonArray(row.message_references)
+          const cachedReferences = cachedById.get(row.id)?.references
+          return {
           id: row.id,
           brandId: row.brand_id || null,
           sender: {
@@ -318,15 +359,20 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
               .toUpperCase(),
           },
           content: row.content,
-          references: Array.isArray(row.message_references) ? row.message_references : typeof row.message_references === 'string' ? JSON.parse(row.message_references) : [],
-          media: Array.isArray(row.media) ? row.media : typeof row.media === 'string' ? JSON.parse(row.media) : [],
+          references: databaseReferences.length ? databaseReferences : (Array.isArray(cachedReferences) ? cachedReferences : []),
+          media: jsonArray(row.media),
           mentions: Array.isArray(row.mentions) ? row.mentions : [],
           status: row.status || 'read',
           replyToId: row.reply_to_id || null,
           replyToSnippet: row.reply_to_snippet || null,
           reactions: row.reactions || {},
+          pinnedUntil: row.pinned_until || null,
+          pinnedBy: row.pinned_by || null,
+          pinnedByName: row.pinned_by_name || null,
+          editedAt: row.edited_at || null,
           createdAt: row.created_at,
-        }))
+        }
+        })
         try {
           window.localStorage.setItem(key, JSON.stringify(mapped))
         } catch {}
@@ -414,15 +460,9 @@ export const sendClientChatMessage = async ({
     reactions: {},
   }
 
-  // 1. Send via WebSocket for real-time instantaneous delivery to all connected clients
-  const sentViaWs = wsClient.send({
-    type: 'chat_message',
-    ...newMessage,
-    brandName: brand,
-    brandId: effectiveBrandId,
-  })
-
-  // 2. Write to Supabase Postgres as persistent store
+  // 1. Write first. Sending on the WebSocket first can race with this insert:
+  // an older worker writes the bare message, then the browser receives a
+  // duplicate-key error and loses the rich-reference JSON for other viewers.
   if (supabase) {
     const payload = {
       id: generatedId,
@@ -446,11 +486,11 @@ export const sendClientChatMessage = async ({
       const { error } = await supabase
         .schema('cx_copilot')
         .from('orb_client_chat_messages')
-        .insert(payload)
+        .upsert(payload, { onConflict: 'id' })
       if (error) {
         // Keep a concise textual fallback for installations that have not run
-        // the reference migration yet. This preserves the shared product even
-        // when the old table only accepts text messages.
+        // the reference migration yet. The rich token includes a compact
+        // snapshot, so it still restores the capsule in its exact position.
         const { mentions, message_references, ...fallbackPayload } = payload
         if (!fallbackPayload.content && newMessage.references.length) {
           fallbackPayload.content = `Shared: ${newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'}`
@@ -464,6 +504,15 @@ export const sendClientChatMessage = async ({
       console.warn('Could not insert to Supabase orb_client_chat_messages:', e)
     }
   }
+
+  // 2. Broadcast after persistence so all connected workspaces receive the
+  // complete reference payload, including product image and link metadata.
+  wsClient.send({
+    type: 'chat_message',
+    ...newMessage,
+    brandName: brand,
+    brandId: effectiveBrandId,
+  })
 
   // 3. Update local cache
   let list = []
@@ -557,6 +606,115 @@ export const toggleMessageReaction = async ({
   return updated
 }
 
+export const pinChatspaceMessage = async ({
+  messageId,
+  expiresAt,
+  currentUser,
+}) => {
+  if (!supabase) throw new Error('Chatspace is not connected to Supabase.')
+  if (!messageId || !currentUser?.id || !expiresAt) throw new Error('Could not pin this message.')
+
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_messages')
+    .update({
+      pinned_until: expiresAt,
+      pinned_by: currentUser.id,
+      pinned_by_name: currentUser.name || currentUser.email?.split('@')[0] || 'Member',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', messageId)
+    .select('id, pinned_until, pinned_by, pinned_by_name')
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) throw new Error('Message not found or you do not have permission to pin it.')
+  return {
+    id: data.id,
+    pinnedUntil: data.pinned_until,
+    pinnedBy: data.pinned_by,
+    pinnedByName: data.pinned_by_name,
+  }
+}
+
+export const deleteChatspaceMessage = async ({
+  brandName = activeBrandName(),
+  message,
+  currentUser,
+}) => {
+  if (!supabase) throw new Error('Chatspace is not connected to Supabase.')
+  if (!message?.id || !currentUser?.id) throw new Error('Could not delete this message.')
+
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_messages')
+    .delete()
+    .eq('id', message.id)
+    .eq('brand_name', brandName || 'default_brand')
+    .eq('sender_id', currentUser.id)
+    .select('id')
+
+  if (error) throw error
+  if (!data?.length) throw new Error('Only the sender can delete this message.')
+
+  // Remove files after the database delete succeeds. A storage-policy issue
+  // must never make a deleted chat message reappear.
+  const attachmentPaths = (Array.isArray(message.media) ? message.media : [])
+    .filter((file) => file?.bucket === CHATSPACE_BUCKET && file?.path)
+    .map((file) => file.path)
+  if (attachmentPaths.length) {
+    const { error: storageError } = await supabase.storage
+      .from(CHATSPACE_BUCKET)
+      .remove(attachmentPaths)
+    if (storageError) console.warn('Message deleted, but some attachments could not be removed:', storageError)
+  }
+
+  const key = `${STORAGE_PREFIX}${brandName || 'default_brand'}`
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(key) || '[]')
+    window.localStorage.setItem(key, JSON.stringify((Array.isArray(cached) ? cached : []).filter((item) => item.id !== message.id)))
+  } catch {}
+  window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand: brandName } }))
+  return message.id
+}
+
+export const editChatspaceMessage = async ({
+  brandName = activeBrandName(),
+  messageId,
+  content,
+  currentUser,
+}) => {
+  if (!supabase) throw new Error('Chatspace is not connected to Supabase.')
+  if (!messageId || !currentUser?.id || !String(content || '').trim()) {
+    throw new Error('A message cannot be empty.')
+  }
+
+  const editedAt = new Date().toISOString()
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_messages')
+    .update({ content, edited_at: editedAt, updated_at: editedAt })
+    .eq('id', messageId)
+    .eq('brand_name', brandName || 'default_brand')
+    .eq('sender_id', currentUser.id)
+    .select('id, content, edited_at')
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) throw new Error('Only the sender can edit this message.')
+  const updated = { id: data.id, content: data.content, editedAt: data.edited_at }
+  const brand = brandName || 'default_brand'
+  const key = `${STORAGE_PREFIX}${brand}`
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(key) || '[]')
+    window.localStorage.setItem(key, JSON.stringify((Array.isArray(cached) ? cached : []).map((message) => (
+      message.id === data.id ? { ...message, ...updated } : message
+    ))))
+  } catch {}
+  window.dispatchEvent(new CustomEvent('orb:client-chat-updated', { detail: { brand } }))
+  return updated
+}
+
 export const updateMessageStatus = async ({
   brandName = activeBrandName(),
   messageId,
@@ -644,10 +802,54 @@ export const getUnreadChatCount = (brandName = activeBrandName(), currentUser) =
   return getChatspaceUnreadStatus(brandName, currentUser).unreadCount
 }
 
-export const markChatspaceAsRead = (brandName = activeBrandName()) => {
+export const getChatspaceReadReceipts = async (brandName = activeBrandName()) => {
+  if (!supabase || !brandName) return []
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_read_receipts')
+    .select('user_id, reader_name, reader_avatar, last_read_message_id, read_at')
+    .eq('brand_name', brandName)
+  if (error) throw error
+  return (Array.isArray(data) ? data : []).map((receipt) => ({
+    ...receipt,
+    avatar: avatarUrlFromKey(receipt.reader_avatar),
+    avatarSources: avatarUrlsFromKey(receipt.reader_avatar),
+  }))
+}
+
+export const subscribeToChatReadReceipts = (brandName, onChange) => {
+  if (!supabase || !brandName) return () => {}
+  const channel = supabase
+    .channel(`chatspace-receipts:${brandName}`)
+    .on('postgres_changes', {
+      event: '*', schema: 'cx_copilot', table: 'orb_client_chat_read_receipts', filter: `brand_name=eq.${brandName}`,
+    }, () => onChange?.())
+    .subscribe()
+  return () => { supabase.removeChannel(channel) }
+}
+
+export const markChatspaceAsRead = async (brandName = activeBrandName(), currentUser, lastReadMessageId = null) => {
   const brand = brandName || 'default_brand'
   window.localStorage.setItem(`orb_chatspace_last_read:${brand}`, String(Date.now()))
   window.dispatchEvent(new CustomEvent('orb:chatspace-unread-changed', { detail: { brand, count: 0 } }))
+  if (!supabase || !currentUser?.id || !lastReadMessageId) return null
+  const payload = {
+    brand_id: activeBrandId() || null,
+    brand_name: brand,
+    user_id: currentUser.id,
+    reader_name: currentUser.name || currentUser.email?.split('@')[0] || 'Member',
+    reader_avatar: currentUser.avatarKey || currentUser.avatar || null,
+    last_read_message_id: lastReadMessageId,
+    read_at: new Date().toISOString(),
+  }
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_read_receipts')
+    .upsert(payload, { onConflict: 'brand_name,user_id' })
+    .select()
+    .maybeSingle()
+  if (error) throw error
+  return data
 }
 
 export const subscribeToChatMessages = (brandName, onNewMessage) => {

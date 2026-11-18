@@ -100,16 +100,20 @@ async def scroll_points(
     brand_name: str,
     kind: str,
     limit: int = 500,
+    query_filter: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Return payload-only points from one brand and knowledge-type collection."""
     base_url, headers = await _client(pool)
     collection = collection_name(settings.qdrant_collection_prefix, brand_name, kind)
     try:
         async with httpx.AsyncClient(timeout=30) as client:
+            body: dict[str, object] = {"limit": limit, "with_payload": True, "with_vector": False}
+            if query_filter:
+                body["filter"] = query_filter
             response = await client.post(
                 f"{base_url}/collections/{collection}/points/scroll",
                 headers=headers,
-                json={"limit": limit, "with_payload": True, "with_vector": False},
+                json=body,
             )
             if response.status_code == 404:
                 return []

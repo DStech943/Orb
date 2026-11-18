@@ -16,7 +16,9 @@ const publicUrl = (bucket, path) => {
  * a renamed bucket does not silently turn every profile back into initials.
  */
 export const avatarUrlsFromKey = (avatarKey) => {
-  const key = String(avatarKey || '').trim()
+  // Existing people records use `custom:<public URL>`. This is not a
+  // Storage bucket prefix: use the public URL itself.
+  const key = String(avatarKey || '').trim().replace(/^custom:(?=https?:)/i, '')
   if (!key) return []
   if (/^(?:https?:|data:|blob:)/i.test(key) || key.startsWith('/')) return [key]
 

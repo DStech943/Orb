@@ -1464,11 +1464,27 @@ async def list_categories() -> dict[str, list[dict[str, str]]]:
 
 
 @router.get("/brands")
-async def list_brands(request: Request, _: User = Depends(current_user)) -> dict[str, list[dict[str, Any]]]:
+async def list_brands(request: Request, user: User = Depends(current_user)) -> dict[str, list[dict[str, Any]]]:
+    params: dict[str, str] = {"select": "id,name,description,industry_category,platform_config", "order": "name.asc"}
+    # A client is never given another brand's ID or display name. Staff retain
+    # their all-brand workspace, while clients see the exact brand rows where
+    # their email has a brand_assignment.
+    if await _is_client_workspace_user(request, user):
+        if not user.email:
+            return {"brands": []}
+        assignments = await _supabase_rows(
+            request,
+            "brand_assignments",
+            {"select": "brand_id", "email": f"eq.{user.email.lower()}"},
+        )
+        brand_ids = [str(row.get("brand_id")) for row in assignments if row.get("brand_id")]
+        if not brand_ids:
+            return {"brands": []}
+        params["id"] = f"in.({','.join(brand_ids)})"
     rows = await _supabase_rows(
         request,
         "brands",
-        {"select": "id,name,description,industry_category,platform_config", "order": "name.asc"},
+        params,
     )
     return {"brands": [_brand_out(row) for row in rows]}
 
@@ -2711,7 +2727,27 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, user: Us
 @router.post("/knowledge/sops/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_sop(payload: ManualSopCreate, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     """Create a manual SOP and publish it to the brand's live Qdrant knowledge."""
-    sop_id = str(uuid4())
+    # Re-publishing a saved flow must refresh the SOP it originally produced,
+    # rather than adding another copy to the brand's live knowledge. The flow
+    # ID is persisted in Qdrant's payload specifically for this provenance.
+    flow_id = flow_snapshot["flow_id"]
+    sop_id: str | None = None
+    if flow_id:
+        try:
+            existing = await scroll_points(
+                request.app.state.db,
+                request.app.state.settings,
+                payload.brand_name,
+                "sop",
+                limit=2,
+                query_filter={"must": [{"key": "source_flow.flow_id", "match": {"value": flow_id}}]},
+            )
+            if existing:
+                sop_id = str(existing[0]["id"])
+        except PublishUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"Could not check the existing flow SOP: {exc}") from exc
+    updated = sop_id is not None
+    sop_id = sop_id or str(uuid4())
     title = payload.title.strip()
     sop = {
         "title": title,
@@ -2737,7 +2773,7 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, user: Us
         )
     except PublishUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"SOP could not be published to Qdrant: {exc}") from exc
-    return {"point": {"id": sop_id, "payload": sop}, "published": True, "collection": collection}
+    return {"point": {"id": sop_id, "payload": sop}, "published": True, "updated": updated, "collection": collection}
 
 @router.post("/knowledge/{kind}/bulk", status_code=status.HTTP_201_CREATED)
 async def create_bulk_knowledge(

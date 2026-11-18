@@ -70,6 +70,14 @@ const safeFlows = (result) =>
       ? result.points
       : []).filter((flow) => !flow?.is_template)
 
+const graphNodes = (value) => Array.isArray(value)
+  ? value
+  : Array.isArray(value?.nodes)
+    ? value.nodes
+    : Array.isArray(value?.edges)
+      ? value.edges.map((edge) => edge?.node).filter(Boolean)
+      : []
+
 // [MOCK] Simulated latency for the localStorage path.
 // Remove when the backend exposes a real /api/overview endpoint.
 const mockDelay = (ms = 400) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -116,7 +124,7 @@ async function fetchViaApi(brandName, user) {
     const pl = p?.payload ?? {}
     const sh = pl.shopify ?? pl.structured?.shopify_admin ?? {}
     const firstImage = (...candidates) => candidates.flat(Infinity).find((image) => typeof image === 'string' && image.trim()) ?? null
-    const variants = Array.isArray(sh.variants) ? sh.variants : Array.isArray(pl.variants) ? pl.variants : []
+    const variants = graphNodes(sh.variants).length ? graphNodes(sh.variants) : graphNodes(pl.variants)
     const totalInventory = variants.reduce((acc, v) => acc + (Number(v?.inventoryQuantity ?? v?.inventory_quantity) || 0), 0)
     const isOutOfStock = variants.length > 0 ? totalInventory <= 0 : Boolean(pl.out_of_stock || sh.out_of_stock)
 

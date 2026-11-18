@@ -2633,9 +2633,9 @@ function Builder({
     }
     setCreatingSop(true);
     try {
-      await createSopFromFlow(draft);
+      const result = await createSopFromFlow(draft);
       setAddToBrainOpen(false);
-      showToast("SOP added to AI’s Brain and published to Qdrant.");
+      showToast(result?.updated ? "Existing flow SOP updated in AI’s Brain." : "SOP added to AI’s Brain and published to Qdrant.");
     } catch (error) {
       showToast(error.message || "Could not create an SOP from this flow.");
     } finally {

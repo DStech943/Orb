@@ -23,11 +23,13 @@ export default function Avatar({ name, src = '', sources = [], className = '', f
   useEffect(() => setSourceIndex(0), [imageSources.join('|')])
   const imageSource = imageSources[sourceIndex]
   const [bg, fg] = tintFor(name)
+  // A caller that sets its own size (h-/w-) must not also get the default 36px box.
+  const explicitSize = /(?:^|\s)[hw]-/.test(className)
   return (
     <span
       aria-label={name ? `${name} avatar` : 'Avatar'}
       style={imageSource ? undefined : { backgroundColor: bg, color: fg }}
-      className={`grid h-9 w-9 shrink-0 place-items-center overflow-hidden text-xs font-semibold ${shape === 'full' ? 'rounded-full' : 'rounded-lg'} ${fallbackClassName} ${className}`}
+      className={`grid ${explicitSize ? '' : 'h-9 w-9'} shrink-0 place-items-center overflow-hidden text-xs font-semibold ${shape === 'full' ? 'rounded-full' : 'rounded-lg'} ${fallbackClassName} ${className}`}
     >
       {imageSource ? <img src={imageSource} alt="" className="h-full w-full object-cover" onError={() => setSourceIndex((index) => index + 1)} /> : initials(name)}
     </span>

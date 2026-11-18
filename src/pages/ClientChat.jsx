@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowDown,
@@ -14,12 +14,16 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  Paperclip,
+  Pencil,
   Plus,
+  Pin,
   Quote,
   Search,
   Smile,
   Video,
   X,
+  Trash2,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useAuth } from '../context/AuthContext'
@@ -31,11 +35,17 @@ import PageHeader from '../components/ui/PageHeader'
 import { startBrowserDictation } from '../lib/browserDictation'
 import {
   PRESET_REACTIONS,
+  deleteChatspaceMessage,
+  editChatspaceMessage,
   getClientChatMessages,
+  getChatspaceReadReceipts,
   listBrandChatMembers,
   markChatspaceAsRead,
+  pinChatspaceMessage,
+  sendChatspaceTyping,
   sendClientChatMessage,
   subscribeToChatMessages,
+  subscribeToChatReadReceipts,
   toggleMessageReaction,
   uploadChatspaceMedia,
 } from '../services/clientChat'
@@ -50,10 +60,53 @@ const PRESET_MENTIONS = [
 ]
 
 const SLASH_COMMAND_IDS = ['products', 'oos', 'nos', 'flows', 'operation', 'template', 'sheet']
+const PIN_DURATIONS = [
+  { label: '24 hours', hours: 24 },
+  { label: '7 days', hours: 24 * 7 },
+  { label: '30 days', hours: 24 * 30 },
+]
+const EMOJI_RECENTS_KEY = 'orb:chatspace:recent-emojis'
+const EMOJI_CATEGORIES = [
+  { id: 'smileys', icon: '😀', label: 'Smileys', emojis: ['😀', '😃', '😄', '😁', '😅', '😂', '🙂', '🙃', '😉', '😊', '😍', '😘', '😎', '🤔', '😅', '😭', '😡', '🤯', '🥳', '🤝'] },
+  { id: 'gestures', icon: '👍', label: 'Gestures', emojis: ['👋', '🤚', '✋', '👌', '🤞', '🤝', '🙏', '👍', '👎', '👏', '🙌', '💪', '👀', '🫡', '✍️', '💯'] },
+  { id: 'hearts', icon: '❤️', label: 'Hearts', emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '💔', '💕', '💖', '✨', '🔥', '🎉'] },
+  { id: 'nature', icon: '🌿', label: 'Nature', emojis: ['🌿', '🌸', '🌻', '🌞', '🌈', '⭐', '🌙', '🌊', '🐶', '🐱', '🐝', '🦋', '🍀', '🌍'] },
+  { id: 'objects', icon: '💡', label: 'Objects', emojis: ['💡', '📦', '🛍️', '🚚', '📞', '💬', '📎', '📌', '✅', '⚠️', '❌', '🔔', '🧠', '🛠️'] },
+]
+const DEFAULT_RECENT_EMOJIS = ['😊', '👍', '🙏', '❤️', '😂', '✅', '🎉', '👋']
+const readRecentEmojis = () => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(EMOJI_RECENTS_KEY) || '[]')
+    if (Array.isArray(stored) && stored.length) return stored.filter((emoji) => typeof emoji === 'string').slice(0, 24)
+  } catch {}
+  return DEFAULT_RECENT_EMOJIS
+}
 const chatspaceScrollMemory = new Map()
+const chatspaceScrollKey = (brandName) => `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
 const referenceKey = (reference = {}) => `${reference.type || 'reference'}:${reference.id || reference.title || 'item'}`
-const referenceToken = (reference) => `[[orb-reference:${encodeURIComponent(reference.type || 'reference')}:${encodeURIComponent(reference.id || reference.title || 'item')}]]`
-const referenceTokenPattern = /\[\[orb-reference:([^:\]]+):([^\]]+)\]\]/g
+// Keep a small reference snapshot in the text token as well as the JSONB
+// column. The JSONB column is the canonical source, but this means a rich
+// capsule still survives a delayed schema refresh or an older WebSocket
+// worker that writes the message without `message_references`.
+const referenceToken = (reference = {}) => {
+  const snapshot = {
+    type: reference.type || 'reference',
+    id: reference.id || reference.title || 'item',
+    title: reference.title || reference.name || 'Reference',
+    subtitle: reference.subtitle || '',
+    image: reference.image || '',
+    href: reference.href || '',
+    external: Boolean(reference.external),
+  }
+  return `[[orb-reference-v2:${encodeURIComponent(JSON.stringify(snapshot))}]]`
+}
+const referenceTokenPattern = /\[\[(?:orb-reference:([^:\]]+):([^\]]+)|orb-reference-v2:([^\]]+))\]\]/g
+const fallbackReference = (type, id) => ({
+  type: type || 'reference',
+  id: id || 'item',
+  title: type === 'product' ? 'Product' : type === 'flow' ? 'Flow' : type === 'template' ? 'Template' : type === 'operation' ? 'Operation' : type === 'sheet' ? 'Master sheet' : 'Reference',
+  subtitle: '',
+})
 const escapeComposerHtml = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -84,16 +137,82 @@ const serializeRichMessage = (text, references = []) => {
   })
   return `${output}${value.slice(cursor)}`
 }
-const saveChatspaceScroll = (key, element) => {
-  if (!element || !Number.isFinite(element.scrollTop)) return
-  chatspaceScrollMemory.set(key, element.scrollTop)
-  try { window.sessionStorage.setItem(key, String(element.scrollTop)) } catch {}
+// Convert the stored rich-message token format back into editable text while
+// retaining each capsule at the place where it was originally written.
+const editableRichMessage = (content, references = []) => {
+  const availableReferences = Array.isArray(references) ? references : []
+  const referencesByKey = new Map(availableReferences.map((reference) => [referenceKey(reference), reference]))
+  const consumed = new Set()
+  const positionedReferences = []
+  const value = String(content || '')
+  let text = ''
+  let cursor = 0
+  let match
+
+  referenceTokenPattern.lastIndex = 0
+  while ((match = referenceTokenPattern.exec(value))) {
+    text += value.slice(cursor, match.index)
+    let type = ''
+    let id = ''
+    let tokenReference = null
+    try {
+      if (match[3]) {
+        tokenReference = JSON.parse(decodeURIComponent(match[3]))
+        type = String(tokenReference?.type || '')
+        id = String(tokenReference?.id || '')
+      } else {
+        type = decodeURIComponent(match[1])
+        id = decodeURIComponent(match[2])
+      }
+    } catch {}
+    const reference = referencesByKey.get(`${type}:${id}`) || tokenReference || fallbackReference(type, id)
+    positionedReferences.push({ ...reference, position: text.length })
+    consumed.add(referenceKey(reference))
+    cursor = referenceTokenPattern.lastIndex
+  }
+  text += value.slice(cursor)
+
+  // Older messages may have references only in JSONB. Keep them attached to
+  // the editable message rather than silently removing them on save.
+  availableReferences
+    .filter((reference) => !consumed.has(referenceKey(reference)))
+    .forEach((reference) => positionedReferences.push({ ...reference, position: text.length }))
+
+  return { text, references: positionedReferences }
+}
+const captureChatspaceScroll = (element) => {
+  if (!element || !Number.isFinite(element.scrollTop)) return null
+  const containerTop = element.getBoundingClientRect().top
+  const anchor = [...element.querySelectorAll('[data-msg-id]')].find((node) => node.getBoundingClientRect().bottom > containerTop)
+  return {
+    top: element.scrollTop,
+    anchorId: anchor?.dataset.msgId || '',
+    anchorOffset: anchor ? anchor.getBoundingClientRect().top - containerTop : 0,
+  }
+}
+
+const saveChatspaceScroll = (key, element, lastKnownSnapshot = null, preferLastKnown = false) => {
+  // React can reset a scroll container to 0 while it is being unmounted. On a
+  // route/tab change, retain the last user-originated snapshot rather than
+  // letting that transient DOM position overwrite it.
+  const snapshot = (preferLastKnown ? lastKnownSnapshot : captureChatspaceScroll(element))
+    || captureChatspaceScroll(element)
+    || lastKnownSnapshot
+  if (!snapshot || !Number.isFinite(snapshot.top)) return
+  // An anchor makes the saved position resilient to messages whose height
+  // changes while the room is not mounted (images, reactions, receipts).
+  // Never persist the old top-only format: it is what caused a room to reopen
+  // at the beginning of a conversation.
+  if (!snapshot.anchorId) return
+  const savedSnapshot = { ...snapshot, savedAt: Date.now() }
+  chatspaceScrollMemory.set(key, savedSnapshot)
+  try { window.sessionStorage.setItem(key, JSON.stringify(savedSnapshot)) } catch {}
 }
 
 export default function ClientChat() {
   const { user } = useAuth()
   const { showToast } = useToast()
-  const brandName = activeBrandName() || 'Your Brand'
+  const [brandName, setBrandName] = useState(() => activeBrandName() || 'Your Brand')
   const currentUserName = user?.name || user?.email?.split('@')[0] || 'You'
 
   const [messages, setMessages] = useState([])
@@ -119,6 +238,18 @@ export default function ClientChat() {
   const [slashCommandIndex, setSlashCommandIndex] = useState(0)
   const [composerRevision, setComposerRevision] = useState(0)
   const [assignedMembers, setAssignedMembers] = useState([])
+  const [readReceipts, setReadReceipts] = useState([])
+  const [typingUsers, setTypingUsers] = useState([])
+  const [pinningMessageId, setPinningMessageId] = useState(null)
+  const [deletingMessageId, setDeletingMessageId] = useState(null)
+  const [editingMessage, setEditingMessage] = useState(null)
+  const [editDraft, setEditDraft] = useState('')
+  const [editReferences, setEditReferences] = useState([])
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
+  const [emojiCategory, setEmojiCategory] = useState('recent')
+  const [emojiSearch, setEmojiSearch] = useState('')
+  const [recentEmojis, setRecentEmojis] = useState(() => readRecentEmojis())
 
   const fileInputRef = useRef(null)
   const slashMenuRef = useRef(null)
@@ -129,14 +260,51 @@ export default function ClientChat() {
   const composerCursorRef = useRef(0)
   const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
+  const lastKnownScrollRef = useRef(null)
+  const pinTypingRowRef = useRef(false)
   const searchInputRef = useRef(null)
-  const isFirstLoad = useRef(true)
-  const restoredScrollTopRef = useRef(null)
-  const chatScrollStorageKey = `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
+  const initialScrollAppliedRef = useRef(false)
+  const pendingScrollRestoreRef = useRef(null)
+  const messageLoadRequestRef = useRef(0)
+  const brandNameRef = useRef(brandName)
+  const typingStopTimerRef = useRef(null)
+  const isTypingRef = useRef(false)
+  const chatScrollStorageKey = chatspaceScrollKey(brandName)
 
   useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
+  useEffect(() => { brandNameRef.current = brandName }, [brandName])
   useEffect(() => { setSlashCommandIndex(0) }, [inputMessage])
   useEffect(() => () => { dictationRef.current?.stop() }, [])
+  useEffect(() => () => {
+    window.clearTimeout(typingStopTimerRef.current)
+    if (isTypingRef.current) sendChatspaceTyping(user, false)
+  }, [user])
+  useEffect(() => {
+    const onBrandChanged = (event) => {
+      const nextBrand = String(event.detail?.name || activeBrandName() || 'Your Brand')
+      if (brandNameRef.current === nextBrand) return
+      // Capture before React clears/unmounts the current room. This avoids a
+      // transient scrollTop=0 from overwriting the actual reading position.
+      saveChatspaceScroll(
+        chatspaceScrollKey(brandNameRef.current),
+        scrollContainerRef.current,
+        lastKnownScrollRef.current,
+        true,
+      )
+      // Do not leave the previous brand's messages visible while the new room
+      // is being fetched.
+      setMessages([])
+      setLoading(true)
+      setSearchQuery('')
+      setMediaPanelOpen(false)
+      setEditingMessage(null)
+      setEditDraft('')
+      setEditReferences([])
+      setBrandName(nextBrand)
+    }
+    window.addEventListener('orb:brand-changed', onBrandChanged)
+    return () => window.removeEventListener('orb:brand-changed', onBrandChanged)
+  }, [])
 
   const readComposerState = (root) => {
     let text = ''
@@ -250,10 +418,30 @@ export default function ClientChat() {
   const handleScroll = () => {
     const el = scrollContainerRef.current
     if (!el) return
-    saveChatspaceScroll(chatScrollStorageKey, el)
+    lastKnownScrollRef.current = captureChatspaceScroll(el)
+    saveChatspaceScroll(chatScrollStorageKey, el, lastKnownScrollRef.current)
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom > 160) pinTypingRowRef.current = false
     setShowScrollBottom(distanceFromBottom > 160)
   }
+
+  const updateOwnTyping = useCallback((hasText) => {
+    window.clearTimeout(typingStopTimerRef.current)
+    if (!hasText) {
+      if (isTypingRef.current) sendChatspaceTyping(user, false)
+      isTypingRef.current = false
+      return
+    }
+    if (!isTypingRef.current) {
+      sendChatspaceTyping(user, true)
+      isTypingRef.current = true
+    }
+    // Stop even if the browser/tab disappears before a blur event arrives.
+    typingStopTimerRef.current = window.setTimeout(() => {
+      if (isTypingRef.current) sendChatspaceTyping(user, false)
+      isTypingRef.current = false
+    }, 1800)
+  }, [user])
 
   const scrollToBottom = (smooth = true) => {
     if (scrollContainerRef.current) {
@@ -265,8 +453,10 @@ export default function ClientChat() {
   }
 
   const loadMessages = async () => {
+    const requestId = ++messageLoadRequestRef.current
     try {
       const data = await getClientChatMessages(brandName, user)
+      if (requestId !== messageLoadRequestRef.current) return
       setMessages((current) => {
         const currentById = new Map(current.map((message) => [message.id, message]))
         const merged = data.map((message) => {
@@ -286,7 +476,7 @@ export default function ClientChat() {
         return merged.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
       })
     } finally {
-      setLoading(false)
+      if (requestId === messageLoadRequestRef.current) setLoading(false)
     }
   }
 
@@ -346,58 +536,115 @@ export default function ClientChat() {
   const goToPrevMatch = () => setSearchActiveIndex((i) => (i - 1 + searchMatchIds.length) % searchMatchIds.length)
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
-      if (isFirstLoad.current) {
-        const savedScrollTop = restoredScrollTopRef.current
-        if (Number.isFinite(savedScrollTop)) {
-          // Flow/message animations can briefly reset the container after the
-          // first paint. Restore through that settling window as well.
-          ;[0, 90, 280].forEach((delay) => window.setTimeout(() => {
-            const el = scrollContainerRef.current
-            if (!el) return
-            el.scrollTop = Math.min(savedScrollTop, Math.max(0, el.scrollHeight - el.clientHeight))
-            handleScroll()
-          }, delay))
-        } else {
-          scrollToBottom(false)
-        }
-        isFirstLoad.current = false
-      } else {
-        const el = scrollContainerRef.current
-        if (el) {
-          const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-          if (distanceFromBottom < 220) {
-            scrollToBottom(true)
-          }
-        }
-      }
-    }
-  }, [messages.length, loading])
-
-  useEffect(() => {
     try {
       const stored = chatspaceScrollMemory.has(chatScrollStorageKey)
-        ? String(chatspaceScrollMemory.get(chatScrollStorageKey))
+        ? chatspaceScrollMemory.get(chatScrollStorageKey)
         : window.sessionStorage.getItem(chatScrollStorageKey)
-      const parsed = stored === null ? null : Number(stored)
-      restoredScrollTopRef.current = Number.isFinite(parsed) ? parsed : null
+      const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored
+      // Snapshots from the old implementation contained just a numeric top
+      // offset. They can be stale (often 0), so only restore snapshots tied
+      // to a message that is still visible in the loaded conversation.
+      pendingScrollRestoreRef.current = parsed
+        && Number.isFinite(parsed.top)
+        && typeof parsed.anchorId === 'string'
+        && parsed.anchorId
+        ? parsed
+        : null
+      if (!pendingScrollRestoreRef.current) {
+        try { window.sessionStorage.removeItem(chatScrollStorageKey) } catch {}
+      }
     } catch {
-      restoredScrollTopRef.current = null
+      pendingScrollRestoreRef.current = null
     }
-    isFirstLoad.current = true
+    initialScrollAppliedRef.current = false
     return () => {
-      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current)
+      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current, lastKnownScrollRef.current, true)
     }
   }, [chatScrollStorageKey])
+
+  // Apply the initial position after the message DOM exists, before the
+  // browser paints it. A valid saved anchor wins; first-time visits fall back
+  // to the newest message at the bottom. This is deliberately separate from
+  // updates below so receiving a message never resets someone reading older
+  // history back to the beginning.
+  useLayoutEffect(() => {
+    if (loading || initialScrollAppliedRef.current) return
+    const element = scrollContainerRef.current
+    if (!element) return
+
+    const snapshot = pendingScrollRestoreRef.current
+    let nextTop = null
+    if (snapshot?.anchorId) {
+      const anchor = [...element.querySelectorAll('[data-msg-id]')]
+        .find((node) => node.dataset.msgId === snapshot.anchorId)
+      if (anchor) {
+        const containerTop = element.getBoundingClientRect().top
+        nextTop = element.scrollTop + anchor.getBoundingClientRect().top - containerTop - snapshot.anchorOffset
+      }
+    }
+
+    // Missing/deleted anchors and first visits should always start at the
+    // latest activity, never at the top.
+    if (!Number.isFinite(nextTop)) nextTop = element.scrollHeight
+    const maxTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    element.scrollTop = Math.max(0, Math.min(nextTop, maxTop))
+
+    pendingScrollRestoreRef.current = null
+    initialScrollAppliedRef.current = true
+    lastKnownScrollRef.current = captureChatspaceScroll(element)
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    setShowScrollBottom(distanceFromBottom > 160)
+  }, [chatScrollStorageKey, loading, messages.length])
+
+  // Stay pinned only when the reader was already near the latest message.
+  // If they are reading older history, retain their exact scroll position.
+  useEffect(() => {
+    if (loading || !initialScrollAppliedRef.current || !messages.length) return
+    const element = scrollContainerRef.current
+    if (!element) return
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    if (distanceFromBottom < 220) scrollToBottom(false)
+  }, [messages.length, loading])
+
+  // Typing is rendered as the final row in the conversation (rather than an
+  // overlay above the composer). Keep readers who are already at the latest
+  // message pinned to that row while it appears and disappears. People reading
+  // older history are intentionally left where they are.
+  useLayoutEffect(() => {
+    if (!initialScrollAppliedRef.current || !messages.length) return
+    const element = scrollContainerRef.current
+    if (!element) return
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    pinTypingRowRef.current = distanceFromBottom < 160
+    if (pinTypingRowRef.current) scrollToBottom(false)
+  }, [messages.length, typingUsers.length])
+
+  const pinTypingRowToBottom = useCallback(() => {
+    if (!pinTypingRowRef.current) return
+    const element = scrollContainerRef.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [])
 
   useEffect(() => {
     setLoading(true)
     loadMessages()
 
-    const handleUpdate = () => {
-      loadMessages()
+    const receiveTyping = (event) => {
+      if (event?.type !== 'typing' || String(event.userId) === String(user?.id)) return false
+      const userId = String(event.userId || '')
+      if (!userId) return true
+      if (!event.isTyping) {
+        setTypingUsers((current) => current.filter((person) => person.id !== userId))
+        return true
+      }
+      setTypingUsers((current) => [
+        ...current.filter((person) => person.id !== userId),
+        { id: userId, name: event.userName || 'Someone', avatar: event.avatar || '', expiresAt: Date.now() + 5000 },
+      ])
+      return true
     }
-    const onBrandChanged = () => {
+    const handleUpdate = (event) => {
+      if (receiveTyping(event?.detail?.event)) return
       loadMessages()
     }
     const onWsStatus = (e) => {
@@ -407,32 +654,52 @@ export default function ClientChat() {
     }
 
     window.addEventListener('orb:client-chat-updated', handleUpdate)
-    window.addEventListener('orb:brand-changed', onBrandChanged)
     window.addEventListener('orb:chatspace-ws-status', onWsStatus)
 
     // Realtime WebSocket & database sync
-    const unsubscribe = subscribeToChatMessages(brandName, () => {
-      loadMessages()
+    const unsubscribe = subscribeToChatMessages(brandName, (event) => {
+      if (!receiveTyping(event)) loadMessages()
     })
 
     return () => {
       window.removeEventListener('orb:client-chat-updated', handleUpdate)
-      window.removeEventListener('orb:brand-changed', onBrandChanged)
       window.removeEventListener('orb:chatspace-ws-status', onWsStatus)
       if (typeof unsubscribe === 'function') unsubscribe()
     }
   }, [brandName, user])
 
-  // Mark chat as read when viewing this brand space or when messages update
   useEffect(() => {
-    markChatspaceAsRead(brandName)
-  }, [brandName, messages.length])
+    const timer = window.setInterval(() => setTypingUsers((current) => current.filter((person) => person.expiresAt > Date.now())), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => { setTypingUsers([]) }, [brandName])
+
+  // Record the latest message this person has seen, then surface those
+  // positions as small reader avatars beneath the corresponding message.
+  useEffect(() => {
+    const latest = messages.at(-1)
+    if (!latest?.id) return
+    let live = true
+    markChatspaceAsRead(brandName, user, latest.id)
+      .catch(() => null)
+      .then(() => getChatspaceReadReceipts(brandName))
+      .then((receipts) => { if (live) setReadReceipts(receipts) })
+      .catch(() => { if (live) setReadReceipts([]) })
+    return () => { live = false }
+  }, [brandName, messages, user])
 
   useEffect(() => {
-    const onFocus = () => markChatspaceAsRead(brandName)
+    const refresh = () => getChatspaceReadReceipts(brandName).then(setReadReceipts).catch(() => setReadReceipts([]))
+    refresh()
+    return subscribeToChatReadReceipts(brandName, refresh)
+  }, [brandName])
+
+  useEffect(() => {
+    const onFocus = () => markChatspaceAsRead(brandName, user, messages.at(-1)?.id).catch(() => null)
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [brandName])
+  }, [brandName, messages, user])
 
   useEffect(() => {
     let live = true
@@ -445,10 +712,8 @@ export default function ClientChat() {
       }
     }
     loadAssignedMembers()
-    window.addEventListener('orb:brand-changed', loadAssignedMembers)
     return () => {
       live = false
-      window.removeEventListener('orb:brand-changed', loadAssignedMembers)
     }
   }, [brandName])
 
@@ -526,6 +791,7 @@ export default function ClientChat() {
       setContextMenu(null)
       setReactionMenuMsgId(null)
       setMentionMenuOpen(false)
+      setEmojiPickerOpen(false)
     }
     window.addEventListener('click', closeMenu)
     window.addEventListener('keydown', (e) => {
@@ -541,7 +807,7 @@ export default function ClientChat() {
     e.stopPropagation()
     // Clamp coordinates so menu stays visible inside viewport
     const menuWidth = 190
-    const menuHeight = 120
+    const menuHeight = 340
     const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10)
     const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10)
     setContextMenu({ x, y, message: msg })
@@ -612,6 +878,7 @@ export default function ClientChat() {
       .filter((reference) => positions.has(referenceKey(reference)))
       .map((reference) => ({ ...reference, position: positions.get(referenceKey(reference)) })))
     setInputMessage(val)
+    updateOwnTyping(Boolean(val.trim()))
 
     const textBeforeCursor = val.slice(0, cursorPos)
     const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\s]*)$/)
@@ -627,6 +894,38 @@ export default function ClientChat() {
       }
     }
     setMentionMenuOpen(false)
+  }
+
+  const emojiChoices = useMemo(() => {
+    const search = emojiSearch.trim()
+    if (!search) {
+      return emojiCategory === 'recent'
+        ? recentEmojis
+        : EMOJI_CATEGORIES.find((category) => category.id === emojiCategory)?.emojis || []
+    }
+    const all = EMOJI_CATEGORIES.flatMap((category) => category.emojis)
+    return [...new Set(all)].filter((emoji) => emoji.includes(search))
+  }, [emojiCategory, emojiSearch, recentEmojis])
+
+  const insertEmoji = (emoji) => {
+    const cursor = inputRef.current === document.activeElement
+      ? composerCursorPosition()
+      : Math.max(0, Math.min(inputMessage.length, composerCursorRef.current || inputMessage.length))
+    const nextText = `${inputMessage.slice(0, cursor)}${emoji}${inputMessage.slice(cursor)}`
+    setSelectedReferences((current) => current.map((reference) => (
+      Number.isFinite(reference.position) && reference.position > cursor
+        ? { ...reference, position: reference.position + emoji.length }
+        : reference
+    )))
+    try {
+      const nextRecent = [emoji, ...recentEmojis.filter((item) => item !== emoji)].slice(0, 24)
+      window.localStorage.setItem(EMOJI_RECENTS_KEY, JSON.stringify(nextRecent))
+      setRecentEmojis(nextRecent)
+    } catch {}
+    replaceComposerText(nextText, cursor + emoji.length)
+    updateOwnTyping(Boolean(nextText.trim()))
+    setEmojiPickerOpen(false)
+    setEmojiSearch('')
   }
 
   const insertMention = (target) => {
@@ -671,6 +970,7 @@ export default function ClientChat() {
     const mentionMatches = matches.map((m) => m.replace(/^@/, '').trim()).filter(Boolean)
 
     setInputMessage('')
+    updateOwnTyping(false)
     setComposerRevision((revision) => revision + 1)
     setReplyingTo(null)
     setAttachedFiles([])
@@ -781,6 +1081,86 @@ export default function ClientChat() {
     loadMessages()
   }
 
+  const handlePinMessage = async (message, hours) => {
+    if (!message?.id || pinningMessageId) return
+    setPinningMessageId(message.id)
+    try {
+      const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+      const pin = await pinChatspaceMessage({ messageId: message.id, expiresAt, currentUser: user })
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, ...pin } : item))
+      showToast(`Message pinned for ${hours === 24 ? '24 hours' : `${hours / 24} days`}.`)
+      setContextMenu(null)
+    } catch (error) {
+      showToast(error.message || 'Could not pin this message.', 'error')
+    } finally {
+      setPinningMessageId(null)
+    }
+  }
+
+  const handleDeleteForEveryone = async (message) => {
+    if (!message?.id || deletingMessageId || !isCurrentUser(message.sender)) return
+    if (!window.confirm('Unsend this message for everyone? This cannot be undone.')) return
+    setDeletingMessageId(message.id)
+    try {
+      await deleteChatspaceMessage({ brandName, message, currentUser: user })
+      setMessages((current) => current.filter((item) => item.id !== message.id))
+      if (replyingTo?.id === message.id) setReplyingTo(null)
+      setContextMenu(null)
+      showToast('Message unsent for everyone.')
+    } catch (error) {
+      showToast(error.message || 'Could not delete this message.', 'error')
+    } finally {
+      setDeletingMessageId(null)
+    }
+  }
+
+  const openMessageEditor = (message) => {
+    if (!message?.id || !isCurrentUser(message.sender)) return
+    const editable = editableRichMessage(message.content, message.references)
+    setEditingMessage(message)
+    setEditDraft(editable.text)
+    setEditReferences(editable.references)
+    setContextMenu(null)
+  }
+
+  const closeMessageEditor = () => {
+    if (savingEdit) return
+    setEditingMessage(null)
+    setEditDraft('')
+    setEditReferences([])
+  }
+
+  const handleSaveMessageEdit = async (event) => {
+    event.preventDefault()
+    if (!editingMessage || savingEdit || !isCurrentUser(editingMessage.sender)) return
+    const content = serializeRichMessage(editDraft, editReferences)
+    if (!editDraft.trim() && editReferences.length === 0) {
+      showToast('A message cannot be empty.', 'error')
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      const edited = await editChatspaceMessage({
+        brandName,
+        messageId: editingMessage.id,
+        content,
+        currentUser: user,
+      })
+      setMessages((current) => current.map((message) => (
+        message.id === edited.id ? { ...message, content: edited.content, editedAt: edited.editedAt } : message
+      )))
+      setEditingMessage(null)
+      setEditDraft('')
+      setEditReferences([])
+      showToast('Message edited.')
+    } catch (error) {
+      showToast(error.message || 'Could not edit this message.', 'error')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   const formatTime = (isoString) => {
     if (!isoString) return ''
     const date = new Date(isoString)
@@ -790,9 +1170,19 @@ export default function ClientChat() {
     }).format(date)
   }
 
-  const isClient = (sender) => {
-    return sender.role === 'client' || sender.id === user?.id
+  const isMessagePinned = (message) => {
+    const expiry = new Date(message?.pinnedUntil || 0).getTime()
+    return Number.isFinite(expiry) && expiry > Date.now()
   }
+
+  const formatPinExpiry = (isoString) => new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(isoString))
+
+  const isCurrentUser = (sender) => Boolean(user?.id && sender?.id === user.id)
 
   const renderStatus = (status) => {
     if (status === 'failed') {
@@ -869,8 +1259,22 @@ export default function ClientChat() {
   // as a second attachment layer. This preserves the writer's exact order:
   // “text, capsule, more text” remains that way after sending and reloading.
   const renderRichMessageContent = (content, references, fromClient, explicitMentions = []) => {
-    const value = String(content || '')
-    const availableReferences = Array.isArray(references) ? references : []
+    const storedReferences = Array.isArray(references) ? references : []
+    // Repair rows saved during the short compatibility window that appended a
+    // visible "(Shared: …)" copy after the real reference.
+    const sharedTitles = storedReferences.map((reference) => String(reference.title || '').trim()).filter(Boolean).join(', ')
+    const sharedSuffix = sharedTitles ? ` (Shared: ${sharedTitles})` : ''
+    const rawValue = String(content || '')
+    const legacyShared = !storedReferences.length && rawValue.match(/(?:^|\s)\(?Shared:\s*([^\)]+)\)?\s*$/i)
+    const recoveredReferences = legacyShared?.[1]?.trim()
+      ? [{ type: 'reference', id: `legacy-${legacyShared[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, title: legacyShared[1].trim(), subtitle: 'Shared reference' }]
+      : []
+    const availableReferences = storedReferences.length ? storedReferences : recoveredReferences
+    const value = sharedSuffix && rawValue.endsWith(sharedSuffix)
+      ? rawValue.slice(0, -sharedSuffix.length)
+      : legacyShared
+        ? rawValue.slice(0, legacyShared.index).trimEnd()
+      : rawValue
     const referencesByKey = new Map(availableReferences.map((reference) => [referenceKey(reference), reference]))
     const consumed = new Set()
     const parts = []
@@ -889,13 +1293,21 @@ export default function ClientChat() {
 
       let type = ''
       let id = ''
+      let tokenReference = null
       try {
-        type = decodeURIComponent(match[1])
-        id = decodeURIComponent(match[2])
+        if (match[3]) {
+          tokenReference = JSON.parse(decodeURIComponent(match[3]))
+          type = String(tokenReference?.type || '')
+          id = String(tokenReference?.id || '')
+        } else {
+          type = decodeURIComponent(match[1])
+          id = decodeURIComponent(match[2])
+        }
       } catch {
-        // A malformed legacy token is treated as normal text below.
+        // A malformed token receives a neutral capsule rather than exposing
+        // the internal storage marker to people in Chatspace.
       }
-      const reference = referencesByKey.get(`${type}:${id}`)
+      const reference = referencesByKey.get(`${type}:${id}`) || tokenReference || fallbackReference(type, id)
       if (reference) {
         consumed.add(referenceKey(reference))
         parts.push(
@@ -904,11 +1316,9 @@ export default function ClientChat() {
             references={[reference]}
             tone={fromClient ? 'dark' : 'light'}
             inline
-            className="mt-0"
+              className="mx-0.5 align-middle"
           />,
         )
-      } else {
-        parts.push(<React.Fragment key={`unknown-${match.index}`}>{match[0]}</React.Fragment>)
       }
       cursor = referenceTokenPattern.lastIndex
     }
@@ -931,7 +1341,7 @@ export default function ClientChat() {
           references={legacyReferences}
           tone={fromClient ? 'dark' : 'light'}
           inline
-          className="mt-0"
+          className="mx-0.5 align-middle"
         />,
       )
     }
@@ -1137,9 +1547,13 @@ export default function ClientChat() {
         ) : (
           <AnimatePresence initial={false}>
             {displayedMessages.map((msg, index) => {
-              const fromClient = isClient(msg.sender)
+              const fromClient = isCurrentUser(msg.sender)
               const isJustSent = msg.id === justSentId
+              const isPinned = isMessagePinned(msg)
               const reactions = msg.reactions || {}
+              const readers = fromClient
+                ? readReceipts.filter((receipt) => String(receipt.last_read_message_id) === String(msg.id) && String(receipt.user_id) !== String(user?.id))
+                : []
               const myNameLower = (user?.name || user?.email?.split('@')[0] || '').toLowerCase()
               const myFirstName = myNameLower ? myNameLower.split(' ')[0] : ''
               const isMentionedToMe = !fromClient && (
@@ -1193,6 +1607,9 @@ export default function ClientChat() {
                     <span className="text-[10px] text-slate-400 font-medium">
                       {formatTime(msg.createdAt)}
                     </span>
+                    {msg.editedAt && (
+                      <span className="text-[10px] font-medium text-slate-400">Edited</span>
+                    )}
                     {!fromClient && (
                       <span className="rounded bg-purple/10 px-1.5 py-0.2 text-[9px] font-bold text-purple uppercase tracking-wider">
                         Orb Team
@@ -1200,6 +1617,13 @@ export default function ClientChat() {
                     )}
 
                   </div>
+
+                  {isPinned && (
+                    <div className={`mb-1 flex items-center gap-1.5 px-1 text-[10px] font-bold ${fromClient ? 'text-primary' : 'text-purple'}`} title={`Pinned by ${msg.pinnedByName || 'a teammate'} until ${formatPinExpiry(msg.pinnedUntil)}`}>
+                      <Pin size={11} fill="currentColor" />
+                      <span>Pinned until {formatPinExpiry(msg.pinnedUntil)}</span>
+                    </div>
+                  )}
 
                   {/* Quoted Reply Snippet if present */}
                   {msg.replyToSnippet && (
@@ -1238,7 +1662,7 @@ export default function ClientChat() {
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
-                      <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="leading-relaxed">
                         {renderRichMessageContent(msg.content, msg.references, fromClient, msg.mentions)}
                       </div>
 
@@ -1369,6 +1793,26 @@ export default function ClientChat() {
                     </div>
                   )}
 
+                  {/* Instagram-style read receipts: each avatar marks the
+                      latest message that teammate has reached. */}
+                  {readers.length > 0 && (
+                    <div className="mt-1.5 flex items-center justify-end pr-1" title={`Read by ${readers.map((reader) => reader.reader_name || 'Member').join(', ')}`}>
+                      <div className="flex -space-x-1.5">
+                        {readers.slice(0, 4).map((reader) => (
+                          <Avatar
+                            key={reader.user_id}
+                            name={reader.reader_name}
+                            src={reader.avatar}
+                            sources={reader.avatarSources}
+                            className="h-5 w-5 rounded-full border-2 border-[#FBFBFC] text-[8px] shadow-none"
+                            fallbackClassName="border-[#FBFBFC] bg-slate-500"
+                          />
+                        ))}
+                        {readers.length > 4 && <span className="grid h-5 w-5 place-items-center rounded-full border-2 border-[#FBFBFC] bg-slate-200 text-[8px] font-bold text-slate-600">+{readers.length - 4}</span>}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Footer status (Sent, Read, Failed) & Timestamp */}
                   {fromClient && (
                     <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-400 px-1">
@@ -1382,6 +1826,39 @@ export default function ClientChat() {
         </AnimatePresence>
         )}
         <div ref={messagesEndRef} />
+
+        <AnimatePresence initial={false}>
+          {typingUsers.length > 0 && messages.length > 0 && (
+            <motion.div
+              key="chatspace-typing"
+              initial={{ opacity: 0, y: 8, height: 0, marginTop: 0 }}
+              animate={{ opacity: 1, y: 0, height: 40, marginTop: 20 }}
+              exit={{ opacity: 0, y: 6, height: 0, marginTop: 0 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              onUpdate={pinTypingRowToBottom}
+              className="flex items-center gap-2 overflow-hidden"
+              aria-live="polite"
+              aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}
+            >
+              <div className="flex -space-x-2">
+                {typingUsers.slice(0, 3).map((person) => (
+                  <Avatar
+                    key={person.id}
+                    name={person.name}
+                    src={person.avatar}
+                    className="h-8 w-8 rounded-full border-2 border-white text-[10px] shadow-sm"
+                    fallbackClassName="border-white bg-slate-500"
+                  />
+                ))}
+              </div>
+              <span className="inline-flex h-10 items-center gap-1 rounded-full bg-slate-100 px-4 shadow-sm">
+                <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.2s]" />
+                <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.1s]" />
+                <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500" />
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Scroll To Bottom Floating Button */}
         {showScrollBottom && (
@@ -1403,7 +1880,7 @@ export default function ClientChat() {
           <div className="flex items-center gap-2 truncate">
             <CornerDownRight size={14} className="text-purple shrink-0" />
             <span className="font-bold text-purple">
-              Replying to {isClient(replyingTo.sender) ? 'yourself' : replyingTo.sender.name}:
+              Replying to {isCurrentUser(replyingTo.sender) ? 'yourself' : replyingTo.sender.name}:
             </span>
             <span className="italic text-slate-600 truncate">"{replyingTo.content}"</span>
             <span className="text-[10px] text-slate-400 shrink-0">(#{replyingTo.id.slice(0, 6)})</span>
@@ -1442,13 +1919,7 @@ export default function ClientChat() {
                       isSelected ? 'bg-purple/10 text-purple font-semibold' : 'text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    {item.avatar ? (
-                      <img src={item.avatar} alt={item.handle} className="h-6 w-6 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="grid h-6 w-6 place-items-center rounded-lg bg-slate-100 text-xs shrink-0">
-                        {item.icon || item.initials || '@'}
-                      </span>
-                    )}
+                    <Avatar name={item.handle} src={item.avatar} sources={item.avatarSources} className="h-6 w-6 shrink-0 rounded-full border-0 text-[10px]" fallbackClassName="border-0 bg-slate-100 text-slate-500" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold">{item.label}</span>
@@ -1465,6 +1936,63 @@ export default function ClientChat() {
                   </button>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {emojiPickerOpen && (
+          <div
+            className="absolute bottom-full left-4 z-30 mb-2 w-80 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl animate-in fade-in zoom-in-95"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="relative mb-2">
+              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                autoFocus
+                value={emojiSearch}
+                onChange={(event) => setEmojiSearch(event.target.value)}
+                placeholder="Search emoji"
+                className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-2 text-xs text-slate-700 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+            {!emojiSearch && (
+              <div className="mb-2 flex overflow-x-auto border-b border-slate-100 pb-1">
+                <button
+                  type="button"
+                  onClick={() => setEmojiCategory('recent')}
+                  title="Recently used"
+                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-base ${emojiCategory === 'recent' ? 'bg-primary/10' : 'hover:bg-slate-100'}`}
+                >
+                  🕘
+                </button>
+                {EMOJI_CATEGORIES.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setEmojiCategory(category.id)}
+                    title={category.label}
+                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-base ${emojiCategory === category.id ? 'bg-primary/10' : 'hover:bg-slate-100'}`}
+                  >
+                    {category.icon}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grid max-h-52 grid-cols-8 gap-1 overflow-y-auto pr-0.5">
+              {emojiChoices.length ? emojiChoices.map((emoji, index) => (
+                <button
+                  key={`${emoji}-${index}`}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => insertEmoji(emoji)}
+                  className="grid h-8 place-items-center rounded-md text-lg transition hover:bg-slate-100 hover:scale-110"
+                  aria-label={`Add ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              )) : (
+                <p className="col-span-8 py-5 text-center text-xs font-medium text-slate-400">No emoji found</p>
+              )}
             </div>
           </div>
         )}
@@ -1544,16 +2072,32 @@ export default function ClientChat() {
               />
             </div>
             <div className="flex items-center justify-between px-1">
-              <button
-                type="button"
-                disabled={uploading || sending}
-                onClick={() => fileInputRef.current?.click()}
-                className="grid h-8 w-8 place-items-center rounded-lg text-primary transition hover:bg-white/70 disabled:opacity-40"
-                title="Attach image or document"
-                aria-label="Attach image or document"
-              >
-                {uploading ? <Loader2 size={17} className="animate-spin" /> : <Plus size={19} />}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={uploading || sending}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="grid h-8 w-8 place-items-center rounded-lg text-primary transition hover:bg-white/70 disabled:opacity-40"
+                  title="Attach image or document"
+                  aria-label="Attach image or document"
+                >
+                  {uploading ? <Loader2 size={17} className="animate-spin" /> : <Plus size={19} />}
+                </button>
+                <button
+                  type="button"
+                  disabled={sending || uploading}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setEmojiPickerOpen((open) => !open)
+                    setMentionMenuOpen(false)
+                  }}
+                  className={`grid h-8 w-8 place-items-center rounded-lg text-primary/75 transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 ${emojiPickerOpen ? 'bg-white text-primary ring-1 ring-primary/20' : ''}`}
+                  title="Add emoji"
+                  aria-label="Add emoji"
+                >
+                  <Smile size={17} />
+                </button>
+              </div>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -1583,6 +2127,59 @@ export default function ClientChat() {
           <span>Right-click any message to react or reply</span>
         </div>
       </div>
+
+      {editingMessage && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/30 p-4 backdrop-blur-[1px]"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeMessageEditor()
+          }}
+        >
+          <form
+            onSubmit={handleSaveMessageEdit}
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-message-title"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-slate-900">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Pencil size={16} /></span>
+                <div>
+                  <h2 id="edit-message-title" className="text-sm font-bold">Edit message</h2>
+                  <p className="text-[11px] text-slate-500">Changes are visible to everyone in this chat.</p>
+                </div>
+              </div>
+              <button type="button" onClick={closeMessageEditor} disabled={savingEdit} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" aria-label="Close editor">
+                <X size={17} />
+              </button>
+            </div>
+            {editReferences.length > 0 && (
+              <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Attached capsules stay in place</p>
+                <ChatReferenceCapsules references={editReferences} tone="light" inline className="gap-1" />
+              </div>
+            )}
+            <textarea
+              autoFocus
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+              rows={5}
+              maxLength={10000}
+              className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-800 outline-none transition focus:border-primary/60 focus:bg-white focus:ring-2 focus:ring-primary/10"
+              placeholder="Write your message"
+            />
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button type="button" onClick={closeMessageEditor} disabled={savingEdit} className="rounded-lg px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+              <button type="submit" disabled={savingEdit || (!editDraft.trim() && editReferences.length === 0)} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-bold text-white transition hover:bg-primary-dark disabled:cursor-wait disabled:opacity-60">
+                {savingEdit && <Loader2 size={13} className="animate-spin" />}
+                {savingEdit ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Right-Click Context Menu */}
       {contextMenu && (
@@ -1625,6 +2222,17 @@ export default function ClientChat() {
             <span>Reply to message</span>
           </button>
 
+          {isCurrentUser(contextMenu.message.sender) && (
+            <button
+              type="button"
+              onClick={() => openMessageEditor(contextMenu.message)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-purple/10 hover:text-purple"
+            >
+              <Pencil size={14} className="text-purple" />
+              <span>Edit message</span>
+            </button>
+          )}
+
           {/* Copy Text Option */}
           <button
             type="button"
@@ -1638,10 +2246,41 @@ export default function ClientChat() {
             <Quote size={14} className="text-slate-400" />
             <span>Copy message</span>
           </button>
+
+          {/* Pin duration choices */}
+          <div className="mt-1 border-t border-slate-100 px-2.5 pb-2 pt-2">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <Pin size={12} /> Pin message for
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {PIN_DURATIONS.map(({ label, hours }) => (
+                <button
+                  key={hours}
+                  type="button"
+                  disabled={pinningMessageId === contextMenu.message.id}
+                  onClick={() => handlePinMessage(contextMenu.message, hours)}
+                  className="rounded-md bg-slate-100 px-1 py-1.5 text-[10px] font-bold text-slate-600 transition hover:bg-purple hover:text-white disabled:cursor-wait disabled:opacity-60"
+                >
+                  {pinningMessageId === contextMenu.message.id ? 'Pinning…' : label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isCurrentUser(contextMenu.message.sender) && (
+            <button
+              type="button"
+              disabled={deletingMessageId === contextMenu.message.id}
+              onClick={() => handleDeleteForEveryone(contextMenu.message)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Trash2 size={14} />
+              <span>{deletingMessageId === contextMenu.message.id ? 'Unsending…' : 'Unsend for everyone'}</span>
+            </button>
+          )}
         </div>
       )}
     </div>
     </div>
   )
 }
-
