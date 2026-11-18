@@ -310,7 +310,7 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
               aria-expanded={open}
               onClick={toggle}
             >
-              <Avatar name={user?.name} src={user?.avatar} sources={user?.avatarSources} />
+              <Avatar name={user?.name} src={user?.avatar} sources={user?.avatarSources} avatarKey={user?.avatarKey} />
               <ChevronDown size={15} />
             </button>
           )}

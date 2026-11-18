@@ -1240,7 +1240,7 @@ export default function ClientChat() {
                 >
                   {/* Profile Pic / Avatar */}
                 <div className="shrink-0 pt-6">
-                  <Avatar name={msg.sender.name} src={msg.sender.avatar} sources={msg.sender.avatarSources} className="rounded-full border border-slate-200 shadow-2xs" fallbackClassName={fromClient ? 'bg-purple border-purple/80' : 'bg-slate-800 border-slate-700'} />
+                  <Avatar name={msg.sender.name} src={msg.sender.avatar} sources={msg.sender.avatarSources} avatarKey={msg.sender.avatarKey} className="rounded-full border border-slate-200 shadow-2xs" fallbackClassName={fromClient ? 'bg-purple border-purple/80' : 'bg-slate-800 border-slate-700'} />
                 </div>
 
                 {/* Message Bubble + Actions */}
@@ -1502,13 +1502,7 @@ export default function ClientChat() {
                       isSelected ? 'bg-purple/10 text-purple font-semibold' : 'text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    {item.avatar ? (
-                      <img src={item.avatar} alt={item.handle} className="h-6 w-6 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="grid h-6 w-6 place-items-center rounded-lg bg-slate-100 text-xs shrink-0">
-                        {item.icon || item.initials || '@'}
-                      </span>
-                    )}
+                    <Avatar name={item.handle} src={item.avatar} sources={item.avatarSources} avatarKey={item.avatarKey} className="h-6 w-6 shrink-0 rounded-full border-0 text-[10px]" fallbackClassName="border-0 bg-slate-100 text-slate-500" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold">{item.label}</span>

@@ -277,6 +277,7 @@ export const listBrandChatMembers = async (brandId = activeBrandId()) => {
       label: `@${String(member.name).trim()}`,
       role: String(member.role || 'client').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
       description: member.is_online ? 'Online' : 'Offline',
+      avatarKey: member.avatar_key,
       avatar: avatarUrlFromKey(member.avatar_key),
       avatarSources: avatarUrlsFromKey(member.avatar_key),
       initials: String(member.name).trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
@@ -332,6 +333,7 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
             id: row.sender_id || 'unknown',
             name: row.sender_name,
             role: row.sender_role,
+            avatarKey: row.sender_avatar,
             avatar: avatarUrlFromKey(row.sender_avatar),
             avatarSources: avatarUrlsFromKey(row.sender_avatar),
             initials: (row.sender_name || 'U')
@@ -410,6 +412,7 @@ export const sendClientChatMessage = async ({
     id: currentUser?.id || `usr-${Date.now()}`,
     name: currentUser?.name || currentUser?.email?.split('@')[0] || 'Client User',
     role: currentUser?.role || 'client',
+    avatarKey: currentUser?.avatarKey || currentUser?.avatar || '',
     avatar: avatarUrlFromKey(currentUser?.avatarKey || currentUser?.avatar),
     avatarSources: avatarUrlsFromKey(currentUser?.avatarKey || currentUser?.avatar),
     initials: (currentUser?.name || 'CU')
