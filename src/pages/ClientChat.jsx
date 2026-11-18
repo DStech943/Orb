@@ -15,12 +15,15 @@ import {
   Mic,
   MicOff,
   Paperclip,
+  Pencil,
   Plus,
+  Pin,
   Quote,
   Search,
   Smile,
   Video,
   X,
+  Trash2,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useAuth } from '../context/AuthContext'
@@ -31,10 +34,13 @@ import { activeBrandId, activeBrandName } from '../services/orbApi'
 import { startBrowserDictation } from '../lib/browserDictation'
 import {
   PRESET_REACTIONS,
+  deleteChatspaceMessage,
+  editChatspaceMessage,
   getClientChatMessages,
   getChatspaceReadReceipts,
   listBrandChatMembers,
   markChatspaceAsRead,
+  pinChatspaceMessage,
   sendChatspaceTyping,
   sendClientChatMessage,
   subscribeToChatMessages,
@@ -53,6 +59,27 @@ const PRESET_MENTIONS = [
 ]
 
 const SLASH_COMMAND_IDS = ['products', 'oos', 'nos', 'flows', 'operation', 'template', 'sheet']
+const PIN_DURATIONS = [
+  { label: '24 hours', hours: 24 },
+  { label: '7 days', hours: 24 * 7 },
+  { label: '30 days', hours: 24 * 30 },
+]
+const EMOJI_RECENTS_KEY = 'orb:chatspace:recent-emojis'
+const EMOJI_CATEGORIES = [
+  { id: 'smileys', icon: '😀', label: 'Smileys', emojis: ['😀', '😃', '😄', '😁', '😅', '😂', '🙂', '🙃', '😉', '😊', '😍', '😘', '😎', '🤔', '😅', '😭', '😡', '🤯', '🥳', '🤝'] },
+  { id: 'gestures', icon: '👍', label: 'Gestures', emojis: ['👋', '🤚', '✋', '👌', '🤞', '🤝', '🙏', '👍', '👎', '👏', '🙌', '💪', '👀', '🫡', '✍️', '💯'] },
+  { id: 'hearts', icon: '❤️', label: 'Hearts', emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '💔', '💕', '💖', '✨', '🔥', '🎉'] },
+  { id: 'nature', icon: '🌿', label: 'Nature', emojis: ['🌿', '🌸', '🌻', '🌞', '🌈', '⭐', '🌙', '🌊', '🐶', '🐱', '🐝', '🦋', '🍀', '🌍'] },
+  { id: 'objects', icon: '💡', label: 'Objects', emojis: ['💡', '📦', '🛍️', '🚚', '📞', '💬', '📎', '📌', '✅', '⚠️', '❌', '🔔', '🧠', '🛠️'] },
+]
+const DEFAULT_RECENT_EMOJIS = ['😊', '👍', '🙏', '❤️', '😂', '✅', '🎉', '👋']
+const readRecentEmojis = () => {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(EMOJI_RECENTS_KEY) || '[]')
+    if (Array.isArray(stored) && stored.length) return stored.filter((emoji) => typeof emoji === 'string').slice(0, 24)
+  } catch {}
+  return DEFAULT_RECENT_EMOJIS
+}
 const chatspaceScrollMemory = new Map()
 const chatspaceScrollKey = (brandName) => `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
 const referenceKey = (reference = {}) => `${reference.type || 'reference'}:${reference.id || reference.title || 'item'}`
@@ -108,6 +135,49 @@ const serializeRichMessage = (text, references = []) => {
     cursor = insertionPoint
   })
   return `${output}${value.slice(cursor)}`
+}
+// Convert the stored rich-message token format back into editable text while
+// retaining each capsule at the place where it was originally written.
+const editableRichMessage = (content, references = []) => {
+  const availableReferences = Array.isArray(references) ? references : []
+  const referencesByKey = new Map(availableReferences.map((reference) => [referenceKey(reference), reference]))
+  const consumed = new Set()
+  const positionedReferences = []
+  const value = String(content || '')
+  let text = ''
+  let cursor = 0
+  let match
+
+  referenceTokenPattern.lastIndex = 0
+  while ((match = referenceTokenPattern.exec(value))) {
+    text += value.slice(cursor, match.index)
+    let type = ''
+    let id = ''
+    let tokenReference = null
+    try {
+      if (match[3]) {
+        tokenReference = JSON.parse(decodeURIComponent(match[3]))
+        type = String(tokenReference?.type || '')
+        id = String(tokenReference?.id || '')
+      } else {
+        type = decodeURIComponent(match[1])
+        id = decodeURIComponent(match[2])
+      }
+    } catch {}
+    const reference = referencesByKey.get(`${type}:${id}`) || tokenReference || fallbackReference(type, id)
+    positionedReferences.push({ ...reference, position: text.length })
+    consumed.add(referenceKey(reference))
+    cursor = referenceTokenPattern.lastIndex
+  }
+  text += value.slice(cursor)
+
+  // Older messages may have references only in JSONB. Keep them attached to
+  // the editable message rather than silently removing them on save.
+  availableReferences
+    .filter((reference) => !consumed.has(referenceKey(reference)))
+    .forEach((reference) => positionedReferences.push({ ...reference, position: text.length }))
+
+  return { text, references: positionedReferences }
 }
 const captureChatspaceScroll = (element) => {
   if (!element || !Number.isFinite(element.scrollTop)) return null
@@ -169,6 +239,16 @@ export default function ClientChat() {
   const [assignedMembers, setAssignedMembers] = useState([])
   const [readReceipts, setReadReceipts] = useState([])
   const [typingUsers, setTypingUsers] = useState([])
+  const [pinningMessageId, setPinningMessageId] = useState(null)
+  const [deletingMessageId, setDeletingMessageId] = useState(null)
+  const [editingMessage, setEditingMessage] = useState(null)
+  const [editDraft, setEditDraft] = useState('')
+  const [editReferences, setEditReferences] = useState([])
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
+  const [emojiCategory, setEmojiCategory] = useState('recent')
+  const [emojiSearch, setEmojiSearch] = useState('')
+  const [recentEmojis, setRecentEmojis] = useState(() => readRecentEmojis())
 
   const fileInputRef = useRef(null)
   const slashMenuRef = useRef(null)
@@ -216,6 +296,9 @@ export default function ClientChat() {
       setLoading(true)
       setSearchQuery('')
       setMediaPanelOpen(false)
+      setEditingMessage(null)
+      setEditDraft('')
+      setEditReferences([])
       setBrandName(nextBrand)
     }
     window.addEventListener('orb:brand-changed', onBrandChanged)
@@ -707,6 +790,7 @@ export default function ClientChat() {
       setContextMenu(null)
       setReactionMenuMsgId(null)
       setMentionMenuOpen(false)
+      setEmojiPickerOpen(false)
     }
     window.addEventListener('click', closeMenu)
     window.addEventListener('keydown', (e) => {
@@ -722,7 +806,7 @@ export default function ClientChat() {
     e.stopPropagation()
     // Clamp coordinates so menu stays visible inside viewport
     const menuWidth = 190
-    const menuHeight = 120
+    const menuHeight = 340
     const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10)
     const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10)
     setContextMenu({ x, y, message: msg })
@@ -809,6 +893,38 @@ export default function ClientChat() {
       }
     }
     setMentionMenuOpen(false)
+  }
+
+  const emojiChoices = useMemo(() => {
+    const search = emojiSearch.trim()
+    if (!search) {
+      return emojiCategory === 'recent'
+        ? recentEmojis
+        : EMOJI_CATEGORIES.find((category) => category.id === emojiCategory)?.emojis || []
+    }
+    const all = EMOJI_CATEGORIES.flatMap((category) => category.emojis)
+    return [...new Set(all)].filter((emoji) => emoji.includes(search))
+  }, [emojiCategory, emojiSearch, recentEmojis])
+
+  const insertEmoji = (emoji) => {
+    const cursor = inputRef.current === document.activeElement
+      ? composerCursorPosition()
+      : Math.max(0, Math.min(inputMessage.length, composerCursorRef.current || inputMessage.length))
+    const nextText = `${inputMessage.slice(0, cursor)}${emoji}${inputMessage.slice(cursor)}`
+    setSelectedReferences((current) => current.map((reference) => (
+      Number.isFinite(reference.position) && reference.position > cursor
+        ? { ...reference, position: reference.position + emoji.length }
+        : reference
+    )))
+    try {
+      const nextRecent = [emoji, ...recentEmojis.filter((item) => item !== emoji)].slice(0, 24)
+      window.localStorage.setItem(EMOJI_RECENTS_KEY, JSON.stringify(nextRecent))
+      setRecentEmojis(nextRecent)
+    } catch {}
+    replaceComposerText(nextText, cursor + emoji.length)
+    updateOwnTyping(Boolean(nextText.trim()))
+    setEmojiPickerOpen(false)
+    setEmojiSearch('')
   }
 
   const insertMention = (target) => {
@@ -964,6 +1080,86 @@ export default function ClientChat() {
     loadMessages()
   }
 
+  const handlePinMessage = async (message, hours) => {
+    if (!message?.id || pinningMessageId) return
+    setPinningMessageId(message.id)
+    try {
+      const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+      const pin = await pinChatspaceMessage({ messageId: message.id, expiresAt, currentUser: user })
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, ...pin } : item))
+      showToast(`Message pinned for ${hours === 24 ? '24 hours' : `${hours / 24} days`}.`)
+      setContextMenu(null)
+    } catch (error) {
+      showToast(error.message || 'Could not pin this message.', 'error')
+    } finally {
+      setPinningMessageId(null)
+    }
+  }
+
+  const handleDeleteForEveryone = async (message) => {
+    if (!message?.id || deletingMessageId || !isCurrentUser(message.sender)) return
+    if (!window.confirm('Unsend this message for everyone? This cannot be undone.')) return
+    setDeletingMessageId(message.id)
+    try {
+      await deleteChatspaceMessage({ brandName, message, currentUser: user })
+      setMessages((current) => current.filter((item) => item.id !== message.id))
+      if (replyingTo?.id === message.id) setReplyingTo(null)
+      setContextMenu(null)
+      showToast('Message unsent for everyone.')
+    } catch (error) {
+      showToast(error.message || 'Could not delete this message.', 'error')
+    } finally {
+      setDeletingMessageId(null)
+    }
+  }
+
+  const openMessageEditor = (message) => {
+    if (!message?.id || !isCurrentUser(message.sender)) return
+    const editable = editableRichMessage(message.content, message.references)
+    setEditingMessage(message)
+    setEditDraft(editable.text)
+    setEditReferences(editable.references)
+    setContextMenu(null)
+  }
+
+  const closeMessageEditor = () => {
+    if (savingEdit) return
+    setEditingMessage(null)
+    setEditDraft('')
+    setEditReferences([])
+  }
+
+  const handleSaveMessageEdit = async (event) => {
+    event.preventDefault()
+    if (!editingMessage || savingEdit || !isCurrentUser(editingMessage.sender)) return
+    const content = serializeRichMessage(editDraft, editReferences)
+    if (!editDraft.trim() && editReferences.length === 0) {
+      showToast('A message cannot be empty.', 'error')
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      const edited = await editChatspaceMessage({
+        brandName,
+        messageId: editingMessage.id,
+        content,
+        currentUser: user,
+      })
+      setMessages((current) => current.map((message) => (
+        message.id === edited.id ? { ...message, content: edited.content, editedAt: edited.editedAt } : message
+      )))
+      setEditingMessage(null)
+      setEditDraft('')
+      setEditReferences([])
+      showToast('Message edited.')
+    } catch (error) {
+      showToast(error.message || 'Could not edit this message.', 'error')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   const formatTime = (isoString) => {
     if (!isoString) return ''
     const date = new Date(isoString)
@@ -972,6 +1168,18 @@ export default function ClientChat() {
       minute: '2-digit',
     }).format(date)
   }
+
+  const isMessagePinned = (message) => {
+    const expiry = new Date(message?.pinnedUntil || 0).getTime()
+    return Number.isFinite(expiry) && expiry > Date.now()
+  }
+
+  const formatPinExpiry = (isoString) => new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(isoString))
 
   const isCurrentUser = (sender) => Boolean(user?.id && sender?.id === user.id)
 
@@ -1107,7 +1315,7 @@ export default function ClientChat() {
             references={[reference]}
             tone={fromClient ? 'dark' : 'light'}
             inline
-            className="mt-0"
+              className="mx-0.5 align-middle"
           />,
         )
       }
@@ -1132,7 +1340,7 @@ export default function ClientChat() {
           references={legacyReferences}
           tone={fromClient ? 'dark' : 'light'}
           inline
-          className="mt-0"
+          className="mx-0.5 align-middle"
         />,
       )
     }
@@ -1338,6 +1546,7 @@ export default function ClientChat() {
             {displayedMessages.map((msg, index) => {
               const fromClient = isCurrentUser(msg.sender)
               const isJustSent = msg.id === justSentId
+              const isPinned = isMessagePinned(msg)
               const reactions = msg.reactions || {}
               const readers = fromClient
                 ? readReceipts.filter((receipt) => String(receipt.last_read_message_id) === String(msg.id) && String(receipt.user_id) !== String(user?.id))
@@ -1395,6 +1604,9 @@ export default function ClientChat() {
                     <span className="text-[10px] text-slate-400 font-medium">
                       {formatTime(msg.createdAt)}
                     </span>
+                    {msg.editedAt && (
+                      <span className="text-[10px] font-medium text-slate-400">Edited</span>
+                    )}
                     {!fromClient && (
                       <span className="rounded bg-purple/10 px-1.5 py-0.2 text-[9px] font-bold text-purple uppercase tracking-wider">
                         Orb Team
@@ -1402,6 +1614,13 @@ export default function ClientChat() {
                     )}
 
                   </div>
+
+                  {isPinned && (
+                    <div className={`mb-1 flex items-center gap-1.5 px-1 text-[10px] font-bold ${fromClient ? 'text-primary' : 'text-purple'}`} title={`Pinned by ${msg.pinnedByName || 'a teammate'} until ${formatPinExpiry(msg.pinnedUntil)}`}>
+                      <Pin size={11} fill="currentColor" />
+                      <span>Pinned until {formatPinExpiry(msg.pinnedUntil)}</span>
+                    </div>
+                  )}
 
                   {/* Quoted Reply Snippet if present */}
                   {msg.replyToSnippet && (
@@ -1440,7 +1659,7 @@ export default function ClientChat() {
                           : 'rounded-tl-xs border border-slate-200/90 bg-white text-slate-800'
                       }`}
                     >
-                      <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="leading-relaxed">
                         {renderRichMessageContent(msg.content, msg.references, fromClient, msg.mentions)}
                       </div>
 
@@ -1718,6 +1937,63 @@ export default function ClientChat() {
           </div>
         )}
 
+        {emojiPickerOpen && (
+          <div
+            className="absolute bottom-full left-4 z-30 mb-2 w-80 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl animate-in fade-in zoom-in-95"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="relative mb-2">
+              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                autoFocus
+                value={emojiSearch}
+                onChange={(event) => setEmojiSearch(event.target.value)}
+                placeholder="Search emoji"
+                className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-2 text-xs text-slate-700 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+            {!emojiSearch && (
+              <div className="mb-2 flex overflow-x-auto border-b border-slate-100 pb-1">
+                <button
+                  type="button"
+                  onClick={() => setEmojiCategory('recent')}
+                  title="Recently used"
+                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-base ${emojiCategory === 'recent' ? 'bg-primary/10' : 'hover:bg-slate-100'}`}
+                >
+                  🕘
+                </button>
+                {EMOJI_CATEGORIES.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setEmojiCategory(category.id)}
+                    title={category.label}
+                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-base ${emojiCategory === category.id ? 'bg-primary/10' : 'hover:bg-slate-100'}`}
+                  >
+                    {category.icon}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grid max-h-52 grid-cols-8 gap-1 overflow-y-auto pr-0.5">
+              {emojiChoices.length ? emojiChoices.map((emoji, index) => (
+                <button
+                  key={`${emoji}-${index}`}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => insertEmoji(emoji)}
+                  className="grid h-8 place-items-center rounded-md text-lg transition hover:bg-slate-100 hover:scale-110"
+                  aria-label={`Add ${emoji}`}
+                >
+                  {emoji}
+                </button>
+              )) : (
+                <p className="col-span-8 py-5 text-center text-xs font-medium text-slate-400">No emoji found</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Attachment preview bar if attachments exist */}
         {attachedFiles.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
@@ -1793,16 +2069,32 @@ export default function ClientChat() {
               />
             </div>
             <div className="flex items-center justify-between px-1">
-              <button
-                type="button"
-                disabled={uploading || sending}
-                onClick={() => fileInputRef.current?.click()}
-                className="grid h-8 w-8 place-items-center rounded-lg text-primary transition hover:bg-white/70 disabled:opacity-40"
-                title="Attach image or document"
-                aria-label="Attach image or document"
-              >
-                {uploading ? <Loader2 size={17} className="animate-spin" /> : <Plus size={19} />}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={uploading || sending}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="grid h-8 w-8 place-items-center rounded-lg text-primary transition hover:bg-white/70 disabled:opacity-40"
+                  title="Attach image or document"
+                  aria-label="Attach image or document"
+                >
+                  {uploading ? <Loader2 size={17} className="animate-spin" /> : <Plus size={19} />}
+                </button>
+                <button
+                  type="button"
+                  disabled={sending || uploading}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setEmojiPickerOpen((open) => !open)
+                    setMentionMenuOpen(false)
+                  }}
+                  className={`grid h-8 w-8 place-items-center rounded-lg text-primary/75 transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-40 ${emojiPickerOpen ? 'bg-white text-primary ring-1 ring-primary/20' : ''}`}
+                  title="Add emoji"
+                  aria-label="Add emoji"
+                >
+                  <Smile size={17} />
+                </button>
+              </div>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -1832,6 +2124,59 @@ export default function ClientChat() {
           <span>Right-click any message to react or reply</span>
         </div>
       </div>
+
+      {editingMessage && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/30 p-4 backdrop-blur-[1px]"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeMessageEditor()
+          }}
+        >
+          <form
+            onSubmit={handleSaveMessageEdit}
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-message-title"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-slate-900">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary"><Pencil size={16} /></span>
+                <div>
+                  <h2 id="edit-message-title" className="text-sm font-bold">Edit message</h2>
+                  <p className="text-[11px] text-slate-500">Changes are visible to everyone in this chat.</p>
+                </div>
+              </div>
+              <button type="button" onClick={closeMessageEditor} disabled={savingEdit} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" aria-label="Close editor">
+                <X size={17} />
+              </button>
+            </div>
+            {editReferences.length > 0 && (
+              <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Attached capsules stay in place</p>
+                <ChatReferenceCapsules references={editReferences} tone="light" inline className="gap-1" />
+              </div>
+            )}
+            <textarea
+              autoFocus
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+              rows={5}
+              maxLength={10000}
+              className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-800 outline-none transition focus:border-primary/60 focus:bg-white focus:ring-2 focus:ring-primary/10"
+              placeholder="Write your message"
+            />
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button type="button" onClick={closeMessageEditor} disabled={savingEdit} className="rounded-lg px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:opacity-50">Cancel</button>
+              <button type="submit" disabled={savingEdit || (!editDraft.trim() && editReferences.length === 0)} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-bold text-white transition hover:bg-primary-dark disabled:cursor-wait disabled:opacity-60">
+                {savingEdit && <Loader2 size={13} className="animate-spin" />}
+                {savingEdit ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Right-Click Context Menu */}
       {contextMenu && (
@@ -1874,6 +2219,17 @@ export default function ClientChat() {
             <span>Reply to message</span>
           </button>
 
+          {isCurrentUser(contextMenu.message.sender) && (
+            <button
+              type="button"
+              onClick={() => openMessageEditor(contextMenu.message)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-purple/10 hover:text-purple"
+            >
+              <Pencil size={14} className="text-purple" />
+              <span>Edit message</span>
+            </button>
+          )}
+
           {/* Copy Text Option */}
           <button
             type="button"
@@ -1887,9 +2243,40 @@ export default function ClientChat() {
             <Quote size={14} className="text-slate-400" />
             <span>Copy message</span>
           </button>
+
+          {/* Pin duration choices */}
+          <div className="mt-1 border-t border-slate-100 px-2.5 pb-2 pt-2">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <Pin size={12} /> Pin message for
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {PIN_DURATIONS.map(({ label, hours }) => (
+                <button
+                  key={hours}
+                  type="button"
+                  disabled={pinningMessageId === contextMenu.message.id}
+                  onClick={() => handlePinMessage(contextMenu.message, hours)}
+                  className="rounded-md bg-slate-100 px-1 py-1.5 text-[10px] font-bold text-slate-600 transition hover:bg-purple hover:text-white disabled:cursor-wait disabled:opacity-60"
+                >
+                  {pinningMessageId === contextMenu.message.id ? 'Pinning…' : label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isCurrentUser(contextMenu.message.sender) && (
+            <button
+              type="button"
+              disabled={deletingMessageId === contextMenu.message.id}
+              onClick={() => handleDeleteForEveryone(contextMenu.message)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Trash2 size={14} />
+              <span>{deletingMessageId === contextMenu.message.id ? 'Unsending…' : 'Unsend for everyone'}</span>
+            </button>
+          )}
         </div>
       )}
     </div>
   )
 }
-
