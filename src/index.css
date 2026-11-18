@@ -1,8 +1,8 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@layer base { html { scroll-behavior: smooth; } body { @apply m-0 font-sans text-ink antialiased; background-color: #E6E9EF; } * { box-sizing: border-box; } button, a { -webkit-tap-highlight-color: transparent; } :focus-visible { @apply outline outline-2 outline-offset-4 outline-purple; } }
-html, body, #root { font-family: 'Noto Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif !important; }
+@layer base { html { scroll-behavior: smooth; } body { @apply m-0 font-sans text-ink antialiased; background-color: #FFFAF3; } * { box-sizing: border-box; } button, a { -webkit-tap-highlight-color: transparent; } :focus-visible { @apply outline outline-2 outline-offset-2 outline-purple; } }
+html, body, #root { font-family: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; }
 .orb-wordmark { font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif !important; }
 @layer components { .interactive-brutal { @apply transition-all duration-150 ease-out; } .interactive-brutal:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #111111; } .interactive-brutal:active { transform: translate(2px, 2px); box-shadow: 0 0 0 #111111; } .reveal { @apply opacity-0 translate-y-6; } .reveal.is-visible { @apply animate-rise; } }
 .page-enter { animation: orb-content-in 300ms cubic-bezier(.2,.8,.2,1) both; }
@@ -33,7 +33,7 @@ div.page-enter.\-mx-1 > div:nth-child(2) { min-height: 0; flex: 1 1 0%; }
 div.page-enter.\-mx-1 > div:nth-child(2) > main {
   min-height: 0;
   background-color: #fcfdff !important;
-  background-image: radial-gradient(rgba(55, 74, 246, .15) 1px, transparent 1px) !important;
+  background-image: radial-gradient(rgba(99, 91, 255, .15) 1px, transparent 1px) !important;
   background-size: 12px 12px !important;
 }
 
@@ -105,14 +105,14 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
   box-shadow: 0 1px 2px rgba(15, 23, 42, .025);
 }
 
-.orb-composer__prompt .orb-prompt-field { position: relative; min-height: 112px; border-color: #c7ceff; background: #edf0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 1px 2px rgba(55, 74, 246, .08); }
+.orb-composer__prompt .orb-prompt-field { position: relative; min-height: 112px; border-color: #c7ceff; background: #edf0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 1px 2px rgba(99, 91, 255, .08); }
 .orb-composer__prompt textarea, .orb-guide-prompt textarea { min-height: 48px; color: #25358d; }
-.orb-guide-prompt .orb-prompt-field { position: relative; min-height: 112px; border-color: #c7ceff; background: #edf0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 1px 2px rgba(55, 74, 246, .08); }
+.orb-guide-prompt .orb-prompt-field { position: relative; min-height: 112px; border-color: #c7ceff; background: #edf0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .78), 0 1px 2px rgba(99, 91, 255, .08); }
 .orb-prompt-field__typing { position: absolute; top: .75rem; left: .75rem; right: .75rem; overflow: hidden; color: #5969ba; font-size: .875rem; line-height: 1.25rem; white-space: nowrap; pointer-events: none; }
 .orb-prompt-field__typing i { display: inline-block; width: 1px; height: 1em; margin-left: 2px; vertical-align: -2px; background: #5969ba; animation: orb-prompt-caret 850ms steps(1, end) infinite; }
 .orb-prompt-field__icon { display: grid; place-items: center; color: #6070bd; }
 .orb-prompt-field__send { background: #c7ceff; color: #7180c9; }
-.orb-prompt-field__send:not(:disabled) { background: #374af6; color: #fff; }
+.orb-prompt-field__send:not(:disabled) { background: #635BFF; color: #fff; }
 .orb-prompt-field__send:not(:disabled):hover { background: #283ae0; }
 .chat-message-enter { animation: chat-message-enter 220ms cubic-bezier(.22, 1, .36, 1) both; }
 @keyframes chat-message-enter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -141,7 +141,7 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 
 .orb-composer-close { position: absolute; z-index: 5; top: .75rem; right: .75rem; display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .375rem; color: #94a3b8; transition: color 160ms ease, background 160ms ease; }
 .orb-composer-close:hover { background: #f1f5f9; color: #334155; }
-.orb-composer-close:focus-visible { outline: 3px solid rgba(55, 74, 246, .25); outline-offset: 2px; }
+.orb-composer-close:focus-visible { outline: 3px solid rgba(99, 91, 255, .25); outline-offset: 2px; }
 .orb-mark { display: block; flex: none; overflow: hidden; border-radius: 9999px; background: #ffffff; pointer-events: none; }
 .orb-mark .orb-container, .orb-mark .orb-canvas { width: 100%; height: 100%; }
 .orb-header-icon { width: 40px; height: 40px; }
@@ -150,7 +150,7 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
 
 .create-panel-launcher { position: fixed; z-index: 40; right: 2rem; bottom: 4.75rem; display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 9999px; background: transparent; box-shadow: none; transition: transform 180ms ease; }
 .create-panel-launcher:hover { transform: translateY(-2px) scale(1.04); }
-.create-panel-launcher:focus-visible { outline: 3px solid rgba(55, 74, 246, .25); outline-offset: 3px; }
+.create-panel-launcher:focus-visible { outline: 3px solid rgba(99, 91, 255, .25); outline-offset: 3px; }
 .flow-dot-grid { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; transform-origin: center; animation: flow-dot-grid-enter 560ms cubic-bezier(.16, 1, .3, 1) both; will-change: opacity, filter, transform; }
 @keyframes flow-dot-grid-enter { from { opacity: 0; filter: blur(8px); transform: scale(1.015); } to { opacity: 1; filter: blur(0); transform: scale(1); } }
 
@@ -219,9 +219,9 @@ div.page-enter.\-mx-1 > div:nth-child(2) > aside {
   .flow-stage--denoise, .flow-stage--resolve, .flow-stage--sharp { opacity: 1; filter: none; pointer-events: auto; }
   .flow-denoise-preview { display: none; }
 }
-.app-shell .border-ink, .app-shell .border-ink\/20, .app-shell .border-ink\/25 { border-color: rgb(226 232 240) !important; }
+.app-shell .border-ink, .app-shell .border-ink\/20, .app-shell .border-ink\/25 { border-color: #E9EAF2 !important; }
 .app-shell .border-2 { border-width: 1px; }
-.app-shell .border-b-2, .app-shell .border-y-2, .app-shell .border-r-2, .app-shell .border-t-2, .app-shell .border-x-2 { border-color: rgb(226 232 240) !important; }
+.app-shell .border-b-2, .app-shell .border-y-2, .app-shell .border-r-2, .app-shell .border-t-2, .app-shell .border-x-2 { border-color: #E9EAF2 !important; }
 .app-shell .bg-ink { background-color: #ffffff; color: #111111; }
 .app-shell .bg-ink .text-white, .app-shell .bg-ink .text-white\/70, .app-shell .bg-ink .text-white\/75 { color: #64748b; }
 
@@ -238,3 +238,285 @@ button[aria-label="Share feedback with the team"] { background-color: #fff !impo
   background-color: #f1f5f9 !important;
   border-color: #dbe3ed;
 }
+
+.thin-scroll { scrollbar-width: thin; scrollbar-color: #D9DBE8 transparent; }
+.thin-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: #D9DBE8; border-radius: 9999px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LIQUID GLASS — signed-in app only.
+   A vivid mesh canvas sits behind everything. Big panes (sidebar, top bar, modals,
+   menus) are frosted; cards are translucent with a bright top edge, a hairline
+   border and layered shadows. Ported from the cxpilot dashboard.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --app-canvas:
+    radial-gradient(900px 620px at 0% 0%, rgba(255, 196, 140, 0.26) 0%, transparent 62%),
+    radial-gradient(820px 600px at 100% 0%, rgba(255, 222, 186, 0.30) 0%, transparent 60%),
+    radial-gradient(900px 720px at 100% 100%, rgba(255, 170, 110, 0.22) 0%, transparent 62%),
+    radial-gradient(860px 680px at 0% 100%, rgba(246, 214, 176, 0.26) 0%, transparent 62%),
+    linear-gradient(180deg, #FFFCF8 0%, #FFF8F0 100%);
+  --glass-fill: linear-gradient(180deg, rgba(255,255,255,0.84) 0%, rgba(255,255,255,0.62) 100%);
+  --glass-fill-strong: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.80) 100%);
+  --glass-hairline: rgba(24, 24, 60, 0.07);
+  --glass-edge: inset 0 1px 0 rgba(255,255,255,0.95), inset 0 -1px 0 rgba(24,24,60,0.04);
+  --glass-depth-1: 0 1px 2px rgba(24,24,60,0.06), 0 2px 8px -2px rgba(24,24,60,0.08);
+  --glass-depth-2: 0 2px 4px rgba(24,24,60,0.05), 0 12px 32px -10px rgba(120,70,20,0.18);
+  --glass-depth-3: 0 4px 10px rgba(24,24,60,0.06), 0 24px 56px -16px rgba(120,70,20,0.26);
+  --glass-blur: blur(28px) saturate(190%);
+  --glass-blur-card: blur(14px) saturate(160%);
+}
+
+.app-shell { background: var(--app-canvas); background-attachment: fixed; }
+
+/* Cards: any white surface with a card shadow becomes a glass card. */
+.app-shell main .shadow-card:not([class*="bg-primary"]):not([class*="bg-ink"]):not([class*="bg-gradient"]),
+.app-shell main .shadow-pop:not([class*="bg-primary"]):not([class*="bg-ink"]):not([class*="bg-gradient"]) {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur-card);
+  -webkit-backdrop-filter: var(--glass-blur-card);
+}
+.app-shell main .bg-white.border-line,
+.app-shell main .border-line.shadow-card { border-color: var(--glass-hairline); }
+.app-shell main .bg-white.rounded-card,
+.app-shell main .bg-white.rounded-xl,
+.app-shell main .bg-white.rounded-2xl { box-shadow: var(--glass-edge), var(--glass-depth-1); }
+.app-shell main a.shadow-card:hover,
+.app-shell main button.shadow-card:hover { box-shadow: var(--glass-edge), var(--glass-depth-2); }
+.app-shell main input.bg-white, .app-shell main textarea.bg-white, .app-shell main select.bg-white { background: rgba(255,255,255,0.9); }
+
+/* Frosted chrome (desktop sidebar and top bar). */
+.glass-pane {
+  background: rgba(255,255,255,0.55);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: rgba(255,255,255,0.65);
+  box-shadow: inset -1px 0 0 rgba(24,24,60,0.04);
+}
+.glass-bar {
+  background: rgba(255,255,255,0.62);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-color: rgba(255,255,255,0.65);
+  box-shadow: 0 1px 0 var(--glass-hairline);
+}
+/* Floating pieces: menus, tooltips-free dialogs, toasts. */
+.glass-float {
+  background: var(--glass-fill-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255,255,255,0.8);
+  box-shadow: var(--glass-edge), var(--glass-depth-3);
+}
+
+/* People who ask for less transparency get solid surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+  .app-shell { background: #FFFAF3; }
+  .app-shell main .shadow-card, .app-shell main .shadow-pop, .glass-pane, .glass-bar, .glass-float {
+    background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+}
+
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ROUNDED CORNERS — one scale across every page.
+   controls (buttons, inputs, selects, small chips) 10px · cards and panels 14px ·
+   large surfaces 18px · pills stay fully round. Older pages used a mix of square,
+   4px, 6px and 8px corners; this normalises them without touching each file.
+   ══════════════════════════════════════════════════════════════════════════ */
+body.in-app .rounded,
+body.in-app .rounded-sm,
+body.in-app .rounded-md,
+body.in-app .rounded-lg { border-radius: 10px; }
+body.in-app .rounded-xl { border-radius: 14px; }
+body.in-app .rounded-2xl,
+body.in-app .rounded-3xl { border-radius: 18px; }
+
+/* Form controls and buttons are always rounded unless they are explicitly pills/circles. */
+body.in-app input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([class*="rounded"]),
+body.in-app select:not([class*="rounded"]),
+body.in-app textarea:not([class*="rounded"]),
+body.in-app button:not([class*="rounded"]):not([role="tab"]):not([role="switch"]) { border-radius: 10px; }
+
+/* Anything drawn as a bordered box with no radius of its own becomes a rounded card. */
+body.in-app [class~="border"]:not([class*="rounded"]):not(input):not(select):not(textarea):not(button):not(table):not(tr):not(td):not(th),
+body.in-app [class~="border-2"]:not([class*="rounded"]):not(input):not(select):not(textarea):not(button):not(table):not(tr):not(td):not(th) { border-radius: 14px; }
+
+/* Tables sit inside a rounded, clipped wrapper. */
+body.in-app main .overflow-x-auto:has(> table),
+body.in-app main .overflow-hidden:has(> table) { border-radius: 14px; }
+
+/* Dialogs and menus rendered outside the page container. */
+.glass-float { border-radius: 16px; }
+
+/* Catch-all: any visible surface (tile, button, link, chip, card) that has no radius of its own. */
+body.in-app a[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app a[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app button[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app label[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app span[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app li[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app p[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app summary[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop) { border-radius: 10px; }
+body.in-app div[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app div[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app section[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app article[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app details[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app form[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ul[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="shadow"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-white"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-primary"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-subtle"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-canvas"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-gradient"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-success"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-warning"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-danger"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-orange"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop),
+body.in-app ol[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.glass-bar):not(aside):not(header):not(main):not(footer):not(nav):not(table):not(thead):not(tbody):not(tr):not(td):not(th):not(svg):not(img):not(path):not(html):not(body):not(.app-shell):not(.drawer-backdrop) { border-radius: 14px; }
+
+.rounded-card { border-radius: 14px; }
+.rounded-control { border-radius: 10px; }
+
+/* Display type: soft serif headings with an italic accent. Defined here as well as in the
+   Tailwind config so it never depends on a dev-server restart. */
+.font-display { font-family: 'Fraunces Variable', 'Fraunces', Georgia, serif; font-optical-sizing: auto; letter-spacing: -0.01em; }
+.font-display em, em.font-display { font-style: italic; font-weight: 450; }
+
+/* Product photos whose white backdrop could not be cut out: multiply blends white into the
+   warm card behind it, so no white rectangle shows. Cut-out photos keep their soft shadow. */
+.overview-product-card--raw { mix-blend-mode: multiply; }
+.overview-product-card--raw .overview-product-art { filter: none; }

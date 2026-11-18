@@ -28,6 +28,7 @@ import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, ORB_VOICE_WAKE_STATUS_EVEN
 import { listBrands, invalidateBrandCache } from "../services/brands";
 import { getRemoteBrandAgentConnection, listBrandAgentFeedback, setRemoteBrandAgentConnection, updateBrandAgentFeedback, activeBrandId, activeBrandName, sendDailySlackReport } from "../services/orbApi";
 import { getDailySlackReport, saveDailySlackReport } from "../services/overviewBlocks";
+import PageHeader from '../components/ui/PageHeader'
 
 const tabs = [
   { id: "profile", label: "Profile" },
@@ -395,12 +396,9 @@ export default function Settings() {
     }
   };
   return (
-    <div className="mx-auto max-w-6xl">
-      <p className="text-xs font-extrabold uppercase tracking-widest text-purple">
-        Account setup
-      </p>
-      <h2 className="mt-1 text-3xl font-extrabold tracking-tight">Settings</h2>
-      <section className="mt-6 rounded-lg border-2 border-ink bg-white shadow-brutal">
+    <div className="mx-auto w-full max-w-7xl">
+      <PageHeader eyebrow="Account" title="Settings" description="Manage your profile, team and preferences." />
+      <section className="rounded-card border border-line bg-white shadow-card">
         <Tabs tabs={visibleTabs} active={active} onChange={tabChange} />
         <div className="p-5 sm:p-6">
           {active === "profile" && (

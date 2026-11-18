@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import useFocusTrap from '../../hooks/useFocusTrap'
 
-export default function Modal({ open, onClose, title, children, maxWidth = 'max-w-lg' }) {
+export default function Modal({ open, onClose, title, description, children, maxWidth = 'max-w-lg' }) {
   const ref = useRef(null)
   useFocusTrap(ref, open, onClose)
   if (!open || typeof document === 'undefined') return null
@@ -11,30 +11,29 @@ export default function Modal({ open, onClose, title, children, maxWidth = 'max-
   // becomes page-relative, which can leave the dialog off-screen on long lists.
   return createPortal(
     <div
-      className="fixed inset-0 z-[110] grid place-items-center bg-ink/50 p-4 overflow-y-auto"
+      className="fixed inset-0 z-[110] grid animate-fade-in place-items-center overflow-y-auto bg-ink/40 p-4 backdrop-blur-[2px]"
       role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}
     >
       <section
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className={`my-8 w-full ${maxWidth} border-2 border-ink bg-white p-5 shadow-brutal-lg max-h-[90vh] flex flex-col`}
+        className={`my-8 flex max-h-[90vh] w-full ${maxWidth} animate-pop-in flex-col glass-float rounded-2xl p-6`}
       >
-        <div className="mb-4 flex items-center justify-between shrink-0">
-          <h2 id="modal-title" className="text-xl font-extrabold">
-            {title}
-          </h2>
-          <button onClick={onClose} aria-label="Close dialog" className="p-1 hover:bg-slate-100 rounded">
-            <X size={20} />
+        <div className="mb-4 flex shrink-0 items-start justify-between gap-4">
+          <div>
+            <h2 id="modal-title" className="font-display text-xl font-medium">{title}</h2>
+            {description && <p className="mt-1 text-sm text-fg-muted">{description}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close dialog" className="-mr-1.5 -mt-1 grid h-8 w-8 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-subtle hover:text-ink">
+            <X size={18} />
           </button>
         </div>
-        <div className="min-h-0 overflow-y-auto flex-1">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </section>
     </div>,
-    document.body
+    document.body,
   )
 }

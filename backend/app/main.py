@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.crawls import router as crawls_router
 from app.api.escalations import router as escalations_router
+from app.api.feedback_reports import router as feedback_reports_router
 from app.api.message_templates import router as message_templates_router
 from app.api.knowledge import router as knowledge_router
 from app.api.pipelines import router as pipelines_router
@@ -65,12 +66,14 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    # Idempotency-Key lets a retried issue report resolve to the same saved report.
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
 )
 app.include_router(crawls_router)
 app.include_router(escalations_router)
 app.include_router(message_templates_router)
 app.include_router(knowledge_router)
+app.include_router(feedback_reports_router)
 app.include_router(pipelines_router)
 app.include_router(shopify_router)
 app.include_router(chatspace_router)

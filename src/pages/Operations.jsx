@@ -7,6 +7,7 @@ import useAsync from "../hooks/useAsync";
 import { useToast } from "../context/ToastContext";
 import { startBrowserDictation } from "../lib/browserDictation";
 import { activeBrandName, createOperationalUpdate, hasOrbApi, listOperationalUpdates } from "../services/orbApi";
+import { PageTitle } from '../components/ui/PageHeader'
 
 const typeDetails = {
   cs_update: {
@@ -148,10 +149,10 @@ export default function Operations() {
     } finally { setSubmitting(false); }
   };
 
-  return <div className="page-enter mx-auto max-w-6xl">
+  return <div className="page-enter mx-auto w-full max-w-7xl">
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Brand operations</p><h2 className="mt-1 text-3xl font-extrabold tracking-tight">Operations</h2><p className="mt-2 text-sm text-slate-600">Give Orb a change in plain language and it will organise the next work for {activeBrandName() || "this brand"}.</p></div>
-      <button type="button" onClick={reload} disabled={loading || refreshing} className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 transition hover:text-primary disabled:opacity-60"><RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />Refresh</button>
+      <PageTitle eyebrow="Business" title="Operations" description="Give Orb a change in plain language and it will organise the next work for this brand." />
+      <button type="button" onClick={reload} disabled={loading || refreshing} className="inline-flex h-9 items-center gap-2 rounded-control border border-line-strong bg-white px-3 text-sm font-medium text-fg-muted shadow-card transition hover:text-primary disabled:opacity-60"><RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />Refresh</button>
     </header>
 
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_50px_rgba(40,48,78,0.08)]">

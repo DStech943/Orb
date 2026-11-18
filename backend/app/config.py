@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = Field(None, alias="SLACK_BOT_TOKEN")
     slack_channel_id: str | None = Field(None, alias="SLACK_CHANNEL_ID")
     slack_max_file_bytes: int = Field(10_000_000, alias="SLACK_MAX_FILE_BYTES", ge=1)
+    # Public origin of the Orb web app (no trailing slash), used to build links
+    # to a saved report in Slack messages. Links are omitted when unset.
+    orb_app_url: str | None = Field(None, alias="ORB_APP_URL")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 

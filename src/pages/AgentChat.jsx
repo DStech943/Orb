@@ -1,16 +1,27 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
 import {
   ArrowUp,
   Eraser,
+  Flag,
+  History,
   Loader2,
   Maximize2,
   MessageCircleMore,
   Minimize2,
+  Plus,
+  Search,
   ThumbsUp,
   X,
 } from "lucide-react";
 import Orb from "../components/Orb";
+import ReportIssueModal, { issueCategoryLabel } from "../components/chat/ReportIssueModal";
+import TeammatePicker from "../components/chat/TeammatePicker";
+import Avatar from "../components/ui/Avatar";
+import { buildTranscript, newIdempotencyKey } from "../lib/transcript";
+import { timeAgo } from "../lib/format";
+import { listTestSessions, removeTestSession, touchTestSession } from "../lib/testSessions";
 import { listBrands } from "../services/brands";
 import {
   chatWithBrandAgent,
@@ -20,6 +31,7 @@ import {
   hasBrandAgentApi,
   hasOrbApi,
   listBrandAgentFeedback,
+  reportBrandAgentIssue,
 } from "../services/orbApi";
 import useAsync from "../hooks/useAsync";
 import { useToast } from "../context/ToastContext";
@@ -121,6 +133,11 @@ export default function AgentChat({ embedded = false }) {
   const [idealReply, setIdealReply] = useState("");
   const [overallNote, setOverallNote] = useState("");
   const [savingFeedback, setSavingFeedback] = useState(false);
+  const [noteToSlack, setNoteToSlack] = useState(false);
+  const [noteTagged, setNoteTagged] = useState([]);
+  const noteKey = useRef(newIdempotencyKey());
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState(null);
   const [openFullscreenByDefault, setOpenFullscreenByDefault] = useState(
     () => typeof window !== "undefined" && window.localStorage.getItem(FULLSCREEN_DEFAULT_KEY) === "true",
   );
@@ -128,10 +145,13 @@ export default function AgentChat({ embedded = false }) {
     () => typeof window !== "undefined" && window.localStorage.getItem(FULLSCREEN_DEFAULT_KEY) === "true",
   );
   const messagesRef = useRef(null);
+  const [sessions, setSessions] = useState([]);
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const activeBrand = brands.find((brand) => brand.id === brandId) || brands[0];
   const configuredAgentName = String(activeBrand?.ai_agent_name || "").trim();
   const agentName = agentNameOverride || configuredAgentName || "AI";
-  const title = `Chat with ${agentName}`;
+  const title = `Test ${agentName}`;
 
   useEffect(() => {
     if (activeBrand?.id && activeBrand.id !== brandId)
@@ -140,6 +160,8 @@ export default function AgentChat({ embedded = false }) {
 
   useEffect(() => {
     setAgentNameOverride(null);
+    // Tagged teammates belong to one brand's team.
+    setNoteTagged([]);
   }, [activeBrand?.id]);
 
   useEffect(() => {
@@ -198,6 +220,8 @@ export default function AgentChat({ embedded = false }) {
         setMessages([]);
         setFeedback([]);
         setFeedbackTarget(null);
+        setReportOpen(false);
+        setReportTarget(null);
         setError("");
         setSessionId(sessionForBrand());
       }
@@ -205,6 +229,28 @@ export default function AgentChat({ embedded = false }) {
     window.addEventListener("orb:brand-changed", onBrandChange);
     return () => window.removeEventListener("orb:brand-changed", onBrandChange);
   }, []);
+
+  // Remember each test conversation (id, a short title, timing) for this brand so it can be
+  // reopened later. The conversation itself is always re-read from the agent API.
+  useEffect(() => {
+    if (!activeBrand?.id || !sessionId || !messages.length) return;
+    const firstQuestion = messages.find((message) => message.role === "user")?.text || "";
+    touchTestSession(activeBrand.id, sessionId, {
+      title: firstQuestion.slice(0, 60) || "New test",
+      messageCount: messages.length,
+    });
+  }, [activeBrand?.id, sessionId, messages]);
+
+  useEffect(() => {
+    if (!activeBrand?.id) {
+      setSessions([]);
+      return undefined;
+    }
+    const refresh = () => setSessions(listTestSessions(activeBrand.id));
+    refresh();
+    window.addEventListener("orb:test-sessions-changed", refresh);
+    return () => window.removeEventListener("orb:test-sessions-changed", refresh);
+  }, [activeBrand?.id]);
 
   useEffect(() => {
     messagesRef.current?.scrollTo({
@@ -246,9 +292,57 @@ export default function AgentChat({ embedded = false }) {
     setMessages([]);
     setFeedback([]);
     setFeedbackTarget(null);
+    setReportOpen(false);
+    setReportTarget(null);
     setDraft("");
     setError("");
     setSessionId(sessionForBrand());
+  };
+
+  const resetConversationState = () => {
+    setMessages([]);
+    setFeedback([]);
+    setFeedbackTarget(null);
+    setReportOpen(false);
+    setReportTarget(null);
+    setDraft("");
+    setError("");
+  };
+
+  // Starts a fresh test but keeps the previous one available in the session list.
+  const newConversation = () => {
+    resetConversationState();
+    setSessionId(sessionForBrand());
+    setSessionsOpen(false);
+  };
+
+  const openSession = (id) => {
+    if (id === sessionId) {
+      setSessionsOpen(false);
+      return;
+    }
+    resetConversationState();
+    setSessionId(id);
+    setSessionsOpen(false);
+  };
+
+  const deleteSession = async (id) => {
+    if (!activeBrand?.id) return;
+    if (hasBrandAgentApi) {
+      try {
+        await clearBrandChatHistory(activeBrand.id, id);
+      } catch (cause) {
+        showToast(cause?.message || "Could not delete this test conversation.", "error");
+        return;
+      }
+    }
+    removeTestSession(activeBrand.id, id);
+    if (id === sessionId) newConversation();
+  };
+
+  const openReport = (target = null) => {
+    setReportTarget(target);
+    setReportOpen(true);
   };
 
   const sendMessage = async (event, prompt) => {
@@ -321,34 +415,97 @@ export default function AgentChat({ embedded = false }) {
     }
   };
 
+  // A note sent to Slack is saved as feedback like any other, and also attaches the
+  // conversation and notifies the team. The server treats a report without a category
+  // as a note.
+  const saveNoteToSlack = async () => {
+    if (!activeBrand?.id || !sessionId || savingFeedback) return;
+    const note = overallNote.trim();
+    const transcript = buildTranscript(messages);
+    if (!note || !transcript.length) return;
+    setSavingFeedback(true);
+    try {
+      const result = await reportBrandAgentIssue(
+        activeBrand.id,
+        {
+          session_id: sessionId,
+          description: note,
+          tagged_people: noteTagged,
+          transcript,
+          total_message_count: messages.length,
+        },
+        noteKey.current,
+      );
+      if (result?.feedback) setFeedback((items) => [...items, result.feedback]);
+      setOverallNote("");
+      setNoteTagged([]);
+      noteKey.current = newIdempotencyKey();
+      showToast(
+        result?.feedback?.slack_delivery_status === "failed"
+          ? "Note saved. Slack delivery failed, so the team can resend it."
+          : "Note sent to the team on Slack.",
+      );
+    } catch (cause) {
+      showToast(cause?.message || "Could not send the note.", "error");
+    } finally {
+      setSavingFeedback(false);
+    }
+  };
+
   const toggleFeedbackTag = (tag) => setSelectedTags((tags) => tags.includes(tag) ? tags.filter((item) => item !== tag) : [...tags, tag]);
 
   const chatWorkspace = (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[100] h-[100dvh] w-screen min-h-0 max-w-none overflow-hidden bg-[#E6E9EF]" : `mx-auto ${embedded ? "h-[calc(100dvh-13rem)] min-h-[42rem] max-w-7xl" : "h-[calc(100dvh-8rem)] min-h-[42rem] max-w-6xl"}`}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[100] h-[100dvh] w-screen min-h-0 max-w-none overflow-hidden bg-canvas" : `mx-auto ${embedded ? "h-[calc(100dvh-13rem)] min-h-[42rem] max-w-7xl" : "h-[calc(100dvh-6.5rem)] min-h-[34rem] max-w-7xl"}`}`}
       role={isFullscreen ? "dialog" : undefined}
       aria-modal={isFullscreen || undefined}
       aria-label={isFullscreen ? `${title} full screen` : undefined}
     >
-      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-0 border-b border-slate-200 bg-white px-5 pb-3 pt-5" : "mb-5"}`}>
-        {!isFullscreen && <div>
-          <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-            Agent tester
-          </p>
-          <h2 className="mt-1 text-3xl font-extrabold tracking-tight">
-            {title}
+      <div className={`flex flex-wrap items-end justify-between gap-3 ${isFullscreen ? "mb-0 border-b border-line bg-white px-5 pb-3 pt-5" : "mb-5"}`}>
+        {!isFullscreen && <div className="min-w-0">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-primary">Agent experience</p>
+            {activeBrand?.name && (
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-white py-0.5 pl-0.5 pr-2.5 text-xs text-fg-muted">
+                <Avatar name={activeBrand.name} className="h-5 w-5 text-[9px]" />
+                <span className="truncate">{activeBrand.name}</span>
+              </span>
+            )}
+          </div>
+          <h2 className="font-display text-[1.75rem] font-medium leading-tight text-ink">
+            {embedded ? title : <>Chat with <em>{agentName}</em></>}
           </h2>
-          <p className="mt-2 text-sm text-slate-500">
-            Send a test conversation directly to this brand’s deployed support
-            agent.
+          <p className="mt-1 max-w-xl text-sm leading-5 text-fg-muted">
+            Ask {agentName} what your customers would ask, then flag anything that isn’t right.
           </p>
         </div>}
         <div className="ml-auto flex flex-col items-end gap-1.5">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => setSessionsOpen((open) => !open)}
+                aria-expanded={sessionsOpen}
+                className="inline-flex h-9 items-center gap-2 rounded-control border border-line bg-white px-3 text-xs font-medium text-fg-muted transition hover:border-primary/35 hover:text-primary xl:hidden"
+              >
+                <History size={15} />
+                Sessions
+              </button>
+            )}
+            {!embedded && (
+              <button
+                type="button"
+                onClick={newConversation}
+                className="inline-flex h-9 items-center gap-2 rounded-control bg-primary px-3 text-xs font-medium text-white shadow-card transition hover:bg-primary-dark"
+              >
+                <Plus size={15} />
+                New test
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsFullscreen((open) => !open)}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-primary"
+              className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-xs font-medium text-fg-muted transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-primary"
               aria-label={isFullscreen ? "Exit full screen" : "Open chat full screen"}
               title={isFullscreen ? "Exit full screen (Esc)" : "Open chat full screen"}
             >
@@ -357,63 +514,134 @@ export default function AgentChat({ embedded = false }) {
             </button>
             <button
               type="button"
+              onClick={() => openReport()}
+              disabled={!messages.length || sending}
+              className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-xs font-medium text-fg-muted transition hover:border-orange/60 hover:bg-orange/10 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+              title="Report a problem with this conversation to the team"
+            >
+              <Flag size={15} />
+              Report issue
+            </button>
+            <button
+              type="button"
               onClick={clearChat}
               disabled={!messages.length && !draft && !error}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
+              className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-xs font-medium text-fg-muted transition hover:border-line-strong hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Eraser size={15} />
-              Clear chat
+              Clear this chat
             </button>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] font-medium text-slate-500">
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] font-medium text-fg-muted">
             {isFullscreen && <span>Press Esc to return to the smaller view.</span>}
-            <label className="inline-flex cursor-pointer items-center gap-1.5 text-slate-600">
-              <input type="checkbox" checked={openFullscreenByDefault} onChange={(event) => setFullscreenDefault(event.target.checked)} className="h-3 w-3 rounded border-slate-300 text-primary focus:ring-primary" />
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-fg-muted">
+              <input type="checkbox" checked={openFullscreenByDefault} onChange={(event) => setFullscreenDefault(event.target.checked)} className="h-3 w-3 rounded border-line-strong text-primary focus:ring-primary" />
               Open full screen by default
             </label>
           </div>
         </div>
       </div>
-      <section className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-white lg:flex-row ${isFullscreen ? "rounded-none border-0 shadow-none" : "rounded-2xl border border-slate-200 shadow-sm"}`}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-slate-200">
-          <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+      <section className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-white lg:flex-row ${isFullscreen ? "rounded-none border-0 shadow-none" : "rounded-2xl border border-line shadow-card"}`}>
+        {!embedded && (
+          <aside aria-label="Test sessions" className={`${sessionsOpen ? "flex" : "hidden"} max-h-64 w-full shrink-0 flex-col border-b border-line bg-white lg:max-h-none xl:flex xl:w-64 xl:border-b-0 xl:border-r`}>
+            <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4">
+              <h3 className="text-sm font-semibold text-ink">Test sessions</h3>
+              <button type="button" onClick={newConversation} className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-primary transition hover:bg-primary-tint">
+                <Plus size={13} /> New
+              </button>
+            </div>
+            <label className="relative mx-4 mb-2 block">
+              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" aria-hidden="true" />
+              <input
+                value={sessionQuery}
+                onChange={(event) => setSessionQuery(event.target.value)}
+                placeholder="Search sessions"
+                aria-label="Search test sessions"
+                className="h-9 w-full rounded-lg border border-line bg-canvas pl-8 pr-2 text-sm focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15"
+              />
+            </label>
+            <ul className="thin-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+              {(() => {
+                const term = sessionQuery.trim().toLowerCase();
+                const known = sessions.filter((item) => !term || String(item.title || "").toLowerCase().includes(term));
+                const current = known.some((item) => item.id === sessionId) || term ? [] : [{ id: sessionId, title: "New test", messageCount: 0, updatedAt: Date.now(), draft: true }];
+                const rows = [...current, ...known];
+                if (!rows.length) {
+                  return <li className="px-3 py-8 text-center text-sm text-fg-muted">{term ? "No sessions match your search." : "Your testing playground is ready. Start a conversation with your agent."}</li>;
+                }
+                return rows.map((item) => {
+                  const active = item.id === sessionId;
+                  return (
+                    <li key={item.id} className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => openSession(item.id)}
+                        aria-current={active ? "true" : undefined}
+                        className={`mb-0.5 w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 ${active ? "bg-primary-tint" : "hover:bg-subtle"}`}
+                      >
+                        <span className={`block truncate pr-5 text-sm ${active ? "font-medium text-primary" : "text-ink"}`}>{item.title || "New test"}</span>
+                        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-fg-muted">
+                          {active && <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />}
+                          {active ? "Active" : `${item.messageCount || 0} messages`} · {item.draft && !messages.length ? "not started" : timeAgo(item.updatedAt)}
+                        </span>
+                      </button>
+                      {!item.draft && (
+                        <button
+                          type="button"
+                          onClick={() => deleteSession(item.id)}
+                          aria-label={`Delete test session ${item.title || ""}`}
+                          className="absolute right-2 top-2 hidden h-6 w-6 place-items-center rounded-md text-fg-muted hover:bg-white hover:text-danger group-hover:grid group-focus-within:grid"
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </li>
+                  );
+                });
+              })()}
+            </ul>
+            <p className="border-t border-line px-4 py-2.5 text-[11px] leading-4 text-fg-muted">Sessions are remembered in this browser for {activeBrand?.name || "this brand"}.</p>
+          </aside>
+        )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-line">
+          <header className="flex items-center gap-3 border-b border-line bg-white px-5 py-4 sm:px-6">
             <AgentOrb className="h-10 w-10 shadow-sm" />
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-extrabold text-slate-900">
+              <h3 className="truncate text-sm font-semibold text-ink">
                 {agentName}
               </h3>
-              <p className="text-xs text-slate-500">Deployed support agent</p>
+              <p className="text-xs text-fg-muted">Deployed support agent</p>
             </div>
-            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-extrabold text-emerald-700">
-              <i className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-success-tint px-2.5 py-1 text-[10px] font-semibold text-success">
+              <i className="h-1.5 w-1.5 rounded-full bg-success" />
               Test mode
             </span>
           </header>
 
           <div
             ref={messagesRef}
-            className="min-h-0 flex-1 overflow-y-auto bg-[#f8f9fb] p-6 sm:p-7"
+            className="thin-scroll min-h-0 flex-1 overflow-y-auto bg-white/40 p-5 sm:p-6"
           >
             {!messages.length && !sending && (
               <div className="grid min-h-full place-items-center">
                 <div className="max-w-md text-center">
-                  <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary-tint text-primary">
-                    <MessageCircleMore size={28} />
+                  <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-primary-tint text-primary">
+                    <MessageCircleMore size={24} />
                   </div>
-                  <h4 className="mt-4 text-lg font-extrabold text-slate-900">
+                  <h4 className="mt-4 text-lg font-semibold text-ink">
                     Start a test conversation
                   </h4>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                  <p className="mt-2 text-sm leading-6 text-fg-muted">
                     Ask the same questions your customers would ask. The reply
                     comes from {agentName}’s deployed agent.
                   </p>
-                  <div className="mt-5 grid gap-2 text-left">
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
                     {prompts.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
                         onClick={(event) => sendMessage(event, prompt)}
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left text-xs font-medium text-slate-600 transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-slate-800"
+                        className="rounded-full border border-line bg-white px-3.5 py-2 text-left text-xs font-medium text-fg-muted transition hover:border-primary/40 hover:bg-primary-tint hover:text-primary"
                       >
                         {prompt}
                       </button>
@@ -429,21 +657,21 @@ export default function AgentChat({ embedded = false }) {
                   className={`chat-message-enter flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[78%] px-4 py-3 text-[15px] leading-6 shadow-sm sm:max-w-[68%] ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}
+                    className={`max-w-[78%] px-4 py-3 text-[15px] leading-6 shadow-sm sm:max-w-[68%] ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-line bg-white text-ink"}`}
                   >
                     <p className="whitespace-pre-wrap">{message.text}</p>
                     <p
-                      className={`mt-1 text-[10px] ${message.role === "user" ? "text-white/65" : "text-slate-400"}`}
+                      className={`mt-1 text-[10px] ${message.role === "user" ? "text-white/65" : "text-fg-muted"}`}
                     >
                       {timeLabel(message.createdAt)}
                     </p>
-                    {message.role === "agent" && <div className="mt-2 flex flex-wrap items-center gap-1.5"><button type="button" onClick={() => saveFeedback({ scope: "reply", target: message, tags: ["Good reply"] })} disabled={savingFeedback || feedback.some((item) => item.message_id === message.id && item.tags?.includes("Good reply"))} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-500 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 disabled:opacity-45"><ThumbsUp size={12} />Good</button><button type="button" onClick={() => { setFeedbackTarget(message); setSelectedTags([]); setFeedbackNote(""); setIdealReply(""); }} className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-500 transition hover:border-primary/35 hover:bg-primary-tint hover:text-primary">Suggest change</button>{feedback.filter((item) => item.message_id === message.id).length > 0 && <span className="text-[10px] font-semibold text-primary">{feedback.filter((item) => item.message_id === message.id).length} saved</span>}</div>}
+                    {message.role === "agent" && <div className="mt-2 flex flex-wrap items-center gap-1.5"><button type="button" onClick={() => saveFeedback({ scope: "reply", target: message, tags: ["Good reply"] })} disabled={savingFeedback || feedback.some((item) => item.message_id === message.id && item.tags?.includes("Good reply"))} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition hover:border-success/40 hover:bg-success-tint hover:text-success disabled:opacity-45"><ThumbsUp size={12} />Good</button><button type="button" onClick={() => { setFeedbackTarget(message); setSelectedTags([]); setFeedbackNote(""); setIdealReply(""); }} className="rounded-full border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition hover:border-primary/35 hover:bg-primary-tint hover:text-primary">Suggest change</button><button type="button" onClick={() => openReport(message)} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-1 text-[10px] font-medium text-fg-muted transition hover:border-orange/60 hover:bg-orange/10 hover:text-ink"><Flag size={11} />Report issue</button>{feedback.filter((item) => item.message_id === message.id).length > 0 && <span className="text-[10px] font-semibold text-primary">{feedback.filter((item) => item.message_id === message.id).length} saved</span>}</div>}
                   </div>
                 </div>
               ))}
               {sending && (
                 <div className="chat-message-enter flex justify-start">
-                  <div className="rounded-2xl rounded-bl-sm border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500 shadow-sm">
+                  <div className="rounded-2xl rounded-bl-sm border border-line bg-white px-4 py-3 text-xs text-fg-muted shadow-sm">
                     <span className="inline-flex items-center gap-2">
                       <Loader2
                         size={14}
@@ -459,7 +687,7 @@ export default function AgentChat({ embedded = false }) {
 
           <form
             onSubmit={sendMessage}
-            className="orb-guide-prompt border-t border-slate-200 bg-white p-4 sm:p-5"
+            className="orb-guide-prompt border-t border-line bg-white p-4 sm:p-5"
           >
             <div className="orb-prompt-field rounded-xl border p-3 transition focus-within:ring-4 focus-within:ring-primary/10">
               <textarea
@@ -480,10 +708,10 @@ export default function AgentChat({ embedded = false }) {
                       ? `Message ${agentName}…`
                       : "Choose a brand to start testing"
                 }
-                className="block min-h-14 w-full resize-none bg-transparent px-0 py-0 text-[15px] leading-6 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+                className="block min-h-14 w-full resize-none bg-transparent px-0 py-0 text-[15px] leading-6 text-ink outline-none placeholder:text-fg-muted/70 disabled:cursor-not-allowed"
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
-                <p className="text-[10px] text-slate-400">
+                <p className="text-[10px] text-fg-muted">
                   Enter to send · Shift+Enter for a new line
                 </p>
                 <button
@@ -503,39 +731,46 @@ export default function AgentChat({ embedded = false }) {
             {error && (
               <p
                 role="alert"
-                className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"
+                className="mt-3 rounded-md border border-danger/20 bg-danger-tint px-3 py-2 text-xs font-medium text-danger"
               >
                 {error}
               </p>
             )}
           </form>
         </div>
-        <aside className={`w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-slate-50/70 p-5 lg:border-l lg:border-t-0 ${isFullscreen ? "lg:w-[23rem]" : "lg:w-[21rem]"}`}>
+        <aside className={`w-full shrink-0 overflow-y-auto border-t border-line bg-canvas p-5 lg:border-l lg:border-t-0 ${isFullscreen ? "lg:w-[23rem]" : "lg:w-[21rem]"}`}>
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-white p-3">
+            <Avatar name={activeBrand?.name} shape="lg" className="h-9 w-9" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-ink">{activeBrand?.name || "No brand selected"}</p>
+              <p className="truncate text-xs text-fg-muted">Testing {agentName} · reports are saved for this brand</p>
+            </div>
+          </div>
           <div>
-            <h2 className="text-sm font-extrabold text-slate-900">Feedback</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
+            <h2 className="text-sm font-semibold text-ink">Feedback</h2>
+            <p className="mt-1 text-xs leading-5 text-fg-muted">
               Help improve this brand’s AI without changing its live knowledge yet.
             </p>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="mt-4 rounded-2xl border border-line bg-white p-3 shadow-sm">
             {feedbackTarget ? (
               <>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-indigo-600">Reply feedback</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500">Tell the team what needs to improve.</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">Reply feedback</p>
+                    <p className="mt-1 text-xs leading-5 text-fg-muted">Tell the team what needs to improve.</p>
                   </div>
                   <button
                     type="button"
                     onClick={resetReplyFeedback}
-                    className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                    className="rounded-md p-1 text-fg-muted transition hover:bg-subtle hover:text-ink"
                     aria-label="Close reply feedback"
                   >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <p className="mt-3 line-clamp-3 rounded-lg bg-slate-50 p-2 text-xs leading-5 text-slate-600">
+                <p className="mt-3 line-clamp-3 rounded-lg bg-canvas p-2 text-xs leading-5 text-fg-muted">
                   {feedbackTarget.text}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -547,8 +782,8 @@ export default function AgentChat({ embedded = false }) {
                         type="button"
                         onClick={() => toggleFeedbackTag(tag)}
                         className={`rounded-full border px-2 py-1 text-[11px] font-semibold transition ${active
-                          ? "border-indigo-600 bg-indigo-600 text-white"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300"
+                          ? "border-primary bg-primary text-white"
+                          : "border-line bg-white text-fg-muted hover:border-primary/40"
                           }`}
                         aria-pressed={active}
                       >
@@ -557,7 +792,7 @@ export default function AgentChat({ embedded = false }) {
                     );
                   })}
                 </div>
-                <label className="mt-3 block text-xs font-bold text-slate-700" htmlFor="reply-feedback-note">
+                <label className="mt-3 block text-xs font-medium text-ink" htmlFor="reply-feedback-note">
                   What should change?
                 </label>
                 <textarea
@@ -566,10 +801,10 @@ export default function AgentChat({ embedded = false }) {
                   onChange={(event) => setFeedbackNote(event.target.value)}
                   placeholder="Share the issue or missing detail…"
                   rows={3}
-                  className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="mt-1 w-full resize-y rounded-lg border border-line bg-white px-2.5 py-2 text-xs leading-5 text-ink outline-none transition placeholder:text-fg-muted/70 focus:border-primary focus:ring-4 focus:ring-primary/15"
                 />
-                <label className="mt-3 block text-xs font-bold text-slate-700" htmlFor="ideal-agent-reply">
-                  Ideal reply <span className="font-normal text-slate-400">(optional)</span>
+                <label className="mt-3 block text-xs font-medium text-ink" htmlFor="ideal-agent-reply">
+                  Ideal reply <span className="font-normal text-fg-muted">(optional)</span>
                 </label>
                 <textarea
                   id="ideal-agent-reply"
@@ -577,13 +812,13 @@ export default function AgentChat({ embedded = false }) {
                   onChange={(event) => setIdealReply(event.target.value)}
                   placeholder="What should the AI have said?"
                   rows={3}
-                  className="mt-1 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="mt-1 w-full resize-y rounded-lg border border-line bg-white px-2.5 py-2 text-xs leading-5 text-ink outline-none transition placeholder:text-fg-muted/70 focus:border-primary focus:ring-4 focus:ring-primary/15"
                 />
                 <div className="mt-3 flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={resetReplyFeedback}
-                    className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-fg-muted transition hover:bg-subtle"
                   >
                     Cancel
                   </button>
@@ -597,64 +832,105 @@ export default function AgentChat({ embedded = false }) {
                       note: feedbackNote,
                       ideal: idealReply,
                     })}
-                    className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-extrabold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {savingFeedback ? "Saving…" : "Save feedback"}
                   </button>
                 </div>
               </>
             ) : (
-              <p className="text-xs leading-5 text-slate-500">
-                Choose <strong className="font-bold text-slate-700">Suggest change</strong> under an AI reply to give detailed feedback.
+              <p className="text-xs leading-5 text-fg-muted">
+                Choose <strong className="font-medium text-ink">Suggest change</strong> under an AI reply to give detailed feedback.
               </p>
             )}
           </div>
 
-          <div className="mt-5 border-t border-slate-200 pt-4">
-            <label className="block text-xs font-extrabold text-slate-800" htmlFor="conversation-feedback-note">
+          <div className="mt-5 border-t border-line pt-4">
+            <label className="block text-xs font-semibold text-ink" htmlFor="conversation-feedback-note">
               Overall chat note
             </label>
-            <p className="mt-1 text-xs leading-5 text-slate-500">For feedback about the conversation as a whole.</p>
+            <p className="mt-1 text-xs leading-5 text-fg-muted">For feedback about the conversation as a whole.</p>
             <textarea
               id="conversation-feedback-note"
               value={overallNote}
               onChange={(event) => setOverallNote(event.target.value)}
               placeholder="What worked well or needs improvement?"
               rows={3}
-              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-5 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              className="mt-2 w-full resize-y rounded-lg border border-line bg-white px-2.5 py-2 text-xs leading-5 text-ink outline-none transition placeholder:text-fg-muted/70 focus:border-primary focus:ring-4 focus:ring-primary/15"
             />
+            <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs font-semibold text-ink">
+              <input
+                type="checkbox"
+                checked={noteToSlack}
+                onChange={(event) => setNoteToSlack(event.target.checked)}
+                disabled={savingFeedback}
+                className="mt-0.5 h-3.5 w-3.5 rounded border-line-strong text-primary focus:ring-primary"
+              />
+              <span>
+                Also send to the team on Slack
+                <span className="block font-normal text-fg-muted">Posts this note with the full conversation attached.</span>
+              </span>
+            </label>
+            {noteToSlack && (
+              <div className="mt-2 grid gap-1.5">
+                <p className="text-xs font-medium text-ink">
+                  Notify teammates <span className="font-normal text-fg-muted">(optional)</span>
+                </p>
+                <TeammatePicker brandId={activeBrand?.id} active={noteToSlack} value={noteTagged} onChange={setNoteTagged} disabled={savingFeedback} variant="compact" />
+                {!messages.length && (
+                  <p className="text-[11px] leading-4 text-warning">Send a message to the agent first. The conversation is attached to the Slack note.</p>
+                )}
+              </div>
+            )}
             <button
               type="button"
-              disabled={savingFeedback || !overallNote.trim()}
-              onClick={() => saveFeedback({ scope: "conversation", note: overallNote })}
-              className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-extrabold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={savingFeedback || !overallNote.trim() || (noteToSlack && !messages.length)}
+              onClick={() => (noteToSlack ? saveNoteToSlack() : saveFeedback({ scope: "conversation", note: overallNote }))}
+              className="mt-2 rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {savingFeedback ? "Saving…" : "Add overall note"}
+              {savingFeedback ? (noteToSlack ? "Sending…" : "Saving…") : noteToSlack ? "Add note & notify team" : "Add overall note"}
             </button>
           </div>
 
-          <div className="mt-5 border-t border-slate-200 pt-4">
+          <div className="mt-5 border-t border-line pt-4">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-extrabold uppercase tracking-[0.12em] text-slate-700">Feedback log</h3>
-              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">{feedback.length}</span>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-ink">Feedback log</h3>
+              <span className="rounded-full bg-line px-2 py-0.5 text-[10px] font-medium text-fg-muted">{feedback.length}</span>
             </div>
             {feedback.length ? (
               <div className="mt-3 space-y-2">
                 {[...feedback].reverse().slice(0, 6).map((item) => (
-                  <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-2.5 text-xs">
-                    <p className="font-bold text-slate-800">{item.scope === "reply" ? "AI reply" : "Whole conversation"}</p>
-                    {item.tags?.length ? <p className="mt-1 text-[11px] font-semibold text-indigo-600">{item.tags.join(" · ")}</p> : null}
-                    <p className="mt-1 leading-5 text-slate-600">{item.note || "Marked as a good reply."}</p>
-                    {item.ideal_reply ? <p className="mt-1.5 border-t border-slate-100 pt-1.5 leading-5 text-slate-500">Ideal: {item.ideal_reply}</p> : null}
+                  <article key={item.id} className="rounded-xl border border-line bg-white p-2.5 text-xs">
+                    <p className="font-medium text-ink">{item.scope === "reply" ? "AI reply" : "Whole conversation"}</p>
+                    {item.category ? <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink"><Flag size={10} />Reported · {issueCategoryLabel(item.category) || item.category}</p> : null}
+                    {!item.category && item.slack_delivery_status && item.slack_delivery_status !== "not_applicable" ? <p className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${item.slack_delivery_status === "failed" ? (item.slack_message_posted ? "bg-warning-tint text-warning" : "bg-danger-tint text-danger") : "bg-success-tint text-success"}`}>{item.slack_delivery_status === "failed" ? (item.slack_message_posted ? "Sent to Slack · file missing" : "Slack delivery failed") : "Sent to team on Slack"}</p> : null}
+                    {item.slack_delivery_status && item.slack_delivery_status !== "not_applicable" && activeBrand?.id ? <Link to={`/app/reports/${activeBrand.id}/${item.id}`} className="mt-1 block text-[11px] font-medium text-primary hover:underline">View report and conversation</Link> : null}
+                    {item.tags?.length ? <p className="mt-1 text-[11px] font-semibold text-primary">{item.tags.join(" · ")}</p> : null}
+                    <p className="mt-1 leading-5 text-fg-muted">{item.note || "Marked as a good reply."}</p>
+                    {item.ideal_reply ? <p className="mt-1.5 border-t border-line pt-1.5 leading-5 text-fg-muted">Ideal: {item.ideal_reply}</p> : null}
                   </article>
                 ))}
               </div>
             ) : (
-              <p className="mt-3 text-xs leading-5 text-slate-500">Feedback you send in this test chat will appear here.</p>
+              <p className="mt-3 text-xs leading-5 text-fg-muted">Feedback you send in this test chat will appear here.</p>
             )}
           </div>
         </aside>
       </section>
+      <ReportIssueModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        brandId={activeBrand?.id}
+        brandName={activeBrand?.name}
+        agentName={agentName}
+        sessionId={sessionId}
+        messages={messages}
+        targetMessage={reportTarget}
+        onClearTarget={() => setReportTarget(null)}
+        onSubmitted={(saved) => {
+          if (saved) setFeedback((items) => [...items, saved]);
+        }}
+      />
     </div>
   );
   return isFullscreen && typeof document !== "undefined" ? createPortal(chatWorkspace, document.body) : chatWorkspace;

@@ -27,6 +27,7 @@ import { useToast } from '../context/ToastContext'
 import Avatar from '../components/ui/Avatar'
 import ChatReferenceCommands, { ChatReferenceCapsules } from '../components/chat/ChatReferences'
 import { activeBrandName } from '../services/orbApi'
+import PageHeader from '../components/ui/PageHeader'
 import { startBrowserDictation } from '../lib/browserDictation'
 import {
   PRESET_REACTIONS,
@@ -673,7 +674,9 @@ export default function ClientChat() {
   }
 
   return (
-    <div className="relative mx-auto flex h-[calc(100vh-100px)] max-w-5xl flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="mx-auto w-full max-w-7xl">
+    <PageHeader eyebrow="Agent experience" title="Chatspace" description="Talk with your team about this brand, in real time." />
+    <div className="relative flex h-[calc(100vh-11.5rem)] min-h-[30rem] w-full flex-col rounded-card border border-line bg-white shadow-card overflow-hidden">
       {/* Top Header Bar */}
       <div className="flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4">
         <div className="flex items-center gap-3.5">
@@ -1329,6 +1332,7 @@ export default function ClientChat() {
           </button>
         </div>
       )}
+    </div>
     </div>
   )
 }

@@ -11,6 +11,7 @@ import {
   saveBrandMastersheetConfig,
 } from "../services/orbApi";
 import { useToast } from "../context/ToastContext";
+import { PageTitle } from '../components/ui/PageHeader'
 
 const categoryMeta = {
   commerce: {
@@ -505,20 +506,16 @@ export default function Tools() {
   );
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <section className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-widest text-purple">Workspace tools</p>
-          <h2 className="mt-1 text-3xl font-extrabold tracking-tight">Integrations</h2>
-          <p className="mt-2 max-w-2xl text-sm text-muted">Browse integrations by function. Connected tools stay in Installed so they are always easy to find.</p>
-        </div>
-        <label className="flex w-full items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 sm:w-72">
+    <div className="mx-auto w-full max-w-7xl">
+      <section className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <PageTitle eyebrow="Integrations" title="Connected tools" description="Browse integrations by function. Connected tools stay in Installed so they are always easy to find." />
+        <label className="flex h-10 w-full items-center gap-2 rounded-control border border-line bg-white px-3 transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/15 sm:w-72">
           <Search size={16} className="text-slate-400" />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search integrations" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
         </label>
       </section>
 
-      <div className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-200">
+      <div className="flex gap-1 overflow-x-auto border-b border-line">
         {categories.map((item) => {
           const count = item.id === "all" ? workspaceTools.length : item.id === "installed" ? workspaceTools.filter((tool) => tool.installed).length : workspaceTools.filter((tool) => tool.category === item.id).length;
           return (

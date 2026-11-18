@@ -558,9 +558,9 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       const result = await publishApproved()
       await reload()
       const count = result?.published || 0
-      showToast(count ? `${count} approved ${count === 1 ? 'item has' : 'items have'} been published to Qdrant.` : 'All approved items are already in Qdrant.')
+      showToast(count ? `${count} approved ${count === 1 ? 'item has' : 'items have'} been published to Qdrant.` : 'All approved items are already live for your agent.')
     } catch (publishError) {
-      showToast(publishError.message || 'Could not publish the approved items to Qdrant.')
+      showToast(publishError.message || 'Could not publish the approved items to your agent.')
     } finally {
       setPublishingApproved(false)
     }
@@ -634,19 +634,19 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     )
   )
 
-  return <div className="page-enter mx-auto max-w-7xl">
+  return <div className="page-enter mx-auto w-full max-w-7xl">
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <p className="text-xs font-extrabold uppercase tracking-widest text-purple">Knowledge library</p>
+        {isProduct && <p className="text-xs font-medium uppercase tracking-wide text-primary">Business</p>}
         <div className="mt-1 flex flex-wrap items-center gap-2">
-          <h2 className="text-3xl font-extrabold tracking-tight">{title}</h2>
-          {!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-1 text-xs font-extrabold text-primary">{data.length} {title.toLowerCase()}</span>}
+          <h2 className={isProduct ? 'font-display text-[1.75rem] font-medium leading-tight' : 'font-display text-2xl font-medium'}><em>{title}</em></h2>
+          {!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-0.5 text-xs font-medium text-primary">{data.length}</span>}
           {isReadOnly && <span className="rounded-full bg-slate-100 border border-slate-200 px-2.5 py-0.5 text-[11px] font-bold text-slate-600">Read-Only</span>}
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
         {!isReadOnly && !isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
-        {!isReadOnly && !isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to Qdrant'}</Button>}
+        {!isReadOnly && !isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to agent'}</Button>}
         {isProduct && syncProducts && <Button variant="outline" onClick={sync} disabled={syncing}><RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Sync'}</Button>}
         {!isReadOnly && !isProduct && (
           <Button variant="outline" onClick={() => setBulkUploadOpen(true)}>
@@ -658,15 +658,15 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       </div>
     </div>
     {assistantDraft?.message && <section className="mt-5 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-700"><p className="font-extrabold text-ink">Orb product-update draft</p><p className="mt-1 whitespace-pre-wrap">{assistantDraft.message}</p><p className="mt-2 text-xs text-slate-500">Nothing has been changed. Open the matching product and choose the Shopify metafield that should receive this editable draft.</p></section>}
-    <section className="mt-6 rounded-lg border-2 border-ink bg-white p-4 shadow-brutal">
+    <section className="mt-5 rounded-card border border-line bg-white p-4 shadow-card">
       <div className={`grid items-center gap-3 ${isProduct ? (extraFilterAction ? 'md:grid-cols-[1fr_150px_190px_auto]' : 'md:grid-cols-[1fr_150px_190px]') : 'md:grid-cols-[1fr_150px_150px]'}`}>
-        <label className="flex items-center gap-2 rounded-md border-2 border-ink px-3 py-2"><Search size={16} /><input className="min-w-0 flex-1 outline-none" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>
+        <label className="flex h-10 items-center gap-2 rounded-control border border-line bg-white px-3 text-sm transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/15"><Search size={16} className="text-fg-muted" /><input className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg-muted/70" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>
         <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}>{isProduct ? <><option>All</option><option>Active</option><option>Draft</option></> : <><option>All</option><option>Draft</option><option>Approved</option></>}</Select>
         {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
         {extraFilterAction}
       </div>
       {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
-      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={`No ${title} yet`} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
+      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={isFaq ? 'Your agent is ready to learn' : isSop ? 'Give your agent your business processes' : `No ${title} yet`} description={isFaq ? 'Start by adding your first frequently asked question.' : isSop ? 'Give your agent access to your business processes by adding your first SOP.' : ''} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
     </section>
     <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
     <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />

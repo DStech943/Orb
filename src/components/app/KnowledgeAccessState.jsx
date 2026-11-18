@@ -9,14 +9,14 @@ const copyByStatus = {
     eyebrow: 'Knowledge connection',
     title: 'Orb can’t unlock this library yet.',
     body: 'The knowledge source is connected, but its access key does not currently allow Orb to read this brand’s published content.',
-    note: 'Ask a workspace admin to update the Qdrant database API key, then try again.',
+    note: 'Ask a workspace admin to update the knowledge database access key, then try again.',
     Icon: LockKeyhole,
   },
   401: {
     eyebrow: 'Knowledge connection',
     title: 'This library needs a valid key.',
     body: 'Orb could reach the knowledge source, but the connection could not be authenticated.',
-    note: 'Ask a workspace admin to check the Qdrant database API key, then try again.',
+    note: 'Ask a workspace admin to check the knowledge database access key, then try again.',
     Icon: LockKeyhole,
   },
   404: {

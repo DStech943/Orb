@@ -16,22 +16,14 @@ import { Link } from 'react-router-dom'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
-import { MOCK_STATES, useOverview } from '../services/overview'
+import { useOverview } from '../services/overview'
+import AgentHome from '../components/overview/AgentHome'
+import Panel from '../components/ui/Panel'
 import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker } from '../services/orbApi'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/ui/Modal'
 import { DEFAULT_OVERVIEW_BLOCKS, getOverviewBlocks, saveOverviewBlocks } from '../services/overviewBlocks'
-
-const WELCOME_LINES = [
-  'Good support is just consistency, repeated.',
-  'Every approved answer is one less reply someone has to rewrite.',
-  'Your agent is only as sharp as what it has been taught.',
-  'Small updates beat big rewrites. Refresh one thing today.',
-  'Clear answers mean fewer surprises for your customers.',
-]
-
-const DEV_STATES = MOCK_STATES || {}
 
 const METRIC_CONFIG = [
   { key: 'sops', label: 'SOPs', noun: 'SOP', nouns: 'SOPs', milestones: [1, 10, 25, 50], listTo: '/app/brain?tab=sops', draftTo: '/app/brain?tab=sops&status=draft', createTo: '/app/brain?tab=sops' },
@@ -118,139 +110,6 @@ function InlineBlockError({ label, onRetry }) {
   return <section className="rounded-xl border-2 border-ink bg-white p-4 shadow-brutal"><p className="text-sm font-extrabold">Could not load {label}</p><Button size="sm" variant="outline" className="mt-3" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
 }
 
-function MetricGrid({ counts, brandName, status, onRetry }) {
-  if (status === 'loading') return <section className="grid gap-5 md:grid-cols-3">{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} className="h-44" />)}</section>
-  if (status === 'error') return <InlineBlockError label="knowledge metrics" onRetry={onRetry} />
-  return <section className="grid gap-5 md:grid-cols-3">{METRIC_CONFIG.map((config) => <MetricBox key={config.key} config={config} data={counts?.[config.key]} brandName={brandName} />)}</section>
-}
-
-function useProductDrop(brandName, count) {
-  const [drop, setDrop] = useState(false)
-  useEffect(() => {
-    setDrop(false)
-    if (!count || hasReducedMotion()) return undefined
-    const frame = window.requestAnimationFrame(() => setDrop(true))
-    return () => window.cancelAnimationFrame(frame)
-  }, [brandName, count])
-  return drop
-}
-
-function removeWhiteImageCanvas(image) {
-  const maxSize = 900
-  const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight))
-  const width = Math.max(1, Math.round(image.naturalWidth * scale))
-  const height = Math.max(1, Math.round(image.naturalHeight * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) return ''
-  context.drawImage(image, 0, 0, width, height)
-  const pixels = context.getImageData(0, 0, width, height)
-  const { data } = pixels
-  const total = width * height
-  const seen = new Uint8Array(total)
-  const queue = new Int32Array(total)
-  let head = 0
-  let tail = 0
-  const isWhiteCanvas = (index) => {
-    const offset = index * 4
-    return data[offset + 3] > 12 && data[offset] > 240 && data[offset + 1] > 240 && data[offset + 2] > 240
-  }
-  const add = (index) => {
-    if (seen[index] || !isWhiteCanvas(index)) return
-    seen[index] = 1
-    queue[tail++] = index
-  }
-  for (let x = 0; x < width; x += 1) {
-    add(x)
-    add((height - 1) * width + x)
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    add(y * width)
-    add(y * width + width - 1)
-  }
-  while (head < tail) {
-    const index = queue[head++]
-    const x = index % width
-    const y = Math.floor(index / width)
-    data[index * 4 + 3] = 0
-    if (x) add(index - 1)
-    if (x < width - 1) add(index + 1)
-    if (y) add(index - width)
-    if (y < height - 1) add(index + width)
-  }
-  context.putImageData(pixels, 0, 0)
-  return canvas.toDataURL('image/png')
-}
-
-function ProductImage({ product, onUnavailable, onReady }) {
-  const [failed, setFailed] = useState(false)
-  const [source, setSource] = useState(product.imageUrl)
-  const [withoutCors, setWithoutCors] = useState(false)
-  const processed = useRef(false)
-  useEffect(() => {
-    setFailed(false)
-    setSource(product.imageUrl)
-    setWithoutCors(false)
-    processed.current = false
-  }, [product.id, product.imageUrl])
-  if (!product.imageUrl || failed) return null
-  const cleanBackground = (event) => {
-    onReady()
-    if (processed.current) return
-    processed.current = true
-    try {
-      const cleaned = removeWhiteImageCanvas(event.currentTarget)
-      if (cleaned) setSource(cleaned)
-    } catch {
-      // A non-CORS image can still render normally; it simply keeps its source canvas.
-    }
-  }
-  const handleImageError = () => {
-    // Keep valid non-CORS product images visible. They cannot be processed by
-    // canvas, but still fall back to the normal image instead of disappearing.
-    if (!withoutCors) {
-      setWithoutCors(true)
-      return
-    }
-    setFailed(true)
-    onUnavailable(product.id)
-  }
-  return <img key={`${source}:${withoutCors ? 'plain' : 'cors'}`} crossOrigin={withoutCors ? undefined : 'anonymous'} src={source} alt="" onLoad={cleanBackground} onError={handleImageError} className="aspect-square w-full object-contain" />
-}
-
-function ProductCard({ product, index, drop, onUnavailable }) {
-  const [ready, setReady] = useState(false)
-  useEffect(() => setReady(false), [product.id, product.imageUrl])
-  const style = { '--product-tilt': `${[-3, -1, 1, 3][index % 4]}deg`, '--wave-y': `${[18, 0, 20, 5][index % 4]}px`, '--float-delay': `${index * -0.8}s`, animationDelay: `${index * 90}ms` }
-  const className = `overview-product-card ${drop && ready ? 'overview-product-card--drop' : ''} relative`
-  const content = <span className="overview-product-art"><ProductImage product={product} onUnavailable={onUnavailable} onReady={() => setReady(true)} /></span>
-  if (product.productUrl) return <a href={product.productUrl} target="_blank" rel="noreferrer" aria-label={`Open ${product.title || 'product'} on the store`} className={className} style={style}>{content}</a>
-  return <Link to={`/app/products?product=${encodeURIComponent(product.id)}`} aria-label={`Open ${product.title || 'product'}`} className={className} style={style}>{content}</Link>
-}
-
-function ProductBlock({ products, productError, loading, brandName, onRetry }) {
-  const [unavailableImageIds, setUnavailableImageIds] = useState([])
-  const selected = useMemo(() => {
-    const items = (products || []).filter((product) => {
-      const isActive = String(product?.status || 'active').toLowerCase() === 'active'
-      return isActive && product.imageUrl && !unavailableImageIds.includes(product.id)
-    })
-    const hasBestSellers = items.some((product) => product.bestSellerScore !== null && product.bestSellerScore !== undefined)
-    return items.sort((a, b) => {
-      if (hasBestSellers) return Number(b.bestSellerScore || 0) - Number(a.bestSellerScore || 0)
-      return String(b.newestAt || '').localeCompare(String(a.newestAt || ''))
-    }).slice(0, 4)
-  }, [products, unavailableImageIds])
-  const drop = useProductDrop(brandName, selected.length)
-  const hideUnavailableProduct = (id) => setUnavailableImageIds((current) => (current.includes(id) ? current : [...current, id]))
-  if (loading) return <section aria-label="Loading featured products" className="overview-product-wave">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="overview-product-skeleton" />)}</section>
-  if (productError) return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><p className="font-extrabold">Could not load products</p><Button size="sm" variant="outline" className="mt-4" onClick={onRetry}><RefreshCw size={14} />Retry</Button></section>
-  if (!selected.length) return null
-  return <section aria-label="Featured products" className="overview-product-wave">{selected.map((product, index) => <ProductCard key={product.id} product={product} index={index} drop={drop} onUnavailable={hideUnavailableProduct} />)}</section>
-}
-
 const DAY = 86_400_000
 const expiryDate = (value) => {
   if (!value) return null
@@ -285,7 +144,7 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
 
   if (status === 'loading') {
     return (
-      <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
+      <section className="rounded-card border border-line bg-white p-4 shadow-card">
         <Skeleton className="h-5 w-36" />
         <Skeleton className="mt-5 h-12" />
         <Skeleton className="mt-3 h-12" />
@@ -308,24 +167,16 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
 
   return (
     <>
-      <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-              {near ? 'Near out of stock' : 'Out of stock products'}
-            </p>
-            <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 border border-rose-200">
-              {outOfStockItems.length}
-            </span>
-          </div>
-          <Link to="/app/products" className="text-xs font-extrabold text-primary hover:underline">
-            View catalog
-          </Link>
-        </div>
+      <Panel
+        title={near ? 'Near out of stock' : 'Out of stock products'}
+        count={outOfStockItems.length}
+        countTone={outOfStockItems.length ? (near ? 'warning' : 'danger') : 'success'}
+        action={{ to: '/app/products', label: 'View catalog' }}
+      >
 
         {outOfStockItems.length > 0 ? (
           <>
-            <div className="mt-3 divide-y divide-ink/10">
+            <div className="mt-3 divide-y divide-line">
               {visibleItems.map((item) => {
                 const timeAgo = formatDaysAgo(item.outOfStockSince)
                 return (
@@ -335,23 +186,23 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
                         <img
                           src={item.imageUrl}
                           alt={item.title}
-                          className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 object-cover bg-slate-50"
+                          className="h-10 w-10 shrink-0 rounded-lg border border-line object-cover bg-canvas"
                         />
                       ) : (
-                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-100 text-slate-400">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-subtle text-fg-muted">
                           <PackageX size={18} />
                         </span>
                       )}
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-extrabold text-ink">
+                        <p className="truncate text-sm font-semibold text-ink">
                           {item.title}
                         </p>
-                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-fg-muted">
                           {item.price && <span>{item.price}</span>}
                           {timeAgo && (
                             <>
                               <span>•</span>
-                              <span className="text-rose-600 font-semibold">
+                              <span className="text-danger font-semibold">
                                 {near ? `${item.totalInventory} left` : `Out of stock: ${timeAgo}`}
                               </span>
                             </>
@@ -362,7 +213,7 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
 
                     <Link
                       to={`/app/products?product=${encodeURIComponent(item.id)}`}
-                      className="shrink-0 text-xs font-bold text-slate-500 hover:text-primary transition"
+                      className="shrink-0 text-xs font-medium text-fg-muted hover:text-primary transition"
                       title="Inspect product"
                     >
                       <ArrowUpRight size={15} />
@@ -376,26 +227,26 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
               <button
                 type="button"
                 onClick={() => setModalOpen(true)}
-                className="mt-3 w-full rounded-lg border border-ink/15 bg-slate-50/80 py-2 text-center text-xs font-bold text-ink hover:bg-slate-100 hover:border-primary/40 transition"
+                className="mt-3 w-full rounded-lg border border-line bg-canvas py-2 text-center text-xs font-medium text-ink hover:bg-subtle hover:border-primary/40 transition"
               >
                 View all {outOfStockItems.length} {near ? 'near out of stock' : 'out of stock'} products →
               </button>
             )}
           </>
         ) : (
-          <div className="mt-5 flex items-center gap-2 text-sm font-bold text-muted">
-            <Check size={17} className="text-emerald-600" />
+          <div className="mt-5 flex items-center gap-2 text-sm font-medium text-fg-muted">
+            <Check size={17} className="text-success" />
             {near ? 'No active product has fewer than 7 items left.' : 'All active products have available inventory.'}
           </div>
         )}
-      </section>
+      </Panel>
 
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         title={near ? `Near out of stock products (${outOfStockItems.length})` : `Out of stock products (${outOfStockItems.length})`}
       >
-        <div className="max-h-[60vh] overflow-y-auto pr-1 divide-y divide-ink/10">
+        <div className="max-h-[60vh] overflow-y-auto pr-1 divide-y divide-line">
           {outOfStockItems.map((item) => {
             const timeAgo = formatDaysAgo(item.outOfStockSince)
             return (
@@ -405,23 +256,23 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
                     <img
                       src={item.imageUrl}
                       alt={item.title}
-                      className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 object-cover bg-slate-50"
+                      className="h-10 w-10 shrink-0 rounded-lg border border-line object-cover bg-canvas"
                     />
                   ) : (
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-100 text-slate-400">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-subtle text-fg-muted">
                       <PackageX size={18} />
                     </span>
                   )}
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-extrabold text-ink">
+                    <p className="truncate text-sm font-semibold text-ink">
                       {item.title}
                     </p>
-                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
+                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-fg-muted">
                       {item.price && <span>{item.price}</span>}
                       {timeAgo && (
                         <>
                           <span>•</span>
-                          <span className="text-rose-600 font-semibold">
+                          <span className="text-danger font-semibold">
                             {near ? `${item.totalInventory} left` : `Out of stock: ${timeAgo}`}
                           </span>
                         </>
@@ -433,7 +284,7 @@ function InventoryProducts({ products = [], status, onRetry, near = false }) {
                 <Link
                   to={`/app/products?product=${encodeURIComponent(item.id)}`}
                   onClick={() => setModalOpen(false)}
-                  className="shrink-0 text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                  className="shrink-0 text-xs font-medium text-primary hover:underline flex items-center gap-1"
                   title="Inspect product"
                 >
                   <span>Inspect</span>
@@ -473,12 +324,9 @@ function TrackedVariantMetafield({ brandName }) {
 }
 
 const OVERVIEW_BLOCK_OPTIONS = [
-  { id: 'flows', label: 'Flows', description: 'Published and draft flow count.' },
   { id: 'out_of_stock', label: 'Out of stock products', description: 'Active products with no inventory.' },
   { id: 'near_out_of_stock', label: 'Near out of stock products', description: 'Active products with fewer than 7 items left.' },
   { id: 'operations', label: 'Active operations', description: 'Offers, notices, and restock updates currently used by the agent.' },
-  { id: 'faqs', label: 'FAQs', description: 'Published FAQ count and drafts.' },
-  { id: 'sops', label: 'SOPs', description: 'Published SOP count and drafts.' },
 ]
 
 function OverviewBlockCustomizer({ blocks, onChange, saving }) {
@@ -522,18 +370,18 @@ function MastersheetBanner({ brandName }) {
   const isConfigured = Boolean(liveUrl)
 
   return (
-    <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal">
+    <section className="rounded-card border border-line bg-white p-4 shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-emerald-50 text-emerald-700 shadow-2xs">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-success-tint text-success">
             <FileSpreadsheet size={22} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-extrabold text-ink tracking-tight">
+              <h3 className="font-display text-base font-medium text-ink">
                 Brand Mastersheet
               </h3>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold border ${
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
                 isConfigured
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                   : 'bg-amber-50 text-amber-800 border-amber-200'
@@ -553,7 +401,7 @@ function MastersheetBanner({ brandName }) {
           {!isConfigured && (
             <Link
               to="/app/tools"
-              className="inline-flex items-center gap-1.5 rounded-md border-2 border-ink bg-white px-3 py-2 text-xs font-bold text-ink shadow-brutal hover:bg-slate-50 transition"
+              className="inline-flex h-9 items-center gap-1.5 rounded-control border border-line-strong bg-white px-3 text-xs font-medium text-ink shadow-card transition hover:border-primary/40 hover:bg-subtle"
             >
               <span>Configure in Tools</span>
             </Link>
@@ -562,7 +410,7 @@ function MastersheetBanner({ brandName }) {
             href={targetUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="interactive-brutal inline-flex items-center gap-2 rounded-md border-2 border-ink bg-emerald-100 px-4 py-2.5 text-xs font-bold text-emerald-950 shadow-brutal hover:bg-emerald-200 transition"
+            className="inline-flex h-9 items-center gap-2 rounded-control bg-primary px-3.5 text-xs font-medium text-white shadow-card transition hover:bg-primary-dark"
           >
             <span>Open Mastersheet</span>
             <ExternalLink size={14} className="text-emerald-800" />
@@ -594,7 +442,7 @@ function ExtendOperationModal({ operation, onClose, onSaved }) {
 
 function ActiveOperations({ operations, now, isAdmin, onExtended, status, onRetry }) {
   const [extending, setExtending] = useState(null)
-  if (status === 'loading') return <section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><Skeleton className="h-5 w-32" /><Skeleton className="mt-5 h-16" /><Skeleton className="mt-3 h-16" /></section>
+  if (status === 'loading') return <section className="rounded-card border border-line bg-white p-4 shadow-card"><Skeleton className="h-5 w-32" /><Skeleton className="mt-5 h-16" /><Skeleton className="mt-3 h-16" /></section>
   if (status === 'error') return <InlineBlockError label="operations" onRetry={onRetry} />
   const sorted = [...(operations || [])].sort((a, b) => {
     const first = expiryDate(a.expiresAt)?.getTime() ?? Number.POSITIVE_INFINITY
@@ -603,78 +451,18 @@ function ActiveOperations({ operations, now, isAdmin, onExtended, status, onRetr
   })
   const active = sorted.filter((operation) => !countdown(operation.expiresAt, now).expired).slice(0, 5)
   const expired = sorted.filter((operation) => countdown(operation.expiresAt, now).expired)
-  return <><section className="rounded-xl border-2 border-ink bg-white p-5 shadow-brutal"><div className="flex items-center justify-between gap-3"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Active operations</p><Link to="/app/operations" className="text-xs font-extrabold text-primary hover:underline">View all</Link></div>{active.length ? <div className="mt-3 divide-y divide-ink/10">{active.map((operation) => { const state = countdown(operation.expiresAt, now); return <article key={operation.id} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-extrabold">{operation.title}</p><div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-bold"><span className="rounded-full border border-ink/15 px-2 py-0.5 capitalize">{operation.kind || 'notice'}</span><span className={state.urgent ? 'text-primary' : 'text-muted'}>{state.label}</span></div></div>{isAdmin && <button type="button" onClick={() => setExtending(operation)} className="shrink-0 text-xs font-extrabold text-primary hover:underline">Extend</button>}</div><p className="mt-2 text-xs leading-5 text-muted">{operation.agentBehaviour || 'The agent uses this update while it is active.'}</p></article> })}</div> : <p className="mt-5 text-sm leading-6 text-muted">No active operations. Add an offer or restock date so the agent can use it.</p>}{expired.length > 0 && <details className="mt-4 border-t border-ink/10 pt-3"><summary className="cursor-pointer text-xs font-extrabold text-muted">Recently expired ({expired.length})</summary><div className="mt-2 divide-y divide-ink/10">{expired.map((operation) => <div key={operation.id} className="py-2"><p className="text-sm font-bold text-muted">{operation.title}</p><p className="mt-1 text-xs text-muted">No longer used by the agent.</p></div>)}</div></details>}</section><ExtendOperationModal operation={extending} onClose={() => setExtending(null)} onSaved={(newExpiresAt) => onExtended(extending.id, newExpiresAt)} /></>
-}
-
-function deriveSetupSteps(overview) {
-  const counts = overview.counts || {}
-  const sops = counts.sops || {}
-  const faqs = counts.faqs || {}
-  const flows = counts.flows || {}
-  const draftsAndPublished = [sops, faqs, flows].reduce((total, item) => total + Number(item.drafts || 0) + Number(item.published || 0), 0)
-  const steps = [
-    { key: 'source', label: 'Add a knowledge source', why: 'Give Orb reliable material to learn from.', done: Number(overview.flags?.sourceCount || 0) > 0, to: '/app/workspace?tab=source' },
-    { key: 'generate', label: 'Generate your first drafts', why: 'Turn your source into editable customer knowledge.', done: draftsAndPublished > 0, to: '/app/workspace?tab=source' },
-    { key: 'review', label: 'Review a draft', why: 'Check that the response is accurate and on-brand.', done: Number(sops.approved || 0) + Number(faqs.approved || 0) > 0, to: '/app/brain?tab=sops&status=draft' },
-    { key: 'publish', label: 'Publish your first SOP or FAQ', why: 'Make approved knowledge available to the agent.', done: Number(sops.published || 0) + Number(faqs.published || 0) > 0, to: '/app/brain?tab=sops' },
-    { key: 'flow', label: 'Create your first flow', why: 'Document the decisions your team repeats most often.', done: Number(flows.published || 0) + Number(flows.drafts || 0) > 0, to: '/app/flows?create=1' },
-  ]
-  if (overview.brand?.platform === 'shopify' && !overview.brand?.shopifyConnected) steps.push({ key: 'shopify', label: 'Connect Shopify', why: 'Keep products and availability current for the agent.', done: false, to: '/app/tools' })
-  return steps
-}
-
-function SpringCheck({ animated }) {
-  return <svg className={`setup-check ${animated ? 'setup-check--draw' : ''}`} viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 3.5 3.5L16 5.8" /></svg>
-}
-
-function SetupChecklist({ steps = [], large = false }) {
-  const previous = useRef(null)
-  const [drawn, setDrawn] = useState({})
-  useEffect(() => {
-    if (!previous.current) { previous.current = Object.fromEntries(steps.map((step) => [step.key, step.done])); return undefined }
-    const next = {}
-    steps.forEach((step) => { if (!previous.current[step.key] && step.done) next[step.key] = true })
-    previous.current = Object.fromEntries(steps.map((step) => [step.key, step.done]))
-    if (!Object.keys(next).length) return undefined
-    setDrawn(next)
-    const timer = window.setTimeout(() => setDrawn({}), 700)
-    return () => window.clearTimeout(timer)
-  }, [steps])
-  const firstIncomplete = steps.find((step) => !step.done)?.key
-  return <section className={`${large ? 'mt-8 p-7 sm:p-9' : 'p-5'} rounded-xl border-2 border-ink bg-white shadow-brutal`}><p className="text-xs font-extrabold uppercase tracking-widest text-primary">Next steps</p><h2 className={`${large ? 'mt-2 text-2xl' : 'mt-1 text-lg'} font-extrabold`}>{large ? 'Set up your support workspace' : 'Finish setting up Orb'}</h2><div className="mt-5 grid gap-2">{steps.map((step) => <Link key={step.key} to={step.to} className={`flex items-center gap-3 rounded-lg border px-3 py-3 transition hover:border-primary/50 ${!step.done && step.key === firstIncomplete ? 'border-primary bg-primary-tint/35' : 'border-ink/10 bg-white'}`}><span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${step.done ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-ink/25 text-muted'}`}>{step.done ? <SpringCheck animated={Boolean(drawn[step.key])} /> : <span className="text-xs font-extrabold">{steps.indexOf(step) + 1}</span>}</span><span className="min-w-0 flex-1"><span className="block text-sm font-extrabold">{step.label}</span><span className="mt-0.5 block text-xs leading-5 text-muted">{step.why}</span></span><ArrowUpRight size={16} className="shrink-0 text-muted" /></Link>)}</div></section>
-}
-
-function NewBrandSetup({ steps }) {
-  return <section className="mt-8 rounded-2xl border border-ink/15 bg-white p-8 shadow-sm sm:p-10"><div className="max-w-2xl"><span className="grid h-12 w-12 place-items-center rounded-xl bg-primary-tint text-primary"><Sparkles size={22} /></span><h2 className="mt-5 text-2xl font-extrabold tracking-tight">Start building your agent's brain</h2><p className="mt-2 text-sm leading-6 text-muted">Add a website, document, or product source. Orb will turn it into support knowledge your team can review.</p><Link to="/app/workspace?tab=source" className="mt-6 inline-flex"><Button variant="purple"><Plus size={16} />Add your first source</Button></Link></div><SetupChecklist steps={steps} large /></section>
+  return <><Panel title="Active operations" count={active.length} countTone={active.length ? 'success' : 'neutral'} action={{ to: '/app/operations', label: 'View all' }}>{active.length ? <div className="mt-3 divide-y divide-line">{active.map((operation) => { const state = countdown(operation.expiresAt, now); return <article key={operation.id} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{operation.title}</p><div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium"><span className="rounded-full border border-line px-2 py-0.5 capitalize">{operation.kind || 'notice'}</span><span className={state.urgent ? 'text-primary' : 'text-fg-muted'}>{state.label}</span></div></div>{isAdmin && <button type="button" onClick={() => setExtending(operation)} className="shrink-0 text-xs font-semibold text-primary hover:underline">Extend</button>}</div><p className="mt-2 text-xs leading-5 text-fg-muted">{operation.agentBehaviour || 'The agent uses this update while it is active.'}</p></article> })}</div> : <p className="mt-5 text-sm leading-6 text-fg-muted">No active operations. Add an offer or restock date so the agent can use it.</p>}{expired.length > 0 && <details className="mt-4 border-t border-line pt-3"><summary className="cursor-pointer text-xs font-semibold text-fg-muted">Recently expired ({expired.length})</summary><div className="mt-2 divide-y divide-line">{expired.map((operation) => <div key={operation.id} className="py-2"><p className="text-sm font-medium text-fg-muted">{operation.title}</p><p className="mt-1 text-xs text-fg-muted">No longer used by the agent.</p></div>)}</div></details>}</Panel><ExtendOperationModal operation={extending} onClose={() => setExtending(null)} onSaved={(newExpiresAt) => onExtended(extending.id, newExpiresAt)} /></>
 }
 
 function BrandOverview({ overview, onRetry }) {
   const { isAdmin } = useAuth()
-  const totalDrafts = Object.values(overview.counts || {}).reduce((total, item) => total + Number(item?.drafts || 0), 0)
-  const sourceCount = Number(overview.flags?.sourceCount || 0)
-  const isNewBrand = (overview.blockStatus?.metrics || 'ready') === 'ready' && sourceCount === 0 && totalDrafts === 0 && Object.values(overview.counts || {}).every((item) => Number(item?.published || 0) === 0)
   const brandName = overview.brand?.name || 'Your brand'
-  const setupSteps = useMemo(() => deriveSetupSteps(overview), [overview])
-  const setupComplete = setupSteps.every((step) => step.done)
-  const setupStorageKey = `orb:overview:setup-completed:${brandName}`
-  const sessionKey = `orb:overview-welcome:${brandName}`
-  const [welcome, setWelcome] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const [operations, setOperations] = useState(overview.operations || [])
-  const [setupHidden, setSetupHidden] = useState(false)
-  const [setupCelebrating, setSetupCelebrating] = useState(false)
   const [blocks, setBlocks] = useState(DEFAULT_OVERVIEW_BLOCKS)
   const [savingBlocks, setSavingBlocks] = useState(false)
   const { showToast } = useToast()
   const brandId = overview.brand?.id || activeBrandId()
-
-  useEffect(() => {
-    const saved = window.sessionStorage.getItem(sessionKey)
-    if (saved) { setWelcome(saved); return }
-    const selected = WELCOME_LINES[Math.floor(Math.random() * WELCOME_LINES.length)]
-    window.sessionStorage.setItem(sessionKey, selected)
-    setWelcome(selected)
-  }, [sessionKey])
 
   useEffect(() => { setOperations(overview.operations || []) }, [overview.operations])
   useEffect(() => {
@@ -682,17 +470,6 @@ function BrandOverview({ overview, onRetry }) {
     getOverviewBlocks(brandId, brandName).then((next) => { if (active) setBlocks(next) }).catch(() => { if (active) setBlocks(DEFAULT_OVERVIEW_BLOCKS) })
     return () => { active = false }
   }, [brandId, brandName])
-  useEffect(() => {
-    if (window.localStorage.getItem(setupStorageKey)) { setSetupHidden(true); setSetupCelebrating(false); return undefined }
-    if (!setupComplete) { setSetupHidden(false); setSetupCelebrating(false); return undefined }
-    setSetupCelebrating(true)
-    const timer = window.setTimeout(() => {
-      window.localStorage.setItem(setupStorageKey, new Date().toISOString())
-      setSetupHidden(true)
-      setSetupCelebrating(false)
-    }, 1450)
-    return () => window.clearTimeout(timer)
-  }, [setupComplete, setupStorageKey])
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 60_000)
     return () => window.clearInterval(interval)
@@ -703,29 +480,32 @@ function BrandOverview({ overview, onRetry }) {
     setBlocks(next); setSavingBlocks(true)
     try { await saveOverviewBlocks(brandId, brandName, next) } catch (error) { setBlocks(blocks); showToast(error.message || 'Could not save this Overview layout.', 'error') } finally { setSavingBlocks(false) }
   }
-  const flowConfig = METRIC_CONFIG.find((config) => config.key === 'flows')
-  const optionalMetric = (key) => METRIC_CONFIG.find((config) => config.key === key)
+    const hasOperationalBlocks = blocks.some((block) => ['out_of_stock', 'near_out_of_stock', 'operations'].includes(block))
 
-  return <div className="mx-auto max-w-6xl"><header className="overview-welcome"><p className="text-xs font-extrabold uppercase tracking-widest text-primary">{brandName}</p><h1 className="mt-2 text-3xl font-extrabold tracking-tight sm:text-4xl">Welcome, {overview.user?.firstName || 'there'}</h1><p className="mt-3 text-sm text-muted">{totalDrafts > 0 ? `${totalDrafts} draft${totalDrafts === 1 ? '' : 's'} are waiting for you.` : welcome}</p>{!isNewBrand && <ProductBlock products={overview.products} productError={overview.blockErrors?.products || overview.productError} loading={overview.blockStatus?.products === 'loading'} brandName={brandName} onRetry={onRetry} />}{isAdmin && <OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} />}</header>
-    {isNewBrand ? <NewBrandSetup steps={setupSteps} /> : <main className="mt-8 grid gap-5">
-      <MastersheetBanner brandName={brandName} />
-      <div className="grid gap-5 lg:grid-cols-2">
-        {blocks.includes('flows') && <MetricBox config={flowConfig} data={overview.counts?.flows} brandName={brandName} />}
-        {blocks.includes('out_of_stock') && <InventoryProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />}
-        {blocks.includes('near_out_of_stock') && <InventoryProducts near products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} />}
-        {blocks.includes('operations') && <ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} />}
-        {blocks.includes('faqs') && <MetricBox config={optionalMetric('faqs')} data={overview.counts?.faqs} brandName={brandName} />}
-        {blocks.includes('sops') && <MetricBox config={optionalMetric('sops')} data={overview.counts?.sops} brandName={brandName} />}
+  return <div className="mx-auto w-full max-w-7xl">
+    <AgentHome overview={overview} onRetry={onRetry} middle={(
+    <section aria-labelledby="business-title">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 id="business-title" className="font-display text-lg font-medium">Business <em>snapshot</em></h3>
+        {isAdmin && <div className="relative h-7 w-7"><OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} /></div>}
       </div>
-    </main>}
+      <div className="grid gap-5">
+        <MastersheetBanner brandName={brandName} />
+        {/* Equal-height row: every panel stretches to the tallest, so there is never a blank band between cards. */}
+        {hasOperationalBlocks && <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {blocks.includes('out_of_stock') && <div className="h-full [&>section]:h-full"><InventoryProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} /></div>}
+          {blocks.includes('near_out_of_stock') && <div className="h-full [&>section]:h-full"><InventoryProducts near products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} /></div>}
+          {blocks.includes('operations') && <div className="h-full [&>section]:h-full"><ActiveOperations operations={operations} now={now} isAdmin={isAdmin} onExtended={extend} status={overview.blockStatus?.operations} onRetry={onRetry} /></div>}
+        </div>}
+      </div>
+    </section>
+    )} />
   </div>
 }
 
 export default function Overview() {
-  const { data, loading, error, reload } = useOverview()
-  const [devState, setDevState] = useState('live')
-  const overview = useMemo(() => devState === 'live' ? data : DEV_STATES[devState], [data, devState])
-  if (loading && !overview) return <div className="mx-auto grid max-w-6xl gap-5"><Skeleton className="h-28" /><section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-64" />)}</section><Skeleton className="h-48" /></div>
-  if (error && !overview) return <EmptyState title="Could not load this brand overview." action="Retry" onAction={reload} />
-  return <>{import.meta.env.DEV && <label className="mb-5 flex w-fit items-center gap-2 rounded-lg border border-dashed border-ink/20 bg-white/70 px-3 py-2 text-xs font-bold text-muted">Preview state <select value={devState} onChange={(event) => setDevState(event.target.value)} className="bg-transparent text-ink outline-none"><option value="live">Live data</option><option value="new">New brand</option><option value="partial">Partial setup</option><option value="complete">Complete setup</option><option value="nonShopify">Non-Shopify brand</option></select></label>}{overview && <BrandOverview overview={overview} onRetry={reload} />}</>
+  const { data: overview, loading, error, reload } = useOverview()
+  if (loading && !overview) return <div className="mx-auto grid w-full max-w-7xl gap-5" aria-busy="true"><Skeleton className="h-44" /><div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]"><Skeleton className="h-72" /><Skeleton className="h-72" /></div><Skeleton className="h-28" /></div>
+  if (error && !overview) return <EmptyState icon={AlertTriangle} title="We couldn’t load this workspace." description="Check your connection and try again." action="Try again" onAction={reload} />
+  return overview ? <BrandOverview overview={overview} onRetry={reload} /> : null
 }

@@ -333,11 +333,11 @@ export default function BulkUploadModal({
       const published = result?.published ?? 0
       if (published > 0) {
         showToast(
-          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')} and published to Qdrant.`
+          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')} and published to your agent.`
         )
       } else if (result?.qdrant_error) {
         showToast(
-          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}, but Qdrant publishing encountered an issue: ${result.qdrant_error}. Click "Publish approved to Qdrant" to retry.`
+          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}, but publishing to your agent ran into an issue: ${result.qdrant_error}. Click "Publish approved to Qdrant" to retry.`
         )
       } else if (defaultStatus === 'Draft') {
         showToast(
@@ -553,15 +553,15 @@ export default function BulkUploadModal({
           <label className="grid gap-1 text-xs font-bold text-slate-700">
             Initial Status
             <span className="text-[11px] font-normal text-slate-500">
-              Draft (requires approval before Qdrant) or Approved (stored in Qdrant)
+              Draft (needs your approval first) or Approved (your agent can use it right away)
             </span>
             <select
               value={defaultStatus}
               onChange={(e) => setDefaultStatus(e.target.value)}
               className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary"
             >
-              <option value="Draft">Draft (review before publishing to Qdrant)</option>
-              <option value="Approved">Approved (indexes directly into Qdrant)</option>
+              <option value="Draft">Draft (review before your agent uses it)</option>
+              <option value="Approved">Approved (your agent can use it right away)</option>
             </select>
           </label>
         </div>

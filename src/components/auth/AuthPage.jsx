@@ -10,6 +10,7 @@ import {
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { authBenefits } from "../../data/authContent";
 import { useAuth } from "../../context/AuthContext";
+import { rememberReturnPath, safeAppPath } from "../../lib/returnTo";
 
 function Field({ label, children }) {
   return (
@@ -102,7 +103,9 @@ export default function AuthPage({ mode = "login" }) {
       window.clearInterval(interval);
     };
   }, [mode]);
-  if (user) return <Navigate to="/app" replace />;
+  // Signing in sets `user` before the submit handler below finishes, so this branch
+  // must also honour the page the person came from, not only /app.
+  if (user) return <Navigate to={safeAppPath(location.state?.from?.pathname) || "/app"} replace />;
   const updateField = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
   };
@@ -117,7 +120,7 @@ export default function AuthPage({ mode = "login" }) {
     try {
       if (isSignup) await signup(form);
       else await login(form);
-      navigate(location.state?.from?.pathname || "/app", { replace: true });
+      navigate(safeAppPath(location.state?.from?.pathname) || "/app", { replace: true });
     } catch (authError) {
       const message =
         authError.message || "Something went wrong. Please try again.";
@@ -130,6 +133,7 @@ export default function AuthPage({ mode = "login" }) {
     setError("");
     setSubmitting(true);
     try {
+      rememberReturnPath(location.state?.from?.pathname);
       await loginWithGoogle();
     } catch (authError) {
       setError(authError.message || "Google sign-in could not start.");
@@ -137,7 +141,7 @@ export default function AuthPage({ mode = "login" }) {
     }
   };
   return (
-    <main className="min-h-screen bg-[#E6E9EF] px-5 py-8 sm:grid sm:place-items-center sm:p-8">
+    <main className="min-h-screen bg-[#F7F8FC] px-5 py-8 sm:grid sm:place-items-center sm:p-8">
       <div className="mx-auto grid w-full max-w-6xl overflow-hidden rounded-lg border-2 border-ink bg-white shadow-brutal-lg lg:grid-cols-[1.05fr_1fr]">
         <aside className="relative overflow-hidden bg-ink p-8 text-white sm:p-12">
           <div className="absolute -left-20 -top-16 h-64 w-64 rounded-full bg-purple/70 blur-3xl" />

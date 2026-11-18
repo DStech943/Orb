@@ -1,8 +1,6 @@
 """Authenticated, server-side Slack escalation endpoints."""
 from __future__ import annotations
 
-import html
-import json
 from typing import Any
 
 import httpx
@@ -13,50 +11,18 @@ from app.api.knowledge import _remote_brand_by_name, _supabase_rows, _supabase_s
 from app.auth import User, current_user
 from app.api.shopify import _resolve_credentials
 from app.scraper.shopify import ShopifyAdminUnavailable, _admin_query, admin_domain, list_admin_products
+from app.services.slack import platform_config as _platform_config
+from app.services.slack import slack_json as _slack_json
+from app.services.slack import slack_text as _slack_text
+from app.services.slack import upload_file as _upload_file
 
 
 router = APIRouter(prefix="/api/escalations", tags=["escalations"])
-_SLACK_API = "https://slack.com/api"
 _MAX_ATTACHMENTS = 5
 
 
 class DailySlackReportRequest(BaseModel):
     brand_name: str = Field(min_length=1, max_length=160)
-
-
-def _platform_config(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        return decoded if isinstance(decoded, dict) else {}
-    return {}
-
-
-def _slack_text(value: str) -> str:
-    # Keep a user's angle brackets from becoming arbitrary Slack markup.
-    return html.escape(value.strip())
-
-
-async def _slack_json(
-    client: httpx.AsyncClient, token: str, method: str, payload: dict[str, Any]
-) -> dict[str, Any]:
-    try:
-        response = await client.post(
-            f"{_SLACK_API}/{method}",
-            headers={"Authorization": f"Bearer {token}"},
-            json=payload,
-        )
-        body = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Slack could not be reached") from exc
-    if not response.is_success or not body.get("ok"):
-        # Do not return Slack's detailed response: it can contain workspace data.
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Slack rejected the escalation. Check the bot scopes and channel access.")
-    return body
 
 
 @router.post("/slack")
@@ -115,22 +81,15 @@ async def send_slack_escalation(
             "blocks": blocks,
         })
         for filename, content_type, content in attachment_data:
-            upload_url = await _slack_json(client, settings.slack_bot_token, "files.getUploadURLExternal", {
-                "filename": filename,
-                "length": len(content),
-            })
-            try:
-                uploaded = await client.post(
-                    str(upload_url["upload_url"]), content=content, headers={"Content-Type": content_type}
-                )
-                uploaded.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Slack could not upload an attachment.") from exc
-            await _slack_json(client, settings.slack_bot_token, "files.completeUploadExternal", {
-                "files": [{"id": upload_url["file_id"], "title": filename}],
-                "channel_id": channel_id,
-                "initial_comment": f"Attachment for Orb escalation ({posted.get('ts', 'new message')}).",
-            })
+            await _upload_file(
+                client,
+                settings.slack_bot_token,
+                channel_id=channel_id,
+                filename=filename,
+                content=content,
+                content_type=content_type,
+                initial_comment=f"Attachment for Orb escalation ({posted.get('ts', 'new message')}).",
+            )
 
     return {"ok": True, "channel_id": channel_id, "attachments_uploaded": len(attachment_data)}
 

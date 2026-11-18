@@ -82,10 +82,10 @@ export default function BrandCategorySetup({ isAdmin }) {
     }
   }
 
-  if (!isAdmin) return <p className="rounded-md border border-ink/15 bg-[#E6E9EF] p-3 text-sm text-muted">An administrator chooses the category used for SOP templates.</p>
-  if (!hasOrbApi && !loading) return <p className="rounded-md border border-ink/15 bg-[#E6E9EF] p-3 text-sm text-muted">Start the Orb backend to choose a category and load its SOP templates.</p>
+  if (!isAdmin) return <p className="rounded-md border border-ink/15 bg-white/60 p-3 text-sm text-muted">An administrator chooses the category used for SOP templates.</p>
+  if (!hasOrbApi && !loading) return <p className="rounded-md border border-ink/15 bg-white/60 p-3 text-sm text-muted">Start the Orb backend to choose a category and load its SOP templates.</p>
 
-  return <section className="mb-6 rounded-lg border-2 border-ink bg-[#E6E9EF] p-4 sm:p-5">
+  return <section className="mb-6 rounded-lg border-2 border-ink bg-white/60 p-4 sm:p-5">
     <p className="text-xs font-extrabold uppercase tracking-widest text-purple">SOP generation</p>
     <h3 className="mt-1 text-xl font-extrabold tracking-tight">Brand category</h3>
     <p className="mt-1 max-w-2xl text-sm text-muted">Choose the category for the active brand. Orb uses it to select the matching SOP template before generation.</p>

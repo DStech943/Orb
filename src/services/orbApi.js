@@ -219,6 +219,32 @@ export const createBrandAgentFeedback = (brandId, payload) =>
     method: "POST",
     body: JSON.stringify(payload),
   });
+// Escalated issue reports carry a conversation snapshot and notify the team in
+// Slack. The Idempotency-Key makes an accidental double-submit return the same
+// saved report instead of creating a second Slack notification.
+export const reportBrandAgentIssue = (brandId, payload, idempotencyKey) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback/report`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
+  });
+// One saved report with its conversation snapshot, for the page the Slack link opens.
+// Supabase RLS decides who may read it: admins and members of the report's brand.
+export const getBrandAgentFeedbackReport = (brandId, feedbackId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback/${encodeURIComponent(feedbackId)}`, {
+    cacheTtl: 0,
+  });
+// Admin only: retry a report whose Slack delivery failed.
+export const resendBrandAgentFeedbackToSlack = (brandId, feedbackId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback/${encodeURIComponent(feedbackId)}/slack-resend`, {
+    method: "POST",
+  });
+// Teammates who can be tagged on a report. Orb returns directory ids and display
+// details only; the Slack user ids stay server-side.
+export const listBrandSlackPeople = (brandId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/slack-people`, {
+    cacheTtl: 60_000,
+  });
 export const updateBrandAgentFeedback = (brandId, feedbackId, payload) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback/${encodeURIComponent(feedbackId)}`, {
     method: "PATCH",

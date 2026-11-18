@@ -1664,7 +1664,24 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
         "status": str(row.get("status") or "open"),
         "submitted_by": str(row.get("submitted_by") or ""),
         "created_at": row.get("created_at"),
+        # Issue-report fields (migration 20261117). Plain feedback leaves them empty.
+        "kind": str(row.get("kind") or "feedback"),
+        "category": row.get("category"),
+        "severity": row.get("severity"),
+        "tagged_people": [
+            {"id": str(person.get("id") or ""), "name": str(person.get("name") or "")}
+            for person in (row.get("tagged_people") if isinstance(row.get("tagged_people"), list) else [])
+            if isinstance(person, dict)
+        ],
+        "slack_delivery_status": str(row.get("slack_delivery_status") or "not_applicable"),
+        # True once the Slack message itself is posted, even if a later step (the
+        # transcript file) failed, so the UI can say what actually reached Slack.
+        "slack_message_posted": bool(row.get("slack_message_ts")),
     }
+
+
+_AGENT_FEEDBACK_LEGACY_COLUMNS = "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at"
+_AGENT_FEEDBACK_REPORT_COLUMNS = f"{_AGENT_FEEDBACK_LEGACY_COLUMNS},kind,category,severity,tagged_people,slack_delivery_status,slack_message_ts"
 
 
 @router.get("/brands/{brand_id}/agent-feedback")
@@ -1682,18 +1699,22 @@ async def list_agent_feedback(
         await _admin(request, user)
     brand = await _remote_brand(request, brand_id)
     params = {
-        "select": "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at",
+        "select": _AGENT_FEEDBACK_REPORT_COLUMNS,
         "brand_id": f"eq.{brand['id']}",
         "order": "created_at.desc" if not session_id else "created_at.asc",
         "limit": str(limit),
     }
     if session_id:
         params["session_id"] = f"eq.{session_id}"
-    rows = await _supabase_rows(
-        request,
-        "orb_agent_feedback",
-        params,
-    )
+    try:
+        rows = await _supabase_rows(request, "orb_agent_feedback", params)
+    except HTTPException as exc:
+        # Until migration 20261117 is applied the report columns do not exist.
+        # Keep the original feedback list working in that window.
+        if exc.status_code != 503:
+            raise
+        params["select"] = _AGENT_FEEDBACK_LEGACY_COLUMNS
+        rows = await _supabase_rows(request, "orb_agent_feedback", params)
     return {"feedback": [_agent_feedback_out(row) for row in rows]}
 
 

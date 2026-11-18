@@ -60,6 +60,7 @@ import { listSops } from "../services/generation";
 import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { startBrowserDictation } from "../lib/browserDictation";
+import { PageTitle } from "../components/ui/PageHeader";
 
 const STAGE = { width: 1920, height: 840 },
   MIN_ZOOM = 0.35,
@@ -850,7 +851,7 @@ function OrbComposer({
               collapsible
               collapseOnSettle
               showTimer
-              color="#374AF6"
+              color="#635BFF"
             />
           </div>
         )}
@@ -998,7 +999,7 @@ function OrbComposer({
     </aside>
   );
   /* Previous static header JSX retained only as a non-rendered reference.
-  return <aside className="orb-composer flex min-h-0 flex-col border-l border-slate-200 bg-white xl:w-[350px]"><header className="border-b border-slate-200 px-4 py-4"><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-white shadow-sm"><Sparkles size={16} /></span><div><h2 className="text-sm font-extrabold text-slate-900">Create with Orb</h2><p className="text-[11px] text-slate-500">Describe the support flow you need.</p></div></div></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-4"><div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600"><span className="font-bold text-slate-800">Start with an outcome.</span> Orb will draft the checks, routes, actions, and customer messages as an editable flow.</div>{messages.length === 0 && !working && <div className="mt-5"><p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Try a prompt</p><div className="mt-2 grid gap-2">{suggestions.map((suggestion) => <button key={suggestion} type="button" onClick={() => setPrompt(suggestion)} className="rounded-md border border-slate-200 px-3 py-2 text-left text-xs leading-4 text-slate-600 transition hover:border-primary/40 hover:bg-primary-tint/30 hover:text-slate-800">{suggestion}</button>)}</div></div>}<div className="mt-5 space-y-3">{messages.map((message, index) => <div key={`${message.role}-${index}`} className={message.role === 'user' ? 'ml-7 rounded-lg bg-primary px-3 py-2.5 text-xs leading-5 text-white' : 'mr-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs leading-5 text-slate-600'}>{message.text}</div>)}</div>{(working || completed) && <div className="mt-4 rounded-lg border border-primary/15 bg-primary-tint/45 px-3 py-3"><ThoughtLine working={working} label="Creating your flow…" doneLabel="Created in" glyph="sparkle" steps={['Reading your request', 'Planning branches and checks', 'Creating an editable flow table']} fontSize={13} breathPeriod={1.6} breathDepth={0.45} settleDuration={350} settleBlur={2} collapsible collapseOnSettle showTimer color="#374AF6" /></div>}</div><form onSubmit={submit} className="orb-composer__prompt border-t border-slate-200 p-4"><div className={`orb-prompt-field rounded-xl border p-3 transition ${working ? 'opacity-70' : ''}`}><textarea value={prompt} disabled={working} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSubmit() } }} rows={2} className="block w-full resize-none bg-transparent text-sm leading-5 outline-none disabled:cursor-not-allowed" placeholder="" />{!prompt && !working && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPrompt}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><span className="orb-prompt-field__icon" aria-hidden="true"><Mic size={16} /></span><button type="submit" disabled={working || !prompt.trim()} aria-label="Create flow with Orb" className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{working ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}</button></div></div></form></aside>
+  return <aside className="orb-composer flex min-h-0 flex-col border-l border-slate-200 bg-white xl:w-[350px]"><header className="border-b border-slate-200 px-4 py-4"><div className="flex items-center gap-2"><span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-white shadow-sm"><Sparkles size={16} /></span><div><h2 className="text-sm font-extrabold text-slate-900">Create with Orb</h2><p className="text-[11px] text-slate-500">Describe the support flow you need.</p></div></div></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-4"><div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600"><span className="font-bold text-slate-800">Start with an outcome.</span> Orb will draft the checks, routes, actions, and customer messages as an editable flow.</div>{messages.length === 0 && !working && <div className="mt-5"><p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Try a prompt</p><div className="mt-2 grid gap-2">{suggestions.map((suggestion) => <button key={suggestion} type="button" onClick={() => setPrompt(suggestion)} className="rounded-md border border-slate-200 px-3 py-2 text-left text-xs leading-4 text-slate-600 transition hover:border-primary/40 hover:bg-primary-tint/30 hover:text-slate-800">{suggestion}</button>)}</div></div>}<div className="mt-5 space-y-3">{messages.map((message, index) => <div key={`${message.role}-${index}`} className={message.role === 'user' ? 'ml-7 rounded-lg bg-primary px-3 py-2.5 text-xs leading-5 text-white' : 'mr-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs leading-5 text-slate-600'}>{message.text}</div>)}</div>{(working || completed) && <div className="mt-4 rounded-lg border border-primary/15 bg-primary-tint/45 px-3 py-3"><ThoughtLine working={working} label="Creating your flow…" doneLabel="Created in" glyph="sparkle" steps={['Reading your request', 'Planning branches and checks', 'Creating an editable flow table']} fontSize={13} breathPeriod={1.6} breathDepth={0.45} settleDuration={350} settleBlur={2} collapsible collapseOnSettle showTimer color="#635BFF" /></div>}</div><form onSubmit={submit} className="orb-composer__prompt border-t border-slate-200 p-4"><div className={`orb-prompt-field rounded-xl border p-3 transition ${working ? 'opacity-70' : ''}`}><textarea value={prompt} disabled={working} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSubmit() } }} rows={2} className="block w-full resize-none bg-transparent text-sm leading-5 outline-none disabled:cursor-not-allowed" placeholder="" />{!prompt && !working && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPrompt}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><span className="orb-prompt-field__icon" aria-hidden="true"><Mic size={16} /></span><button type="submit" disabled={working || !prompt.trim()} aria-label="Create flow with Orb" className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{working ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}</button></div></div></form></aside>
   */
 }
 
@@ -1388,7 +1389,7 @@ function Edges({ nodes, edges, stage, geometry, connecting, hoveredTargetId }) {
               <path
                 d={`M ${output.x} ${output.y} C ${output.x + bend} ${output.y}, ${endX - bend} ${endY}, ${endX} ${endY}`}
                 fill="none"
-                stroke="#374AF6"
+                stroke="#635BFF"
                 strokeWidth="2"
                 strokeDasharray="6 5"
               />
@@ -1396,7 +1397,7 @@ function Edges({ nodes, edges, stage, geometry, connecting, hoveredTargetId }) {
                 x={(output.x + endX) / 2}
                 y={Math.min(output.y, endY) - 10}
                 textAnchor="middle"
-                fill="#374AF6"
+                fill="#635BFF"
                 fontSize="10"
                 fontWeight="700"
               >
@@ -3341,19 +3342,9 @@ function Library({ flows, loading, error, onNew, onImport, onOpen, onRetry }) {
       </section>
     );
   return (
-    <div className="page-enter mx-auto max-w-6xl">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-            Visual playbooks
-          </p>
-          <h2 className="mt-1 text-3xl font-extrabold tracking-tight">Flows</h2>
-          <p className="mt-2 max-w-xl text-sm text-slate-600">
-            Build visual SOPs from scratch or create an editable flow from a
-            deterministic CSV table. Flows are stored in Supabase, separately
-            from your generated SOP library.
-          </p>
-        </div>
+    <div className="page-enter mx-auto w-full max-w-7xl">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <PageTitle eyebrow="Visual playbooks" title="Flows" description="Build visual SOPs from scratch or create an editable flow from a deterministic CSV table. Flows are stored in Supabase, separately from your generated SOP library." />
         <div className="flex gap-2">
           <Button variant="outline" onClick={onImport}>
             <Upload size={16} />
@@ -3426,18 +3417,9 @@ function OrbFlowLibrary({
       </section>
     );
   return (
-    <div className="page-enter mx-auto max-w-6xl">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-            Visual playbooks
-          </p>
-          <h2 className="mt-1 text-3xl font-extrabold tracking-tight">Flows</h2>
-          <p className="mt-2 max-w-xl text-sm text-slate-600">
-            Build visual SOPs from scratch, customise a category template,
-            upload a structured table, or ask Orb to draft an editable flow.
-          </p>
-        </div>
+    <div className="page-enter mx-auto w-full max-w-7xl">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <PageTitle eyebrow="Visual playbooks" title="Flows" description="Build visual SOPs from scratch, customise a category template, upload a structured table, or ask Orb to draft an editable flow." />
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={onImport}>
             <Upload size={16} />
@@ -3533,21 +3515,9 @@ function TemplateManager({
     if (!categoryCode && categories[0]) setCategoryCode(categories[0].code);
   }, [categories, categoryCode, defaultCategoryCode]);
   return (
-    <section className="page-enter mx-auto max-w-6xl">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-widest text-primary">
-            Global playbooks
-          </p>
-          <h2 className="mt-1 text-3xl font-extrabold tracking-tight">
-            Manage templates
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            Published templates are available to every brand in their matching
-            Brand Workspace category. A brand-specific version is created only
-            once someone customises and saves it.
-          </p>
-        </div>
+    <section className="page-enter mx-auto w-full max-w-7xl">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <PageTitle eyebrow="Global playbooks" title="Manage templates" description="Published templates are available to every brand in their matching Brand Workspace category. A brand-specific version is created only once someone customises and saves it." />
         <div className="flex flex-wrap gap-2">
           <select
             value={categoryCode}
