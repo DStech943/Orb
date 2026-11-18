@@ -439,15 +439,9 @@ export const sendClientChatMessage = async ({
     reactions: {},
   }
 
-  // 1. Send via WebSocket for real-time instantaneous delivery to all connected clients
-  const sentViaWs = wsClient.send({
-    type: 'chat_message',
-    ...newMessage,
-    brandName: brand,
-    brandId: effectiveBrandId,
-  })
-
-  // 2. Write to Supabase Postgres as persistent store
+  // 1. Write first. Sending on the WebSocket first can race with this insert:
+  // an older worker writes the bare message, then the browser receives a
+  // duplicate-key error and loses the rich-reference JSON for other viewers.
   if (supabase) {
     const payload = {
       id: generatedId,
@@ -471,22 +465,12 @@ export const sendClientChatMessage = async ({
       const { error } = await supabase
         .schema('cx_copilot')
         .from('orb_client_chat_messages')
-        .insert(payload)
+        .upsert(payload, { onConflict: 'id' })
       if (error) {
         // Keep a concise textual fallback for installations that have not run
-        // the reference migration yet. This preserves the shared product even
-        // when the old table only accepts text messages.
+        // the reference migration yet. The rich token includes a compact
+        // snapshot, so it still restores the capsule in its exact position.
         const { mentions, message_references, ...fallbackPayload } = payload
-        // Do not persist the internal marker by itself. A database without
-        // the migration cannot render it back into a rich capsule after a
-        // reload, so write a readable sentence instead.
-        if (newMessage.references.length) {
-          fallbackPayload.content = String(fallbackPayload.content || '')
-            .replace(/\[\[orb-reference(?:-v2)?:[^\]]+\]\]/g, '')
-            .trim()
-          const shared = newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'
-          fallbackPayload.content = fallbackPayload.content ? `${fallbackPayload.content} (Shared: ${shared})` : `Shared: ${shared}`
-        }
         if (!fallbackPayload.content && newMessage.references.length) {
           fallbackPayload.content = `Shared: ${newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'}`
         }
@@ -499,6 +483,15 @@ export const sendClientChatMessage = async ({
       console.warn('Could not insert to Supabase orb_client_chat_messages:', e)
     }
   }
+
+  // 2. Broadcast after persistence so all connected workspaces receive the
+  // complete reference payload, including product image and link metadata.
+  wsClient.send({
+    type: 'chat_message',
+    ...newMessage,
+    brandName: brand,
+    brandId: effectiveBrandId,
+  })
 
   // 3. Update local cache
   let list = []

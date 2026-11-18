@@ -810,9 +810,7 @@ export default function ClientChat() {
     }).format(date)
   }
 
-  const isClient = (sender) => {
-    return sender.role === 'client' || sender.id === user?.id
-  }
+  const isCurrentUser = (sender) => Boolean(user?.id && sender?.id === user.id)
 
   const renderStatus = (status) => {
     if (status === 'failed') {
@@ -889,8 +887,22 @@ export default function ClientChat() {
   // as a second attachment layer. This preserves the writer's exact order:
   // “text, capsule, more text” remains that way after sending and reloading.
   const renderRichMessageContent = (content, references, fromClient, explicitMentions = []) => {
-    const value = String(content || '')
-    const availableReferences = Array.isArray(references) ? references : []
+    const storedReferences = Array.isArray(references) ? references : []
+    // Repair rows saved during the short compatibility window that appended a
+    // visible "(Shared: …)" copy after the real reference.
+    const sharedTitles = storedReferences.map((reference) => String(reference.title || '').trim()).filter(Boolean).join(', ')
+    const sharedSuffix = sharedTitles ? ` (Shared: ${sharedTitles})` : ''
+    const rawValue = String(content || '')
+    const legacyShared = !storedReferences.length && rawValue.match(/(?:^|\s)\(?Shared:\s*([^\)]+)\)?\s*$/i)
+    const recoveredReferences = legacyShared?.[1]?.trim()
+      ? [{ type: 'reference', id: `legacy-${legacyShared[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, title: legacyShared[1].trim(), subtitle: 'Shared reference' }]
+      : []
+    const availableReferences = storedReferences.length ? storedReferences : recoveredReferences
+    const value = sharedSuffix && rawValue.endsWith(sharedSuffix)
+      ? rawValue.slice(0, -sharedSuffix.length)
+      : legacyShared
+        ? rawValue.slice(0, legacyShared.index).trimEnd()
+      : rawValue
     const referencesByKey = new Map(availableReferences.map((reference) => [referenceKey(reference), reference]))
     const consumed = new Set()
     const parts = []
@@ -1161,7 +1173,7 @@ export default function ClientChat() {
         ) : (
           <AnimatePresence initial={false}>
             {displayedMessages.map((msg, index) => {
-              const fromClient = isClient(msg.sender)
+              const fromClient = isCurrentUser(msg.sender)
               const isJustSent = msg.id === justSentId
               const reactions = msg.reactions || {}
               const myNameLower = (user?.name || user?.email?.split('@')[0] || '').toLowerCase()
@@ -1427,7 +1439,7 @@ export default function ClientChat() {
           <div className="flex items-center gap-2 truncate">
             <CornerDownRight size={14} className="text-purple shrink-0" />
             <span className="font-bold text-purple">
-              Replying to {isClient(replyingTo.sender) ? 'yourself' : replyingTo.sender.name}:
+              Replying to {isCurrentUser(replyingTo.sender) ? 'yourself' : replyingTo.sender.name}:
             </span>
             <span className="italic text-slate-600 truncate">"{replyingTo.content}"</span>
             <span className="text-[10px] text-slate-400 shrink-0">(#{replyingTo.id.slice(0, 6)})</span>
