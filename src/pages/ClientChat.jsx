@@ -180,6 +180,7 @@ export default function ClientChat() {
   const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
   const lastKnownScrollRef = useRef(null)
+  const pinTypingRowRef = useRef(false)
   const searchInputRef = useRef(null)
   const initialScrollAppliedRef = useRef(false)
   const pendingScrollRestoreRef = useRef(null)
@@ -336,6 +337,7 @@ export default function ClientChat() {
     lastKnownScrollRef.current = captureChatspaceScroll(el)
     saveChatspaceScroll(chatScrollStorageKey, el, lastKnownScrollRef.current)
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom > 160) pinTypingRowRef.current = false
     setShowScrollBottom(distanceFromBottom > 160)
   }
 
@@ -529,8 +531,15 @@ export default function ClientChat() {
     const element = scrollContainerRef.current
     if (!element) return
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
-    if (distanceFromBottom < 160) scrollToBottom(false)
+    pinTypingRowRef.current = distanceFromBottom < 160
+    if (pinTypingRowRef.current) scrollToBottom(false)
   }, [messages.length, typingUsers.length])
+
+  const pinTypingRowToBottom = useCallback(() => {
+    if (!pinTypingRowRef.current) return
+    const element = scrollContainerRef.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -1600,11 +1609,12 @@ export default function ClientChat() {
           {typingUsers.length > 0 && messages.length > 0 && (
             <motion.div
               key="chatspace-typing"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
+              initial={{ opacity: 0, y: 8, height: 0, marginTop: 0 }}
+              animate={{ opacity: 1, y: 0, height: 40, marginTop: 20 }}
+              exit={{ opacity: 0, y: 6, height: 0, marginTop: 0 }}
               transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-              className="flex min-h-10 items-center gap-2"
+              onUpdate={pinTypingRowToBottom}
+              className="flex items-center gap-2 overflow-hidden"
               aria-live="polite"
               aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}
             >
