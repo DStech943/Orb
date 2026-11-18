@@ -88,3 +88,20 @@ export function AnalyticsGate({ analytics, children, label = 'Loading analytics'
 }
 
 export const CHART_TOOLTIP = { backgroundColor: '#FFFFFF', borderRadius: 12, border: '1px solid #E9EAF2', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }
+
+// ---- who sent a reply --------------------------------------------------------------------
+// Every message sent to a customer is one of these. `ai` counts only messages the AI confirmed it
+// sent, so it is a minimum: replies sent without that confirmation are in `other`.
+export const SENDER_META = {
+  ai: { label: 'AI', color: '#635BFF', tint: 'bg-primary-tint text-primary', hint: 'Messages the AI agent confirmed it sent' },
+  team: { label: 'Human agents', color: '#1F9D6B', tint: 'bg-emerald-50 text-success', hint: 'Typed by someone on your team in Orb' },
+  automated: { label: 'Automated flows', color: '#FF9B3D', tint: 'bg-amber-50 text-amber-800', hint: 'Sent by a flow or automation' },
+  other: { label: 'Outside Orb', color: '#A3A5B8', tint: 'bg-slate-100 text-slate-600', hint: 'Sent from another app or by the API without an AI confirmation' },
+}
+export const SENDER_ORDER = ['ai', 'team', 'automated', 'other']
+
+export function SenderBadge({ sender }) {
+  const meta = SENDER_META[sender]
+  if (!meta) return null
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${meta.tint}`} title={meta.hint}><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />{meta.label}</span>
+}

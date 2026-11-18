@@ -27,11 +27,17 @@ def raw(**over) -> dict:
     base = {
         "range": {"from": "2026-10-19T00:00:00+00:00", "to": "2026-11-18T00:00:00+00:00", "timezone": "Asia/Kolkata"},
         "conversations": {"started": 200, "active": 150, "resolved": 50, "median_hours_to_resolve": 17.9,
-                          "by_platform": [{"platform": "zoko", "conversations": 160}, {"platform": "instagram", "conversations": 40}]},
-        "messages": {"customer": 900, "replies": 700, "sent_from_dashboard": 120},
+                          "by_platform": [{"platform": "zoko", "conversations": 160}, {"platform": "instagram", "conversations": 40}],
+                          "handling": {"ai_only": 60, "ai_and_team": 30, "team_only": 40, "other_only": 10, "unanswered": 10}},
+        "messages": {"customer": 900, "replies": 700, "sent_from_dashboard": 120,
+                     "by_sender": {"ai": 300, "team": 150, "automated": 200, "other": 50}},
         "escalations": {"records": 30, "conversations": 25, "conversations_in_active": 15},
-        "first_reply": {"answered_conversations": 120, "median_seconds": 180, "p90_seconds": 900},
-        "daily": [{"day": "2026-11-17", "conversations": 7, "customer_messages": 30, "replies": 22}],
+        "first_reply": {"eligible_conversations": 140, "answered_conversations": 120, "median_seconds": 180, "p90_seconds": 900,
+                        "by_sender": [{"sender": "ai", "conversations": 80, "median_seconds": 20, "p90_seconds": 60},
+                                      {"sender": "team", "conversations": 40, "median_seconds": 900, "p90_seconds": 7200},
+                                      {"sender": "robot", "conversations": 1, "median_seconds": 1, "p90_seconds": 1}]},
+        "daily": [{"day": "2026-11-17", "conversations": 7, "customer_messages": 30, "replies": 22,
+                   "ai_replies": 10, "team_replies": 5, "automated_replies": 4, "other_replies": 3}],
         "hourly": [{"hour": h, "customer_messages": h} for h in range(24)],
         "topics": {"tagged_conversations": 50, "items": [{"topic": "Order Status", "conversations": 20}]},
         "products": [{"key": "p1", "title": "Serum", "conversations": 9}],
@@ -48,7 +54,8 @@ def test_summary_uses_only_database_numbers_and_explicit_denominators() -> None:
     assert (s["conversations_started"], s["active_conversations"], s["customer_messages"], s["replies_sent"]) == (200, 150, 900, 700)
     assert s["resolution_rate"] == 25.0                      # 50 resolved of 200 started
     assert s["escalation_rate"] == 10.0                      # 15 escalated of 150 active
-    assert s["first_reply"]["answered_share"] == 80.0        # 120 answered of 150 active
+    assert s["first_reply"]["answered_share"] == round(120 / 140 * 100, 1)   # of conversations that started in the period
+    assert s["first_reply"]["eligible_conversations"] == 140
     assert out["topics"]["coverage_pct"] == 25.0 and out["topics"]["tagged_conversations"] == 50 and out["topics"]["total_conversations"] == 200
 
 
@@ -57,7 +64,8 @@ def test_nothing_is_invented_for_missing_sources() -> None:
     data = {key: value for key, value in out.items() if key != "availability"}     # the explanations may use these words
     flat = str(data).lower()
     assert "csat" not in flat and "rating" not in flat and "revenue" not in flat and "satisfaction" not in flat
-    for key in ("customer_satisfaction", "ai_vs_human_replies", "revenue_attribution"):
+    assert set(out["availability"]) == {"customer_satisfaction", "revenue_attribution"}     # the AI/team split is real now
+    for key in out["availability"]:
         assert out["availability"][key]["available"] is False and out["availability"][key]["reason"]
 
 
@@ -69,6 +77,59 @@ def test_empty_brand_yields_none_not_fake_defaults() -> None:
     assert s["median_hours_to_resolve"] is None and s["first_reply"]["median_seconds"] is None
     assert out["comparison"]["conversations_started"]["change_pct"] is None
     assert out["topics"]["coverage_pct"] is None and out["trends"] == []
+
+
+# ------------------------------------------------------------------ AI / team split
+def test_replies_are_split_by_who_sent_them_and_add_up() -> None:
+    out = an.shape_analytics(BRAND, "30d", raw(), raw())
+    s = out["summary"]
+    assert s["reply_split_available"] is True
+    assert s["replies"] == {"ai": 300, "team": 150, "automated": 200, "other": 50, "total": 700}
+    assert sum(s["replies"][k] for k in an.SENDERS) == s["replies"]["total"]
+    h = s["handling"]
+    assert h["ai_only"] == 60 and h["ai_and_team"] == 30 and h["team_only"] == 40 and h["unanswered"] == 10
+    assert sum(h[k] for k in ("ai_only", "ai_and_team", "team_only", "other_only", "unanswered")) == s["active_conversations"]
+    assert h["ai_involved_rate"] == 60.0 and h["ai_only_rate"] == 40.0         # 90 and 60 of 150 active
+    day = out["trends"][0]
+    assert (day["ai_replies"], day["team_replies"], day["automated_replies"], day["other_replies"]) == (10, 5, 4, 3)
+
+
+def test_first_reply_is_reported_per_sender_and_unknown_senders_are_dropped() -> None:
+    by = an.shape_analytics(BRAND, "30d", raw(), raw())["summary"]["first_reply"]["by_sender"]
+    assert [(i["sender"], i["conversations"], i["median_seconds"]) for i in by] == [("ai", 80, 20), ("team", 40, 900)]
+
+
+def test_previous_period_comparison_covers_each_sender() -> None:
+    previous = raw(messages={"customer": 900, "replies": 700, "sent_from_dashboard": 0, "by_sender": {"ai": 200, "team": 150, "automated": 300, "other": 50}})
+    c = an.shape_analytics(BRAND, "30d", raw(), previous)["comparison"]
+    assert c["ai_replies"] == {"previous": 200, "change_pct": 50.0} and c["team_replies"]["change_pct"] == 0.0
+
+
+def test_an_older_database_function_is_reported_as_no_split_not_as_zeros() -> None:
+    old = raw(messages={"customer": 900, "replies": 700, "sent_from_dashboard": 120})
+    old["first_reply"] = {"answered_conversations": 120, "median_seconds": 180, "p90_seconds": 900}
+    old["conversations"] = {k: v for k, v in old["conversations"].items() if k != "handling"}
+    s = an.shape_analytics(BRAND, "30d", old, old)["summary"]
+    assert s["reply_split_available"] is False and s["replies"]["total"] == 700
+    assert s["first_reply"]["answered_share"] == 80.0 and s["first_reply"]["by_sender"] == []   # 120 of 150 active, as before
+
+
+@pytest.mark.parametrize("args,expected", [
+    (dict(role="customer"), "customer"),
+    (dict(role="agent", ai_confirmed=True, provider_source="webhook"), "ai"),
+    (dict(role="agent", ai_confirmed=True, provider_source="instagram_webhook"), "ai"),
+    (dict(role="agent", provider_source="dashboard", agent="shweta@example.com"), "team"),
+    (dict(role="agent", provider_source="webhook_linked"), "team"),
+    (dict(role="agent", provider_source="webhook", agent="person@example.com"), "team"),
+    (dict(role="agent", provider_source="webhook", app_type="flow"), "automated"),
+    (dict(role="agent", provider_source="webhook", app_type="direct_api"), "other"),   # API send with no AI confirmation
+    (dict(role="agent", provider_source="instagram_webhook"), "other"),
+    (dict(role="agent", provider_source="webhook", ai_confirmed="true"), "other"),     # only a real boolean true counts
+    (dict(role="agent", provider_source="webhook", ai_confirmed=False, app_type="flow"), "automated"),
+    (dict(role="agent", provider_source="webhook", agent="   "), "other"),
+])
+def test_every_reply_lands_in_exactly_one_group(args, expected) -> None:
+    assert an.classify_sender(**args) == expected
 
 
 def test_comparison_is_against_the_real_previous_period() -> None:
@@ -186,7 +247,10 @@ def api(monkeypatch):
         if table == "chat_threads":
             return [{"id": str(uuid4()), "platform": "zoko", "customer_details": {"senderName": "Asha", "waId": "919876543210", "bot_number": "x"}, "last_message_preview": "Where is my order?", "latest_message_direction": "inbound", "workflow_status": "pending", "created_at": "2026-11-17T10:00:00+00:00", "resolved_at": None, "last_activity_at": "2026-11-17T11:00:00+00:00", "tags": ["Order Status"], "summary": "Asks about delivery.", "conversation_id": "919876543210"}], 42
         return [{"id": "m1", "role": "customer", "content": "Hi", "media_type": "text", "media_url": "javascript:alert(1)", "message_status": "received", "provider_source": "webhook", "timestamp": "2026-11-17T10:00:00+00:00"},
-                {"id": "m2", "role": "agent", "content": "Hello", "media_type": "text", "media_url": "https://cdn.example.com/a.png", "message_status": "read", "provider_source": "dashboard", "timestamp": "2026-11-17T10:01:00+00:00"}], None
+                {"id": "m2", "role": "agent", "content": "Hello", "media_type": "text", "media_url": "https://cdn.example.com/a.png", "message_status": "read", "provider_source": "dashboard", "agent": "shweta@example.com", "timestamp": "2026-11-17T10:01:00+00:00"},
+                {"id": "m3", "role": "agent", "content": "Your order ships today", "media_type": "text", "media_url": None, "message_status": "read", "provider_source": "webhook", "ai": True, "timestamp": "2026-11-17T10:02:00+00:00"},
+                {"id": "m4", "role": "agent", "content": "Flow step", "media_type": "text", "media_url": None, "message_status": "read", "provider_source": "webhook", "app_type": "flow", "timestamp": "2026-11-17T10:03:00+00:00"},
+                {"id": "m5", "role": "agent", "content": "Sent from the app", "media_type": "text", "media_url": None, "message_status": "read", "provider_source": "instagram_webhook", "timestamp": "2026-11-17T10:04:00+00:00"}], None
 
     state.missing_thread = False
     monkeypatch.setattr(an, "_authorize_brand", authorize)
@@ -243,7 +307,9 @@ def test_messages_are_scoped_to_the_brand_and_hide_internals(api) -> None:
     assert thread_query["brand_id"] == f"eq.{BRAND}" and thread_query["id"] == f"eq.{thread}"
     assert msg_query["brand_id"] == f"eq.{BRAND}" and msg_query["conversation_id"] == "eq.919876543210" and msg_query["role"] == "in.(customer,agent)"
     body = resp.json()
-    assert [m["sender"] for m in body["messages"]] == ["customer", "business"]
+    assert [m["sender"] for m in body["messages"]] == ["customer", "team", "ai", "automated", "other"]
+    assert "meta_data->ai_confirmed" in msg_query["select"] and "raw" not in msg_query["select"].replace("meta_data->raw->>appType", "")   # only the three small markers are read
+    assert "shweta@example.com" not in resp.text          # which team member replied is never sent to the client
     assert body["messages"][1]["sent_from_dashboard"] is True and body["messages"][0]["sent_from_dashboard"] is False
     assert body["messages"][0]["media_url"] is None and body["messages"][1]["media_url"].startswith("https://")   # no javascript: urls
     assert "919876543210" not in resp.text.replace("••••3210", "")

@@ -3,7 +3,7 @@
  *
  * Every number comes from the API, which reads the live conversation tables for ONE brand.
  * Nothing is simulated, estimated or filled in: when a figure has no real source (customer
- * satisfaction, an AI-versus-human split of replies, revenue) the API lists it under
+ * satisfaction, revenue) the API lists it under
  * `availability` and the pages show "Not available" instead of a value.
  */
 

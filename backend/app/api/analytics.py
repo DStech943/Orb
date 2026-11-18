@@ -2,8 +2,9 @@
 
 Everything here is read from the live conversation tables (chat_threads, chat_messages,
 ai_escalations, reply_feedback, reply_diagnostics). Nothing is simulated: where no real
-source exists (customer satisfaction ratings, an AI-versus-human split of replies,
-revenue) the response says so in ``availability`` and the numbers are simply absent.
+source exists (customer satisfaction ratings, revenue) the response says so in
+``availability`` and the numbers are simply absent. Replies are split by who sent them (see
+``classify_sender``).
 
 Access: an admin, a member of the brand (``orb_brand_memberships``) or someone assigned to
 it (``brand_assignments``, matched on email). Data is read with the service role only after
@@ -46,15 +47,37 @@ UNAVAILABLE = {
         "available": False,
         "reason": "Customer satisfaction ratings are not collected yet, so no score can be shown.",
     },
-    "ai_vs_human_replies": {
-        "available": False,
-        "reason": "Messages sent to customers are not labelled as AI or team, and include automated and proactive messages as well as replies, so they are reported together.",
-    },
     "revenue_attribution": {
         "available": False,
         "reason": "Orders and AI-attributed revenue are not connected yet.",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Who sent a reply
+# ---------------------------------------------------------------------------
+SENDERS = ("ai", "team", "automated", "other")
+
+
+def classify_sender(role: Any, provider_source: Any = None, ai_confirmed: Any = None, agent: Any = None, app_type: Any = None) -> str:
+    """Put one message in exactly one group. Must stay identical to the CASE in
+    20261124_brand_analytics_reply_senders.sql so a conversation reads the same as the totals.
+
+    ai         the AI agent confirmed it sent the message (``meta_data.ai_confirmed`` is true)
+    team       a person sent it (dashboard, or the message names the team member who did)
+    automated  a Zoko flow / automation
+    other      sent outside Orb, or by the API without an AI confirmation
+    """
+    if role != "agent":
+        return "customer"
+    if ai_confirmed is True:
+        return "ai"
+    if provider_source in ("dashboard", "webhook_linked") or str(agent or "").strip():
+        return "team"
+    if app_type == "flow":
+        return "automated"
+    return "other"
 
 
 # ---------------------------------------------------------------------------
@@ -163,12 +186,34 @@ def _summary(raw: dict[str, Any]) -> dict[str, Any]:
     started = int(conv.get("started") or 0)
     active = int(conv.get("active") or 0)
     answered = int(first.get("answered_conversations") or 0)
+    # Older versions of the database function have no per-sender numbers; say so rather than
+    # showing zeros that look like real counts.
+    by_sender = msgs.get("by_sender")
+    split_available = isinstance(by_sender, dict)
+    by_sender = by_sender if split_available else {}
+    handling = conv.get("handling") if isinstance(conv.get("handling"), dict) else {}
+    ai_only = int(handling.get("ai_only") or 0)
+    ai_and_team = int(handling.get("ai_and_team") or 0)
+    # The first reply is measured for conversations that started in the period; an older database
+    # function measured every active conversation, so fall back to that denominator.
+    eligible = int(first["eligible_conversations"]) if "eligible_conversations" in first else active
     return {
         "conversations_started": started,
         "active_conversations": active,
         "customer_messages": int(msgs.get("customer") or 0),
         "replies_sent": int(msgs.get("replies") or 0),
         "replies_from_dashboard": int(msgs.get("sent_from_dashboard") or 0),
+        "reply_split_available": split_available,
+        "replies": {**{key: int(by_sender.get(key) or 0) for key in SENDERS}, "total": int(msgs.get("replies") or 0)},
+        "handling": {
+            "ai_only": ai_only,
+            "ai_and_team": ai_and_team,
+            "team_only": int(handling.get("team_only") or 0),
+            "other_only": int(handling.get("other_only") or 0),
+            "unanswered": int(handling.get("unanswered") or 0),
+            "ai_involved_rate": _pct(ai_only + ai_and_team, active),
+            "ai_only_rate": _pct(ai_only, active),
+        },
         "resolved_conversations": int(conv.get("resolved") or 0),
         "resolution_rate": _pct(int(conv.get("resolved") or 0), started),
         "median_hours_to_resolve": conv.get("median_hours_to_resolve"),
@@ -177,9 +222,20 @@ def _summary(raw: dict[str, Any]) -> dict[str, Any]:
         "escalation_records": int(esc.get("records") or 0),
         "first_reply": {
             "answered_conversations": answered,
-            "answered_share": _pct(answered, active),
+            "eligible_conversations": eligible,
+            "answered_share": _pct(answered, eligible),
             "median_seconds": first.get("median_seconds"),
             "p90_seconds": first.get("p90_seconds"),
+            "by_sender": [
+                {
+                    "sender": str(item.get("sender")),
+                    "conversations": int(item.get("conversations") or 0),
+                    "median_seconds": item.get("median_seconds"),
+                    "p90_seconds": item.get("p90_seconds"),
+                }
+                for item in (first.get("by_sender") or [])
+                if isinstance(item, dict) and item.get("sender") in SENDERS
+            ],
         },
     }
 
@@ -203,6 +259,8 @@ def shape_analytics(brand_id: UUID, range_id: str, current: dict[str, Any], prev
             "conversations_started": _change(now["conversations_started"], before["conversations_started"]),
             "customer_messages": _change(now["customer_messages"], before["customer_messages"]),
             "replies_sent": _change(now["replies_sent"], before["replies_sent"]),
+            "ai_replies": _change(now["replies"]["ai"], before["replies"]["ai"]),
+            "team_replies": _change(now["replies"]["team"], before["replies"]["team"]),
             "escalated_conversations": _change(now["escalated_conversations"], before["escalated_conversations"]),
             "resolution_rate": _points(now["resolution_rate"], before["resolution_rate"]),
             "escalation_rate": _points(now["escalation_rate"], before["escalation_rate"]),
@@ -213,6 +271,10 @@ def shape_analytics(brand_id: UUID, range_id: str, current: dict[str, Any], prev
                 "conversations": int(day.get("conversations") or 0),
                 "customer_messages": int(day.get("customer_messages") or 0),
                 "replies": int(day.get("replies") or 0),
+                "ai_replies": int(day.get("ai_replies") or 0),
+                "team_replies": int(day.get("team_replies") or 0),
+                "automated_replies": int(day.get("automated_replies") or 0),
+                "other_replies": int(day.get("other_replies") or 0),
             }
             for day in (current.get("daily") or [])
         ],
@@ -379,7 +441,7 @@ async def conversation_messages(
     rows, _ = await _service_get(
         request, "chat_messages",
         {
-            "select": "id,role,content,media_type,media_url,message_status,provider_source,timestamp",
+            "select": "id,role,content,media_type,media_url,message_status,provider_source,timestamp,ai:meta_data->ai_confirmed,agent:meta_data->>agent,app_type:meta_data->raw->>appType",
             "brand_id": f"eq.{brand_id}",
             "conversation_id": f"eq.{thread['conversation_id']}",
             "role": "in.(customer,agent)",
@@ -401,8 +463,9 @@ async def conversation_messages(
         "messages": [
             {
                 "id": str(row.get("id") or ""),
-                # Replies are not labelled AI or team in the data, so they are just "business".
-                "sender": "customer" if row.get("role") == "customer" else "business",
+                # customer | ai | team | automated | other. Which team member sent a reply is never
+                # included: the client sees "team", not a person's address.
+                "sender": classify_sender(row.get("role"), row.get("provider_source"), row.get("ai"), row.get("agent"), row.get("app_type")),
                 "sent_from_dashboard": row.get("provider_source") == "dashboard",
                 "text": _clip(row.get("content"), 6000),
                 "media_type": row.get("media_type"),

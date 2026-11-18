@@ -7,6 +7,7 @@ import OrbLoader from '../components/ui/OrbLoader'
 import { useBrand } from '../context/BrandContext'
 import { DATE_RANGES } from '../services/aiAnalytics'
 import { getConversationMessages, listBrandConversations } from '../services/conversations'
+import { SENDER_META } from '../components/analytics/parts'
 
 const STATUS_FILTERS = [
   { id: 'all', label: 'All' },
@@ -206,9 +207,9 @@ export default function Conversations() {
                     return (
                       <div key={msg.id} className={`flex flex-col ${customer ? 'items-start' : 'items-end'}`}>
                         <span className="mb-1 text-[11px] font-semibold text-fg-muted">
-                          {customer ? selected.customer_name : msg.sent_from_dashboard ? 'Your team' : 'Reply'}
+                          {customer ? selected.customer_name : (SENDER_META[msg.sender]?.label || 'Reply')}
                         </span>
-                        <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${customer ? 'rounded-tl-sm border border-line-strong bg-white text-ink' : msg.sent_from_dashboard ? 'rounded-tr-sm border border-[#FF9B3D]/30 bg-[#FFFAF3] text-ink' : 'rounded-tr-sm bg-primary text-white'}`}>
+                        <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${customer ? 'rounded-tl-sm border border-line-strong bg-white text-ink' : msg.sender === 'ai' ? 'rounded-tr-sm bg-primary text-white' : msg.sender === 'team' ? 'rounded-tr-sm border border-emerald-200 bg-emerald-50 text-ink' : msg.sender === 'automated' ? 'rounded-tr-sm border border-[#FF9B3D]/30 bg-[#FFFAF3] text-ink' : 'rounded-tr-sm border border-line-strong bg-subtle text-ink'}`}>
                           {msg.text ? <p className="whitespace-pre-wrap break-words">{msg.text}</p> : <p className="italic opacity-80">{msg.media_type ? `[${msg.media_type}]` : '[no text]'}</p>}
                           {msg.media_url && <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="mt-1 block text-xs underline">Open attachment</a>}
                         </div>
@@ -217,7 +218,7 @@ export default function Conversations() {
                     )
                   })}
                 </div>
-                <p className="text-[11px] text-fg-muted">Replies from the AI and from your team are not labelled separately in the data. Messages sent from the dashboard are marked "Your team".</p>
+                <p className="text-[11px] text-fg-muted">Each reply is labelled by who sent it: the AI (confirmed by the AI agent), human agents on your team, an automated flow, or outside Orb (another app, or the API without an AI confirmation).</p>
               </>
             )}
           </div>

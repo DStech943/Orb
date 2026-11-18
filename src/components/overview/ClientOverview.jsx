@@ -124,7 +124,7 @@ export default function ClientOverview({ overview = {} }) {
         ) : s ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard title="Conversations" icon={Users} value={num(s.conversations_started)} change={c.conversations_started.change_pct} sub={`${num(s.active_conversations)} had customer messages`} />
-            <StatCard title="Customer Messages" icon={MessageSquare} value={num(s.customer_messages)} change={c.customer_messages.change_pct} sub={`${num(s.replies_sent)} messages sent to customers`} />
+            <StatCard title="Customer Messages" icon={MessageSquare} value={num(s.customer_messages)} change={c.customer_messages.change_pct} sub={s.reply_split_available ? `${num(s.replies_sent)} sent: ${num(s.replies.ai)} by AI, ${num(s.replies.team)} by human agents` : `${num(s.replies_sent)} messages sent to customers`} />
             <StatCard title="Resolved" icon={CheckCircle2} tone="bg-emerald-50 text-success" value={percent(s.resolution_rate)} change={c.resolution_rate.change_points} unit=" pts" sub={`${num(s.resolved_conversations)} of ${num(s.conversations_started)} conversations`} />
             <StatCard title="Handed to Team" icon={UserCheck} tone="bg-sky-50 text-sky-600" value={num(s.escalated_conversations)} sub={s.escalation_rate != null ? `${s.escalation_rate}% of active conversations` : 'No active conversations'} />
           </div>
