@@ -69,7 +69,10 @@ const request = async (path, options = {}) => {
 
   const run = async () => {
     const controller = new AbortController();
-    const timeoutMs = fetchOptions.timeout || (isLocalBackend ? 1200 : 3000);
+    // A backend that is down fails immediately (connection refused), so this only has to cover
+    // a backend that is up but slow: flows, knowledge and brand reads can take several seconds
+    // against a remote database. Calls that need longer pass their own `timeout`.
+    const timeoutMs = fetchOptions.timeout || 30_000;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(`${baseUrl}${path}`, {
