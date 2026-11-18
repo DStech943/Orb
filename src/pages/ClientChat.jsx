@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  Paperclip,
   Plus,
   Quote,
   Search,
@@ -104,10 +105,22 @@ const serializeRichMessage = (text, references = []) => {
   })
   return `${output}${value.slice(cursor)}`
 }
-const saveChatspaceScroll = (key, element) => {
-  if (!element || !Number.isFinite(element.scrollTop)) return
-  chatspaceScrollMemory.set(key, element.scrollTop)
-  try { window.sessionStorage.setItem(key, String(element.scrollTop)) } catch {}
+const captureChatspaceScroll = (element) => {
+  if (!element || !Number.isFinite(element.scrollTop)) return null
+  const containerTop = element.getBoundingClientRect().top
+  const anchor = [...element.querySelectorAll('[data-msg-id]')].find((node) => node.getBoundingClientRect().bottom > containerTop)
+  return {
+    top: element.scrollTop,
+    anchorId: anchor?.dataset.msgId || '',
+    anchorOffset: anchor ? anchor.getBoundingClientRect().top - containerTop : 0,
+  }
+}
+
+const saveChatspaceScroll = (key, element, lastKnownSnapshot = null) => {
+  const snapshot = captureChatspaceScroll(element) || lastKnownSnapshot
+  if (!snapshot || !Number.isFinite(snapshot.top)) return
+  chatspaceScrollMemory.set(key, snapshot)
+  try { window.sessionStorage.setItem(key, JSON.stringify(snapshot)) } catch {}
 }
 
 export default function ClientChat() {
@@ -149,6 +162,7 @@ export default function ClientChat() {
   const composerCursorRef = useRef(0)
   const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
+  const lastKnownScrollRef = useRef(null)
   const searchInputRef = useRef(null)
   const isFirstLoad = useRef(true)
   const restoredScrollTopRef = useRef(null)
@@ -270,7 +284,8 @@ export default function ClientChat() {
   const handleScroll = () => {
     const el = scrollContainerRef.current
     if (!el) return
-    saveChatspaceScroll(chatScrollStorageKey, el)
+    lastKnownScrollRef.current = captureChatspaceScroll(el)
+    saveChatspaceScroll(chatScrollStorageKey, el, lastKnownScrollRef.current)
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     setShowScrollBottom(distanceFromBottom > 160)
   }
@@ -368,14 +383,20 @@ export default function ClientChat() {
   useEffect(() => {
     if (!loading && messages.length > 0) {
       if (isFirstLoad.current) {
-        const savedScrollTop = restoredScrollTopRef.current
-        if (Number.isFinite(savedScrollTop)) {
+        const savedScroll = restoredScrollTopRef.current
+        if (savedScroll && Number.isFinite(savedScroll.top)) {
           // Flow/message animations can briefly reset the container after the
           // first paint. Restore through that settling window as well.
           ;[0, 90, 280].forEach((delay) => window.setTimeout(() => {
             const el = scrollContainerRef.current
             if (!el) return
-            el.scrollTop = Math.min(savedScrollTop, Math.max(0, el.scrollHeight - el.clientHeight))
+            const anchor = savedScroll.anchorId
+              ? [...el.querySelectorAll('[data-msg-id]')].find((node) => node.dataset.msgId === savedScroll.anchorId)
+              : null
+            const anchoredTop = anchor
+              ? el.scrollTop + anchor.getBoundingClientRect().top - el.getBoundingClientRect().top - savedScroll.anchorOffset
+              : savedScroll.top
+            el.scrollTop = Math.min(Math.max(0, anchoredTop), Math.max(0, el.scrollHeight - el.clientHeight))
             handleScroll()
           }, delay))
         } else {
@@ -397,16 +418,19 @@ export default function ClientChat() {
   useEffect(() => {
     try {
       const stored = chatspaceScrollMemory.has(chatScrollStorageKey)
-        ? String(chatspaceScrollMemory.get(chatScrollStorageKey))
+        ? chatspaceScrollMemory.get(chatScrollStorageKey)
         : window.sessionStorage.getItem(chatScrollStorageKey)
-      const parsed = stored === null ? null : Number(stored)
-      restoredScrollTopRef.current = Number.isFinite(parsed) ? parsed : null
+      const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored
+      // Retain support for scroll positions saved by the previous build.
+      restoredScrollTopRef.current = Number.isFinite(parsed)
+        ? { top: parsed, anchorId: '', anchorOffset: 0 }
+        : parsed && Number.isFinite(parsed.top) ? parsed : null
     } catch {
       restoredScrollTopRef.current = null
     }
     isFirstLoad.current = true
     return () => {
-      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current)
+      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current, lastKnownScrollRef.current)
     }
   }, [chatScrollStorageKey])
 
