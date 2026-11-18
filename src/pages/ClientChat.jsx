@@ -131,7 +131,7 @@ const saveChatspaceScroll = (key, element, lastKnownSnapshot = null, preferLastK
 export default function ClientChat() {
   const { user } = useAuth()
   const { showToast } = useToast()
-  const brandName = activeBrandName() || 'Your Brand'
+  const [brandName, setBrandName] = useState(() => activeBrandName() || 'Your Brand')
   const currentUserName = user?.name || user?.email?.split('@')[0] || 'You'
 
   const [messages, setMessages] = useState([])
@@ -172,11 +172,29 @@ export default function ClientChat() {
   const searchInputRef = useRef(null)
   const isFirstLoad = useRef(true)
   const restoredScrollTopRef = useRef(null)
+  const messageLoadRequestRef = useRef(0)
+  const brandNameRef = useRef(brandName)
   const chatScrollStorageKey = `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
 
   useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
+  useEffect(() => { brandNameRef.current = brandName }, [brandName])
   useEffect(() => { setSlashCommandIndex(0) }, [inputMessage])
   useEffect(() => () => { dictationRef.current?.stop() }, [])
+  useEffect(() => {
+    const onBrandChanged = (event) => {
+      const nextBrand = String(event.detail?.name || activeBrandName() || 'Your Brand')
+      if (brandNameRef.current === nextBrand) return
+      // Do not leave the previous brand's messages visible while the new room
+      // is being fetched.
+      setMessages([])
+      setLoading(true)
+      setSearchQuery('')
+      setMediaPanelOpen(false)
+      setBrandName(nextBrand)
+    }
+    window.addEventListener('orb:brand-changed', onBrandChanged)
+    return () => window.removeEventListener('orb:brand-changed', onBrandChanged)
+  }, [])
 
   const readComposerState = (root) => {
     let text = ''
@@ -306,8 +324,10 @@ export default function ClientChat() {
   }
 
   const loadMessages = async () => {
+    const requestId = ++messageLoadRequestRef.current
     try {
       const data = await getClientChatMessages(brandName, user)
+      if (requestId !== messageLoadRequestRef.current) return
       setMessages((current) => {
         const currentById = new Map(current.map((message) => [message.id, message]))
         const merged = data.map((message) => {
@@ -327,7 +347,7 @@ export default function ClientChat() {
         return merged.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))
       })
     } finally {
-      setLoading(false)
+      if (requestId === messageLoadRequestRef.current) setLoading(false)
     }
   }
 
@@ -450,9 +470,6 @@ export default function ClientChat() {
     const handleUpdate = () => {
       loadMessages()
     }
-    const onBrandChanged = () => {
-      loadMessages()
-    }
     const onWsStatus = (e) => {
       if (e.detail?.connected !== undefined) {
         setWsConnected(Boolean(e.detail.connected))
@@ -460,7 +477,6 @@ export default function ClientChat() {
     }
 
     window.addEventListener('orb:client-chat-updated', handleUpdate)
-    window.addEventListener('orb:brand-changed', onBrandChanged)
     window.addEventListener('orb:chatspace-ws-status', onWsStatus)
 
     // Realtime WebSocket & database sync
@@ -470,7 +486,6 @@ export default function ClientChat() {
 
     return () => {
       window.removeEventListener('orb:client-chat-updated', handleUpdate)
-      window.removeEventListener('orb:brand-changed', onBrandChanged)
       window.removeEventListener('orb:chatspace-ws-status', onWsStatus)
       if (typeof unsubscribe === 'function') unsubscribe()
     }
@@ -498,10 +513,8 @@ export default function ClientChat() {
       }
     }
     loadAssignedMembers()
-    window.addEventListener('orb:brand-changed', loadAssignedMembers)
     return () => {
       live = false
-      window.removeEventListener('orb:brand-changed', loadAssignedMembers)
     }
   }, [brandName])
 
@@ -1249,7 +1262,7 @@ export default function ClientChat() {
                 >
                   {/* Profile Pic / Avatar */}
                 <div className="shrink-0 pt-6">
-                  <Avatar name={msg.sender.name} src={msg.sender.avatar} sources={msg.sender.avatarSources} avatarKey={msg.sender.avatarKey} className="rounded-full border border-slate-200 shadow-2xs" fallbackClassName={fromClient ? 'bg-purple border-purple/80' : 'bg-slate-800 border-slate-700'} />
+                  <Avatar name={msg.sender.name} src={msg.sender.avatar} sources={msg.sender.avatarSources} className="rounded-full border border-slate-200 shadow-2xs" fallbackClassName={fromClient ? 'bg-purple border-purple/80' : 'bg-slate-800 border-slate-700'} />
                 </div>
 
                 {/* Message Bubble + Actions */}
@@ -1511,7 +1524,7 @@ export default function ClientChat() {
                       isSelected ? 'bg-purple/10 text-purple font-semibold' : 'text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    <Avatar name={item.handle} src={item.avatar} sources={item.avatarSources} avatarKey={item.avatarKey} className="h-6 w-6 shrink-0 rounded-full border-0 text-[10px]" fallbackClassName="border-0 bg-slate-100 text-slate-500" />
+                    <Avatar name={item.handle} src={item.avatar} sources={item.avatarSources} className="h-6 w-6 shrink-0 rounded-full border-0 text-[10px]" fallbackClassName="border-0 bg-slate-100 text-slate-500" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold">{item.label}</span>
