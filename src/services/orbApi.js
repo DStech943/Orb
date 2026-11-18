@@ -222,6 +222,9 @@ export const chatWithDeployedAgent = (brandId, payload) =>
     method: "POST",
     body: JSON.stringify(payload),
     invalidateCache: false,
+    // The API waits up to 60s for the deployed agent's reply; the default 1.2s local timeout
+    // would cut every real answer off.
+    timeout: 75_000,
   });
 export const hasBrandAgentApi = Boolean(agentBaseUrl);
 export const chatWithBrandAgent = async (brandId, payload) => {
