@@ -32,10 +32,12 @@ import { startBrowserDictation } from '../lib/browserDictation'
 import {
   PRESET_REACTIONS,
   getClientChatMessages,
+  getChatspaceReadReceipts,
   listBrandChatMembers,
   markChatspaceAsRead,
   sendClientChatMessage,
   subscribeToChatMessages,
+  subscribeToChatReadReceipts,
   toggleMessageReaction,
   uploadChatspaceMedia,
 } from '../services/clientChat'
@@ -157,6 +159,7 @@ export default function ClientChat() {
   const [slashCommandIndex, setSlashCommandIndex] = useState(0)
   const [composerRevision, setComposerRevision] = useState(0)
   const [assignedMembers, setAssignedMembers] = useState([])
+  const [readReceipts, setReadReceipts] = useState([])
 
   const fileInputRef = useRef(null)
   const slashMenuRef = useRef(null)
@@ -409,26 +412,10 @@ export default function ClientChat() {
   useEffect(() => {
     if (!loading && messages.length > 0) {
       if (isFirstLoad.current) {
-        const savedScroll = restoredScrollTopRef.current
-        if (savedScroll && Number.isFinite(savedScroll.top)) {
-          // Flow/message animations can briefly reset the container after the
-          // first paint. Restore through that settling window as well.
-          restoreTimersRef.current.forEach((timer) => window.clearTimeout(timer))
-          restoreTimersRef.current = [0, 90, 280].map((delay) => window.setTimeout(() => {
-            const el = scrollContainerRef.current
-            if (!el) return
-            const anchor = savedScroll.anchorId
-              ? [...el.querySelectorAll('[data-msg-id]')].find((node) => node.dataset.msgId === savedScroll.anchorId)
-              : null
-            const anchoredTop = anchor
-              ? el.scrollTop + anchor.getBoundingClientRect().top - el.getBoundingClientRect().top - savedScroll.anchorOffset
-              : savedScroll.top
-            el.scrollTop = Math.min(Math.max(0, anchoredTop), Math.max(0, el.scrollHeight - el.clientHeight))
-            handleScroll()
-          }, delay))
-        } else {
-          scrollToBottom(false)
-        }
+        // A room should always open on its latest activity. Restoring an old
+        // offset after a tab switch was the path that could leave users at the
+        // top of the conversation.
+        scrollToBottom(false)
         isFirstLoad.current = false
       } else {
         const el = scrollContainerRef.current
@@ -491,16 +478,31 @@ export default function ClientChat() {
     }
   }, [brandName, user])
 
-  // Mark chat as read when viewing this brand space or when messages update
+  // Record the latest message this person has seen, then surface those
+  // positions as small reader avatars beneath the corresponding message.
   useEffect(() => {
-    markChatspaceAsRead(brandName)
-  }, [brandName, messages.length])
+    const latest = messages.at(-1)
+    if (!latest?.id) return
+    let live = true
+    markChatspaceAsRead(brandName, user, latest.id)
+      .catch(() => null)
+      .then(() => getChatspaceReadReceipts(brandName))
+      .then((receipts) => { if (live) setReadReceipts(receipts) })
+      .catch(() => { if (live) setReadReceipts([]) })
+    return () => { live = false }
+  }, [brandName, messages, user])
 
   useEffect(() => {
-    const onFocus = () => markChatspaceAsRead(brandName)
+    const refresh = () => getChatspaceReadReceipts(brandName).then(setReadReceipts).catch(() => setReadReceipts([]))
+    refresh()
+    return subscribeToChatReadReceipts(brandName, refresh)
+  }, [brandName])
+
+  useEffect(() => {
+    const onFocus = () => markChatspaceAsRead(brandName, user, messages.at(-1)?.id).catch(() => null)
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [brandName])
+  }, [brandName, messages, user])
 
   useEffect(() => {
     let live = true
@@ -1222,6 +1224,9 @@ export default function ClientChat() {
               const fromClient = isCurrentUser(msg.sender)
               const isJustSent = msg.id === justSentId
               const reactions = msg.reactions || {}
+              const readers = fromClient
+                ? readReceipts.filter((receipt) => String(receipt.last_read_message_id) === String(msg.id) && String(receipt.user_id) !== String(user?.id))
+                : []
               const myNameLower = (user?.name || user?.email?.split('@')[0] || '').toLowerCase()
               const myFirstName = myNameLower ? myNameLower.split(' ')[0] : ''
               const isMentionedToMe = !fromClient && (
@@ -1448,6 +1453,26 @@ export default function ClientChat() {
                           </button>
                         )
                       })}
+                    </div>
+                  )}
+
+                  {/* Instagram-style read receipts: each avatar marks the
+                      latest message that teammate has reached. */}
+                  {readers.length > 0 && (
+                    <div className="mt-1.5 flex items-center justify-end pr-1" title={`Read by ${readers.map((reader) => reader.reader_name || 'Member').join(', ')}`}>
+                      <div className="flex -space-x-1.5">
+                        {readers.slice(0, 4).map((reader) => (
+                          <Avatar
+                            key={reader.user_id}
+                            name={reader.reader_name}
+                            src={reader.avatar}
+                            sources={reader.avatarSources}
+                            className="h-4 w-4 rounded-full border-2 border-[#FBFBFC] text-[7px] shadow-none"
+                            fallbackClassName="border-[#FBFBFC] bg-slate-500"
+                          />
+                        ))}
+                        {readers.length > 4 && <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-[#FBFBFC] bg-slate-200 text-[7px] font-bold text-slate-600">+{readers.length - 4}</span>}
+                      </div>
                     </div>
                   )}
 

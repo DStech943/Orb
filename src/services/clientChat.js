@@ -672,10 +672,54 @@ export const getUnreadChatCount = (brandName = activeBrandName(), currentUser) =
   return getChatspaceUnreadStatus(brandName, currentUser).unreadCount
 }
 
-export const markChatspaceAsRead = (brandName = activeBrandName()) => {
+export const getChatspaceReadReceipts = async (brandName = activeBrandName()) => {
+  if (!supabase || !brandName) return []
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_read_receipts')
+    .select('user_id, reader_name, reader_avatar, last_read_message_id, read_at')
+    .eq('brand_name', brandName)
+  if (error) throw error
+  return (Array.isArray(data) ? data : []).map((receipt) => ({
+    ...receipt,
+    avatar: avatarUrlFromKey(receipt.reader_avatar),
+    avatarSources: avatarUrlsFromKey(receipt.reader_avatar),
+  }))
+}
+
+export const subscribeToChatReadReceipts = (brandName, onChange) => {
+  if (!supabase || !brandName) return () => {}
+  const channel = supabase
+    .channel(`chatspace-receipts:${brandName}`)
+    .on('postgres_changes', {
+      event: '*', schema: 'cx_copilot', table: 'orb_client_chat_read_receipts', filter: `brand_name=eq.${brandName}`,
+    }, () => onChange?.())
+    .subscribe()
+  return () => { supabase.removeChannel(channel) }
+}
+
+export const markChatspaceAsRead = async (brandName = activeBrandName(), currentUser, lastReadMessageId = null) => {
   const brand = brandName || 'default_brand'
   window.localStorage.setItem(`orb_chatspace_last_read:${brand}`, String(Date.now()))
   window.dispatchEvent(new CustomEvent('orb:chatspace-unread-changed', { detail: { brand, count: 0 } }))
+  if (!supabase || !currentUser?.id || !lastReadMessageId) return null
+  const payload = {
+    brand_id: activeBrandId() || null,
+    brand_name: brand,
+    user_id: currentUser.id,
+    reader_name: currentUser.name || currentUser.email?.split('@')[0] || 'Member',
+    reader_avatar: currentUser.avatarKey || currentUser.avatar || null,
+    last_read_message_id: lastReadMessageId,
+    read_at: new Date().toISOString(),
+  }
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('orb_client_chat_read_receipts')
+    .upsert(payload, { onConflict: 'brand_name,user_id' })
+    .select()
+    .maybeSingle()
+  if (error) throw error
+  return data
 }
 
 export const subscribeToChatMessages = (brandName, onNewMessage) => {
