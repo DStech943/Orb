@@ -2727,27 +2727,7 @@ async def create_manual_faq(payload: ManualFaqCreate, request: Request, user: Us
 @router.post("/knowledge/sops/manual", status_code=status.HTTP_201_CREATED)
 async def create_manual_sop(payload: ManualSopCreate, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
     """Create a manual SOP and publish it to the brand's live Qdrant knowledge."""
-    # Re-publishing a saved flow must refresh the SOP it originally produced,
-    # rather than adding another copy to the brand's live knowledge. The flow
-    # ID is persisted in Qdrant's payload specifically for this provenance.
-    flow_id = flow_snapshot["flow_id"]
-    sop_id: str | None = None
-    if flow_id:
-        try:
-            existing = await scroll_points(
-                request.app.state.db,
-                request.app.state.settings,
-                payload.brand_name,
-                "sop",
-                limit=2,
-                query_filter={"must": [{"key": "source_flow.flow_id", "match": {"value": flow_id}}]},
-            )
-            if existing:
-                sop_id = str(existing[0]["id"])
-        except PublishUnavailable as exc:
-            raise HTTPException(status_code=503, detail=f"Could not check the existing flow SOP: {exc}") from exc
-    updated = sop_id is not None
-    sop_id = sop_id or str(uuid4())
+    sop_id = str(uuid4())
     title = payload.title.strip()
     sop = {
         "title": title,
@@ -2773,7 +2753,7 @@ async def create_manual_sop(payload: ManualSopCreate, request: Request, user: Us
         )
     except PublishUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"SOP could not be published to Qdrant: {exc}") from exc
-    return {"point": {"id": sop_id, "payload": sop}, "published": True, "updated": updated, "collection": collection}
+    return {"point": {"id": sop_id, "payload": sop}, "published": True, "collection": collection}
 
 @router.post("/knowledge/{kind}/bulk", status_code=status.HTTP_201_CREATED)
 async def create_bulk_knowledge(
@@ -2939,7 +2919,27 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, user:
         "source_urls": [],
         **_knowledge_updated_metadata(user),
     }
-    sop_id = str(uuid4())
+    # Re-publishing a saved flow must refresh the SOP it originally produced,
+    # rather than adding another copy to the brand's live knowledge. The flow
+    # ID is persisted in Qdrant's payload specifically for this provenance.
+    flow_id = flow_snapshot["flow_id"]
+    sop_id: str | None = None
+    if flow_id:
+        try:
+            existing = await scroll_points(
+                request.app.state.db,
+                request.app.state.settings,
+                payload.brand_name,
+                "sop",
+                limit=2,
+                query_filter={"must": [{"key": "source_flow.flow_id", "match": {"value": flow_id}}]},
+            )
+            if existing:
+                sop_id = str(existing[0]["id"])
+        except PublishUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"Could not check the existing flow SOP: {exc}") from exc
+    updated = sop_id is not None
+    sop_id = sop_id or str(uuid4())
     try:
         collection = await publish_points(
             request.app.state.db,
@@ -2950,7 +2950,7 @@ async def create_sop_from_flow(payload: FlowToSopCreate, request: Request, user:
         )
     except PublishUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"SOP could not be published to Qdrant: {exc}") from exc
-    return {"point": {"id": sop_id, "payload": sop}, "published": True, "collection": collection}
+    return {"point": {"id": sop_id, "payload": sop}, "published": True, "updated": updated, "collection": collection}
 
 @router.patch("/knowledge/{kind}/{item_id}")
 async def update_knowledge(kind: Literal["sops", "faqs", "products"], item_id: str, payload: KnowledgePayload, request: Request, user: User = Depends(_admin)) -> dict[str, Any]:
