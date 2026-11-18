@@ -116,8 +116,13 @@ const captureChatspaceScroll = (element) => {
   }
 }
 
-const saveChatspaceScroll = (key, element, lastKnownSnapshot = null) => {
-  const snapshot = captureChatspaceScroll(element) || lastKnownSnapshot
+const saveChatspaceScroll = (key, element, lastKnownSnapshot = null, preferLastKnown = false) => {
+  // React can reset a scroll container to 0 while it is being unmounted. On a
+  // route/tab change, retain the last user-originated snapshot rather than
+  // letting that transient DOM position overwrite it.
+  const snapshot = (preferLastKnown ? lastKnownSnapshot : captureChatspaceScroll(element))
+    || captureChatspaceScroll(element)
+    || lastKnownSnapshot
   if (!snapshot || !Number.isFinite(snapshot.top)) return
   chatspaceScrollMemory.set(key, snapshot)
   try { window.sessionStorage.setItem(key, JSON.stringify(snapshot)) } catch {}
@@ -163,6 +168,7 @@ export default function ClientChat() {
   const dictationRef = useRef(null)
   const scrollContainerRef = useRef(null)
   const lastKnownScrollRef = useRef(null)
+  const restoreTimersRef = useRef([])
   const searchInputRef = useRef(null)
   const isFirstLoad = useRef(true)
   const restoredScrollTopRef = useRef(null)
@@ -387,7 +393,8 @@ export default function ClientChat() {
         if (savedScroll && Number.isFinite(savedScroll.top)) {
           // Flow/message animations can briefly reset the container after the
           // first paint. Restore through that settling window as well.
-          ;[0, 90, 280].forEach((delay) => window.setTimeout(() => {
+          restoreTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+          restoreTimersRef.current = [0, 90, 280].map((delay) => window.setTimeout(() => {
             const el = scrollContainerRef.current
             if (!el) return
             const anchor = savedScroll.anchorId
@@ -430,7 +437,9 @@ export default function ClientChat() {
     }
     isFirstLoad.current = true
     return () => {
-      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current, lastKnownScrollRef.current)
+      restoreTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      restoreTimersRef.current = []
+      saveChatspaceScroll(chatScrollStorageKey, scrollContainerRef.current, lastKnownScrollRef.current, true)
     }
   }, [chatScrollStorageKey])
 
