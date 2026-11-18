@@ -51,8 +51,29 @@ const PRESET_MENTIONS = [
 const SLASH_COMMAND_IDS = ['products', 'oos', 'nos', 'flows', 'operation', 'template', 'sheet']
 const chatspaceScrollMemory = new Map()
 const referenceKey = (reference = {}) => `${reference.type || 'reference'}:${reference.id || reference.title || 'item'}`
-const referenceToken = (reference) => `[[orb-reference:${encodeURIComponent(reference.type || 'reference')}:${encodeURIComponent(reference.id || reference.title || 'item')}]]`
-const referenceTokenPattern = /\[\[orb-reference:([^:\]]+):([^\]]+)\]\]/g
+// Keep a small reference snapshot in the text token as well as the JSONB
+// column. The JSONB column is the canonical source, but this means a rich
+// capsule still survives a delayed schema refresh or an older WebSocket
+// worker that writes the message without `message_references`.
+const referenceToken = (reference = {}) => {
+  const snapshot = {
+    type: reference.type || 'reference',
+    id: reference.id || reference.title || 'item',
+    title: reference.title || reference.name || 'Reference',
+    subtitle: reference.subtitle || '',
+    image: reference.image || '',
+    href: reference.href || '',
+    external: Boolean(reference.external),
+  }
+  return `[[orb-reference-v2:${encodeURIComponent(JSON.stringify(snapshot))}]]`
+}
+const referenceTokenPattern = /\[\[(?:orb-reference:([^:\]]+):([^\]]+)|orb-reference-v2:([^\]]+))\]\]/g
+const fallbackReference = (type, id) => ({
+  type: type || 'reference',
+  id: id || 'item',
+  title: type === 'product' ? 'Product' : type === 'flow' ? 'Flow' : type === 'template' ? 'Template' : type === 'operation' ? 'Operation' : type === 'sheet' ? 'Master sheet' : 'Reference',
+  subtitle: '',
+})
 const escapeComposerHtml = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -888,13 +909,21 @@ export default function ClientChat() {
 
       let type = ''
       let id = ''
+      let tokenReference = null
       try {
-        type = decodeURIComponent(match[1])
-        id = decodeURIComponent(match[2])
+        if (match[3]) {
+          tokenReference = JSON.parse(decodeURIComponent(match[3]))
+          type = String(tokenReference?.type || '')
+          id = String(tokenReference?.id || '')
+        } else {
+          type = decodeURIComponent(match[1])
+          id = decodeURIComponent(match[2])
+        }
       } catch {
-        // A malformed legacy token is treated as normal text below.
+        // A malformed token receives a neutral capsule rather than exposing
+        // the internal storage marker to people in Chatspace.
       }
-      const reference = referencesByKey.get(`${type}:${id}`)
+      const reference = referencesByKey.get(`${type}:${id}`) || tokenReference || fallbackReference(type, id)
       if (reference) {
         consumed.add(referenceKey(reference))
         parts.push(
@@ -906,8 +935,6 @@ export default function ClientChat() {
             className="mt-0"
           />,
         )
-      } else {
-        parts.push(<React.Fragment key={`unknown-${match.index}`}>{match[0]}</React.Fragment>)
       }
       cursor = referenceTokenPattern.lastIndex
     }

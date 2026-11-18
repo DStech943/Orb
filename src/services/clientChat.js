@@ -287,6 +287,27 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`
 
+  // Keep locally received rich-reference details while an older deployment or
+  // a PostgREST schema refresh returns an empty JSONB column. This recovery is
+  // keyed by the durable message UUID and is replaced as soon as the database
+  // returns its canonical references.
+  let cachedById = new Map()
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(key) || '[]')
+    cachedById = new Map((Array.isArray(cached) ? cached : []).map((message) => [message.id, message]))
+  } catch {}
+
+  const jsonArray = (value) => {
+    if (Array.isArray(value)) return value
+    if (typeof value !== 'string') return []
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? [parsed] : []
+    } catch {
+      return []
+    }
+  }
+
   // Ensure WebSocket is connected for active brand
   wsClient.connect(brand)
 
@@ -301,7 +322,10 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
         .order('created_at', { ascending: true })
 
       if (!error && Array.isArray(data)) {
-        const mapped = data.map((row) => ({
+        const mapped = data.map((row) => {
+          const databaseReferences = jsonArray(row.message_references)
+          const cachedReferences = cachedById.get(row.id)?.references
+          return {
           id: row.id,
           brandId: row.brand_id || null,
           sender: {
@@ -318,15 +342,16 @@ export const getClientChatMessages = async (brandName = activeBrandName(), curre
               .toUpperCase(),
           },
           content: row.content,
-          references: Array.isArray(row.message_references) ? row.message_references : typeof row.message_references === 'string' ? JSON.parse(row.message_references) : [],
-          media: Array.isArray(row.media) ? row.media : typeof row.media === 'string' ? JSON.parse(row.media) : [],
+          references: databaseReferences.length ? databaseReferences : (Array.isArray(cachedReferences) ? cachedReferences : []),
+          media: jsonArray(row.media),
           mentions: Array.isArray(row.mentions) ? row.mentions : [],
           status: row.status || 'read',
           replyToId: row.reply_to_id || null,
           replyToSnippet: row.reply_to_snippet || null,
           reactions: row.reactions || {},
           createdAt: row.created_at,
-        }))
+        }
+        })
         try {
           window.localStorage.setItem(key, JSON.stringify(mapped))
         } catch {}
@@ -452,6 +477,16 @@ export const sendClientChatMessage = async ({
         // the reference migration yet. This preserves the shared product even
         // when the old table only accepts text messages.
         const { mentions, message_references, ...fallbackPayload } = payload
+        // Do not persist the internal marker by itself. A database without
+        // the migration cannot render it back into a rich capsule after a
+        // reload, so write a readable sentence instead.
+        if (newMessage.references.length) {
+          fallbackPayload.content = String(fallbackPayload.content || '')
+            .replace(/\[\[orb-reference(?:-v2)?:[^\]]+\]\]/g, '')
+            .trim()
+          const shared = newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'
+          fallbackPayload.content = fallbackPayload.content ? `${fallbackPayload.content} (Shared: ${shared})` : `Shared: ${shared}`
+        }
         if (!fallbackPayload.content && newMessage.references.length) {
           fallbackPayload.content = `Shared: ${newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'}`
         }

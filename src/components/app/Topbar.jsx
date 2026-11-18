@@ -276,7 +276,7 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
         <h1 className="mr-auto text-lg font-extrabold tracking-tight sm:text-xl">
           {title}
         </h1>
-        {isAdmin && (
+        {user && (
           <label className="hidden items-center gap-2 rounded-md border-2 border-ink bg-white px-2 py-2 text-xs font-bold sm:flex">
             <span className="text-muted">Brand</span>
             <select

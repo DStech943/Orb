@@ -33,10 +33,12 @@ async function appUser(authUser) {
   if (email) {
     const [adminResult, assignmentResult] = await Promise.all([
       client.schema("cx_copilot").from("admins").select("avatar_key").eq("email", email).maybeSingle(),
-      client.schema("cx_copilot").from("brand_assignments").select("avatar_key, role").eq("email", email).order("is_online", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      client.schema("cx_copilot").from("brand_assignments").select("avatar_key, role").eq("email", email).order("is_online", { ascending: false }).order("created_at", { ascending: false }),
     ]);
-    avatarKey = String(adminResult.data?.avatar_key || assignmentResult.data?.avatar_key || authUser.user_metadata?.avatar_url || "").trim();
-    assignmentRole = String(assignmentResult.data?.role || "").trim().toLowerCase();
+    const assignments = Array.isArray(assignmentResult.data) ? assignmentResult.data : [];
+    avatarKey = String(adminResult.data?.avatar_key || assignments[0]?.avatar_key || authUser.user_metadata?.avatar_url || "").trim();
+    assignmentRole = assignments.map((assignment) => String(assignment.role || "").trim().toLowerCase())
+      .find((role) => ["admin", "agent", "pod_lead"].includes(role)) || assignments[0]?.role || "";
   }
   const rawProfileRole = String(data?.role || "").trim().toLowerCase();
   const profileRole = rawProfileRole === "team" ? "agent" : rawProfileRole;
