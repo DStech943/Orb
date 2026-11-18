@@ -1596,30 +1596,37 @@ export default function ClientChat() {
         )}
         <div ref={messagesEndRef} />
 
-        {typingUsers.length > 0 && messages.length > 0 && (
-          <div
-            className="flex min-h-10 items-center gap-2"
-            aria-live="polite"
-            aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}
-          >
-            <div className="flex -space-x-2">
-              {typingUsers.slice(0, 3).map((person) => (
-                <Avatar
-                  key={person.id}
-                  name={person.name}
-                  src={person.avatar}
-                  className="h-8 w-8 rounded-full border-2 border-white text-[10px] shadow-sm"
-                  fallbackClassName="border-white bg-slate-500"
-                />
-              ))}
-            </div>
-            <span className="inline-flex h-10 items-center gap-1 rounded-full bg-slate-100 px-4 shadow-sm">
-              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.2s]" />
-              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.1s]" />
-              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500" />
-            </span>
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {typingUsers.length > 0 && messages.length > 0 && (
+            <motion.div
+              key="chatspace-typing"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className="flex min-h-10 items-center gap-2"
+              aria-live="polite"
+              aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}
+            >
+              <div className="flex -space-x-2">
+                {typingUsers.slice(0, 3).map((person) => (
+                  <Avatar
+                    key={person.id}
+                    name={person.name}
+                    src={person.avatar}
+                    className="h-8 w-8 rounded-full border-2 border-white text-[10px] shadow-sm"
+                    fallbackClassName="border-white bg-slate-500"
+                  />
+                ))}
+              </div>
+              <span className="inline-flex h-10 items-center gap-1 rounded-full bg-slate-100 px-4 shadow-sm">
+                <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.2s]" />
+                <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.1s]" />
+                <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500" />
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Scroll To Bottom Floating Button */}
         {showScrollBottom && (
