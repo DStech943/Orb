@@ -243,11 +243,17 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
                 })
 
             elif action == "typing":
+                user_id = str(data.get("userId") or "").strip()
                 user_name = data.get("userName") or "Someone"
+                avatar = data.get("avatar") or ""
+                if not user_id:
+                    continue
                 is_typing = bool(data.get("isTyping"))
                 await manager.broadcast(brand_name, {
                     "type": "typing",
+                    "userId": user_id,
                     "userName": user_name,
+                    "avatar": avatar,
                     "isTyping": is_typing,
                 })
 

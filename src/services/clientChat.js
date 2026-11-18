@@ -256,6 +256,19 @@ class ChatspaceWebSocketClient {
 
 export const wsClient = new ChatspaceWebSocketClient()
 
+// Typing presence is deliberately WebSocket-only: it is transient UI state,
+// not a message or audit record, so it never reaches Supabase.
+export const sendChatspaceTyping = (currentUser, isTyping) => {
+  if (!currentUser?.id) return false
+  return wsClient.send({
+    type: 'typing',
+    userId: String(currentUser.id),
+    userName: currentUser.name || currentUser.email?.split('@')[0] || 'Someone',
+    avatar: currentUser.avatar || '',
+    isTyping: Boolean(isTyping),
+  })
+}
+
 // Mention targets are deliberately scoped to the selected brand. The database
 // policy permits this read only when the signed-in person belongs to that same
 // brand (or is internal Orb staff).

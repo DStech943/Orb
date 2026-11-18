@@ -35,6 +35,7 @@ import {
   getChatspaceReadReceipts,
   listBrandChatMembers,
   markChatspaceAsRead,
+  sendChatspaceTyping,
   sendClientChatMessage,
   subscribeToChatMessages,
   subscribeToChatReadReceipts,
@@ -160,6 +161,7 @@ export default function ClientChat() {
   const [composerRevision, setComposerRevision] = useState(0)
   const [assignedMembers, setAssignedMembers] = useState([])
   const [readReceipts, setReadReceipts] = useState([])
+  const [typingUsers, setTypingUsers] = useState([])
 
   const fileInputRef = useRef(null)
   const slashMenuRef = useRef(null)
@@ -177,12 +179,18 @@ export default function ClientChat() {
   const restoredScrollTopRef = useRef(null)
   const messageLoadRequestRef = useRef(0)
   const brandNameRef = useRef(brandName)
+  const typingStopTimerRef = useRef(null)
+  const isTypingRef = useRef(false)
   const chatScrollStorageKey = `orb:chatspace-scroll:${encodeURIComponent(brandName)}`
 
   useEffect(() => { inputMessageRef.current = inputMessage }, [inputMessage])
   useEffect(() => { brandNameRef.current = brandName }, [brandName])
   useEffect(() => { setSlashCommandIndex(0) }, [inputMessage])
   useEffect(() => () => { dictationRef.current?.stop() }, [])
+  useEffect(() => () => {
+    window.clearTimeout(typingStopTimerRef.current)
+    if (isTypingRef.current) sendChatspaceTyping(user, false)
+  }, [user])
   useEffect(() => {
     const onBrandChanged = (event) => {
       const nextBrand = String(event.detail?.name || activeBrandName() || 'Your Brand')
@@ -316,6 +324,24 @@ export default function ClientChat() {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     setShowScrollBottom(distanceFromBottom > 160)
   }
+
+  const updateOwnTyping = useCallback((hasText) => {
+    window.clearTimeout(typingStopTimerRef.current)
+    if (!hasText) {
+      if (isTypingRef.current) sendChatspaceTyping(user, false)
+      isTypingRef.current = false
+      return
+    }
+    if (!isTypingRef.current) {
+      sendChatspaceTyping(user, true)
+      isTypingRef.current = true
+    }
+    // Stop even if the browser/tab disappears before a blur event arrives.
+    typingStopTimerRef.current = window.setTimeout(() => {
+      if (isTypingRef.current) sendChatspaceTyping(user, false)
+      isTypingRef.current = false
+    }, 1800)
+  }, [user])
 
   const scrollToBottom = (smooth = true) => {
     if (scrollContainerRef.current) {
@@ -454,7 +480,22 @@ export default function ClientChat() {
     setLoading(true)
     loadMessages()
 
-    const handleUpdate = () => {
+    const receiveTyping = (event) => {
+      if (event?.type !== 'typing' || String(event.userId) === String(user?.id)) return false
+      const userId = String(event.userId || '')
+      if (!userId) return true
+      if (!event.isTyping) {
+        setTypingUsers((current) => current.filter((person) => person.id !== userId))
+        return true
+      }
+      setTypingUsers((current) => [
+        ...current.filter((person) => person.id !== userId),
+        { id: userId, name: event.userName || 'Someone', avatar: event.avatar || '', expiresAt: Date.now() + 5000 },
+      ])
+      return true
+    }
+    const handleUpdate = (event) => {
+      if (receiveTyping(event?.detail?.event)) return
       loadMessages()
     }
     const onWsStatus = (e) => {
@@ -467,8 +508,8 @@ export default function ClientChat() {
     window.addEventListener('orb:chatspace-ws-status', onWsStatus)
 
     // Realtime WebSocket & database sync
-    const unsubscribe = subscribeToChatMessages(brandName, () => {
-      loadMessages()
+    const unsubscribe = subscribeToChatMessages(brandName, (event) => {
+      if (!receiveTyping(event)) loadMessages()
     })
 
     return () => {
@@ -477,6 +518,13 @@ export default function ClientChat() {
       if (typeof unsubscribe === 'function') unsubscribe()
     }
   }, [brandName, user])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTypingUsers((current) => current.filter((person) => person.expiresAt > Date.now())), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => { setTypingUsers([]) }, [brandName])
 
   // Record the latest message this person has seen, then surface those
   // positions as small reader avatars beneath the corresponding message.
@@ -680,6 +728,7 @@ export default function ClientChat() {
       .filter((reference) => positions.has(referenceKey(reference)))
       .map((reference) => ({ ...reference, position: positions.get(referenceKey(reference)) })))
     setInputMessage(val)
+    updateOwnTyping(Boolean(val.trim()))
 
     const textBeforeCursor = val.slice(0, cursorPos)
     const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\s]*)$/)
@@ -739,6 +788,7 @@ export default function ClientChat() {
     const mentionMatches = matches.map((m) => m.replace(/^@/, '').trim()).filter(Boolean)
 
     setInputMessage('')
+    updateOwnTyping(false)
     setComposerRevision((revision) => revision + 1)
     setReplyingTo(null)
     setAttachedFiles([])
@@ -1567,6 +1617,34 @@ export default function ClientChat() {
                 )
               })}
             </div>
+          </div>
+        )}
+
+        {typingUsers.length > 0 && (
+          <div className="mb-2 flex items-center gap-2 px-1 text-xs text-slate-500" aria-live="polite">
+            <div className="flex -space-x-1.5">
+              {typingUsers.slice(0, 3).map((person) => (
+                <Avatar
+                  key={person.id}
+                  name={person.name}
+                  src={person.avatar}
+                  className="h-5 w-5 rounded-full border-2 border-white text-[8px] shadow-sm"
+                  fallbackClassName="border-white bg-slate-500"
+                />
+              ))}
+            </div>
+            <span className="font-medium">
+              {typingUsers.length === 1
+                ? `${typingUsers[0].name} is typing`
+                : typingUsers.length === 2
+                  ? `${typingUsers[0].name} and ${typingUsers[1].name} are typing`
+                  : `${typingUsers.length} people are typing`}
+            </span>
+            <span className="inline-flex items-center gap-0.5" aria-label="Typing">
+              <i className="h-1 w-1 animate-bounce rounded-full bg-primary [animation-delay:-0.2s]" />
+              <i className="h-1 w-1 animate-bounce rounded-full bg-primary [animation-delay:-0.1s]" />
+              <i className="h-1 w-1 animate-bounce rounded-full bg-primary" />
+            </span>
           </div>
         )}
 
