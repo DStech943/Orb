@@ -90,6 +90,12 @@ export default function AIsBrain() {
   const { brandName, agentName } = useBrand()
   const tab = search.get('tab')
   const active = ['sops', 'faqs', 'chat'].includes(tab) ? tab : null
+  // Deep links from chat references open a specific knowledge item.
+  const reference = {
+    id: search.get('reference_id') || '',
+    title: search.get('reference_title') || '',
+    detail: search.get('reference_detail') || '',
+  }
 
   return (
     <div className="mx-auto w-full max-w-7xl">
@@ -118,8 +124,8 @@ export default function AIsBrain() {
               )
             })}
           </nav>
-          {active === 'sops' && <Sops />}
-          {active === 'faqs' && <Faqs />}
+          {active === 'sops' && <Sops reference={reference} />}
+          {active === 'faqs' && <Faqs reference={reference} />}
           {active === 'chat' && <AgentChat embedded />}
         </>
       ) : (

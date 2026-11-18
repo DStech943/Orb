@@ -73,6 +73,7 @@ async def _ensure_chatspace_table(pool: asyncpg.Pool) -> None:
               sender_avatar text,
               content text NOT NULL,
               media jsonb NOT NULL DEFAULT '[]'::jsonb,
+              message_references jsonb NOT NULL DEFAULT '[]'::jsonb,
               status text NOT NULL DEFAULT 'sent',
               reply_to_id uuid,
               reply_to_snippet text,
@@ -82,6 +83,8 @@ async def _ensure_chatspace_table(pool: asyncpg.Pool) -> None:
             );
             ALTER TABLE cx_copilot.orb_client_chat_messages
               ADD COLUMN IF NOT EXISTS media jsonb NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE cx_copilot.orb_client_chat_messages
+              ADD COLUMN IF NOT EXISTS message_references jsonb NOT NULL DEFAULT '[]'::jsonb;
             CREATE INDEX IF NOT EXISTS orb_client_chat_brand_name_idx
               ON cx_copilot.orb_client_chat_messages (brand_name, created_at ASC);
         """)
@@ -129,8 +132,9 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
                 sender = data.get("sender") or {}
                 content = str(data.get("content") or "").strip()
                 media = data.get("media") or []
+                message_references = data.get("references") or data.get("message_references") or []
                 mentions = data.get("mentions") or []
-                if not content and not media:
+                if not content and not media and not message_references:
                     continue
 
                 reply_to_id = data.get("replyToId")
@@ -158,17 +162,18 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
 
                             await conn.execute("""
                                 INSERT INTO cx_copilot.orb_client_chat_messages
-                                  (id, brand_id, brand_name, sender_id, sender_name, sender_role, sender_avatar, content, media, status, reply_to_id, reply_to_snippet, reactions, created_at)
-                                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::uuid, $12, $13::jsonb, $14::timestamptz)
+                                  (id, brand_id, brand_name, sender_id, sender_name, sender_role, sender_avatar, content, media, message_references, status, reply_to_id, reply_to_snippet, reactions, created_at)
+                                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12::uuid, $13, $14::jsonb, $15::timestamptz)
                                 ON CONFLICT (id) DO UPDATE SET
                                   brand_id=COALESCE(EXCLUDED.brand_id, cx_copilot.orb_client_chat_messages.brand_id),
                                   media=EXCLUDED.media,
+                                  message_references=EXCLUDED.message_references,
                                   reactions=EXCLUDED.reactions,
                                   status=EXCLUDED.status,
                                   updated_at=now();
                             """, msg_id, actual_brand_id if actual_brand_id else None, brand_name,
                                 str(sender.get("id") or ""), str(sender.get("name") or "User"),
-                                str(sender.get("role") or "client"), sender.get("avatar"), content, json.dumps(media),
+                                str(sender.get("role") or "client"), sender.get("avatar"), content, json.dumps(media), json.dumps(message_references),
                                 status_val, reply_to_id if reply_to_id else None, reply_to_snippet,
                                 json.dumps(reactions), datetime.fromisoformat(created_at.replace("Z", "+00:00")))
                     except Exception as db_err:
@@ -183,6 +188,7 @@ async def chatspace_websocket(websocket: WebSocket, brand_name: str) -> None:
                     "sender": sender,
                     "content": content,
                     "media": media,
+                    "references": message_references,
                     "mentions": mentions,
                     "status": status_val,
                     "replyToId": reply_to_id,

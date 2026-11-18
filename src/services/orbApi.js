@@ -42,6 +42,9 @@ const clearApiReadCache = () => {
   apiReadCache.clear();
   apiReadRequests.clear();
 };
+const notifyFlowsChanged = () => {
+  window.dispatchEvent(new CustomEvent("orb:flows-changed"));
+};
 
 const request = async (path, options = {}) => {
   if (!hasOrbApi) return null;
@@ -302,10 +305,10 @@ export const updateKnowledge = (
     method: "PATCH",
     body: JSON.stringify({ brand_name: brandName, payload }),
   });
-export const createAssistantFaq = ({ question, answer, category = "Customer support" }, brandName = activeBrandName()) =>
+export const createAssistantFaq = ({ question, answer }, brandName = activeBrandName()) =>
   request("/api/knowledge/faqs/manual", {
     method: "POST",
-    body: JSON.stringify({ brand_name: brandName, question, answer, category }),
+    body: JSON.stringify({ brand_name: brandName, question, answer }),
   });
 export const createManualSop = ({ title, situation, checkFirst, whatToDo, whatToSay, escalateTo, category = "Support" }, brandName = activeBrandName()) =>
   request("/api/knowledge/sops/manual", {
@@ -336,6 +339,11 @@ export const deleteKnowledge = (kind, id, brandName = activeBrandName()) =>
     `/api/knowledge/${kind}/${encodeURIComponent(id)}?brand_name=${encodeURIComponent(brandName)}`,
     { method: "DELETE" },
   );
+export const deleteKnowledgeBulk = (kind, ids, brandName = activeBrandName()) =>
+  request(`/api/knowledge/${kind}/delete`, {
+    method: "POST",
+    body: JSON.stringify({ brand_name: brandName, ids }),
+  });
 export const listFlows = (brandName = activeBrandName()) =>
   brandName
     ? request(`/api/flows?brand_name=${encodeURIComponent(brandName)}`, { cacheTtl: 45_000 })
@@ -414,21 +422,30 @@ export const assistFlow = (prompt, brandName = activeBrandName()) =>
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, prompt }),
   });
-export const createFlow = (payload, brandName = activeBrandName()) =>
-  request("/api/flows", {
+export const createFlow = async (payload, brandName = activeBrandName()) => {
+  const result = await request("/api/flows", {
     method: "POST",
     body: JSON.stringify({ brand_name: brandName, payload }),
   });
-export const updateFlow = (id, payload, brandName = activeBrandName()) =>
-  request(`/api/flows/${encodeURIComponent(id)}`, {
+  notifyFlowsChanged();
+  return result;
+};
+export const updateFlow = async (id, payload, brandName = activeBrandName()) => {
+  const result = await request(`/api/flows/${encodeURIComponent(id)}`, {
     method: "PUT",
     body: JSON.stringify({ brand_name: brandName, payload }),
   });
-export const deleteFlow = (id, brandName = activeBrandName()) =>
-  request(
+  notifyFlowsChanged();
+  return result;
+};
+export const deleteFlow = async (id, brandName = activeBrandName()) => {
+  const result = await request(
     `/api/flows/${encodeURIComponent(id)}?brand_name=${encodeURIComponent(brandName)}`,
     { method: "DELETE" },
   );
+  notifyFlowsChanged();
+  return result;
+};
 export const createCrawlPipeline = ({
   url,
   brandId,

@@ -64,11 +64,11 @@ const safePoints = (result) =>
   Array.isArray(result?.points) ? result.points : []
 
 const safeFlows = (result) =>
-  Array.isArray(result)
+  (Array.isArray(result)
     ? result
     : Array.isArray(result?.points)
       ? result.points
-      : []
+      : []).filter((flow) => !flow?.is_template)
 
 // [MOCK] Simulated latency for the localStorage path.
 // Remove when the backend exposes a real /api/overview endpoint.
@@ -301,6 +301,14 @@ export function useOverview() {
   useEffect(() => {
     window.addEventListener('orb:brand-changed', load)
     return () => window.removeEventListener('orb:brand-changed', load)
+  }, [load])
+
+  // Flow mutations clear the shared API read cache and emit this event.  The
+  // listener keeps an already-mounted Overview in sync without waiting for a
+  // route change or the 45-second flow-list cache expiry.
+  useEffect(() => {
+    window.addEventListener('orb:flows-changed', load)
+    return () => window.removeEventListener('orb:flows-changed', load)
   }, [load])
 
   return { ...state, reload: load }

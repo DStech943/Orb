@@ -1,5 +1,5 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { activeBrandName, deleteKnowledge, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, publishApprovedKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createAssistantFaq, createManualSop, bulkCreateKnowledge } from './orbApi'
+import { activeBrandName, deleteKnowledge, deleteKnowledgeBulk, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createAssistantFaq, createManualSop, bulkCreateKnowledge } from './orbApi'
 const KEY = 'orb_generation_data_v1'
 const KNOWLEDGE_CACHE_MS = 20_000
 const knowledgeCache = new Map()
@@ -27,8 +27,8 @@ const updateJob = (job) => { const elapsed = Date.now() - job.startedAt; const o
 const createGeneratedContent = (data, job) => { if (job.createdContent) return data; const next = clone(data); if (job.requested.includes('SOPs')) next.sops.push({ id: uid('sop'), title: 'Respond to a new customer', category: 'Support', lifecycle: 'Customer', status: 'Draft', source: job.sources[0]?.label || 'Added source', updated: 'Just now', situation: 'A new customer needs help.', checkFirst: 'Check their account details.', whatToDo: 'Give the next clear step.', whatToSay: 'Here is the quickest way forward.', escalateTo: 'Support lead' }); if (job.requested.includes('FAQs')) next.faqs.push({ id: uid('faq'), question: 'Where can I get help?', answer: 'Contact our support team from your workspace.', category: 'Support', status: 'Draft', source: job.sources[0]?.label || 'Added source', updated: 'Just now' }); if (job.requested.includes('Products')) next.products.push({ id: uid('prd'), name: 'New product', price: '—', url: '', description: 'Generated from your source.' }); next.generations.unshift({ id: uid('gen'), source: job.sources[0]?.label || 'Added source', date: 'Just now', outputs: job.requested, status: 'Done' }); next.jobs = next.jobs.map((item) => item.id === job.id ? { ...job, createdContent: true } : item); return next }
 export async function startGeneration({ sources, outputs }) { await wait(); const data = read(); const job = { id: uid('job'), startedAt: Date.now(), requested: outputs, sources, status: 'Queued', outputs: outputs.map((name) => ({ name, status: 'Queued', progress: 0, count: '0 of 40 pages read' })), createdContent: false }; data.jobs = [job, ...data.jobs]; write(data); return { jobId: job.id } }
 export async function getJobStatus(jobId) { await wait(120); let data = read(); const job = data.jobs.find((item) => item.id === jobId); if (!job) return null; const nextJob = updateJob(job); data.jobs = data.jobs.map((item) => item.id === jobId ? nextJob : item); if (nextJob.status === 'Done') data = createGeneratedContent(data, nextJob); write(data); return clone(nextJob) }
-const mapSop = ({ id, payload = {}, source }) => ({ id, title: payload.title || payload.situation || 'Untitled SOP', situation: payload.situation || '', category: payload.category || 'Uncategorised', lifecycle: payload.lifecycle_stage || payload.lifecycle || '—', status: payload.status || 'Draft', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—', updatedBy: payload.updated_by || payload.updatedBy || payload.updated_by_name || payload.updatedByName || '', checkFirst: payload.check_first || payload.checkFirst || '', whatToDo: payload.what_to_do || payload.whatToDo || '', whatToSay: payload.what_to_say || payload.whatToSay || '', escalateTo: payload.escalate_to || payload.escalateTo || '' })
-const mapFaq = ({ id, payload = {}, source }) => ({ id, question: payload.question || payload.title || 'Untitled FAQ', answer: payload.answer || payload.what_to_say || '', category: payload.category || 'Uncategorised', status: payload.status || 'Draft', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—' })
+const mapSop = ({ id, payload = {}, source }) => ({ id, title: payload.title || payload.situation || 'Untitled SOP', situation: payload.situation || '', category: payload.category || 'Uncategorised', lifecycle: payload.lifecycle_stage || payload.lifecycle || '—', status: payload.status || 'Published', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—', updatedBy: payload.updated_by || payload.updatedBy || payload.updated_by_name || payload.updatedByName || '', checkFirst: payload.check_first || payload.checkFirst || '', whatToDo: payload.what_to_do || payload.whatToDo || '', whatToSay: payload.what_to_say || payload.whatToSay || '', escalateTo: payload.escalate_to || payload.escalateTo || '' })
+const mapFaq = ({ id, payload = {}, source }) => ({ id, question: payload.question || payload.title || 'Untitled FAQ', answer: payload.answer || payload.what_to_say || '', status: payload.status || 'Published', source: source || payload.source || 'Orb generation', updated: payload.updated_at || payload.updated || '—', updatedBy: payload.updated_by || payload.updatedBy || payload.updated_by_name || payload.updatedByName || '' })
 const mapSopWithPayload = (record, source) => ({ ...mapSop({ ...record, source }), sourcePayload: record.payload || {} })
 const productCurrency = (payload = {}, shopify = {}) => payload.currency || payload.currency_code || payload.currencyCode || shopify._orb_currency || graphNodes(shopify.variants)[0]?.price?.currencyCode || ''
 const formatProductPrice = (payload = {}, fallbackCurrency = '') => {
@@ -66,7 +66,7 @@ const mapProduct = ({ id, payload = {} }) => {
   }
 }
 const sopPayload = (sop) => ({ title: sop.title, situation: sop.situation, category: sop.category, lifecycle_stage: sop.lifecycle, status: sop.status, updated_by: sop.updatedBy || '', check_first: sop.checkFirst, what_to_do: sop.whatToDo, what_to_say: sop.whatToSay, escalate_to: sop.escalateTo })
-const faqPayload = (faq) => ({ question: faq.question, answer: faq.answer, category: faq.category, status: faq.status })
+const faqPayload = (faq) => ({ question: faq.question, answer: faq.answer, category: faq.category, status: faq.status, updated_by: faq.updatedBy || '' })
 const productPayload = (product) => {
   const shopify = {
     ...(product.shopify || {}),
@@ -91,12 +91,12 @@ export async function createManualSopEntry(sop) {
   invalidateKnowledgeCache('sops')
   return result?.point ? mapSopWithPayload(result.point) : sop
 }
-export async function publishApprovedSops() { if (!hasOrbApi) return { published: 0 }; const result = await publishApprovedKnowledge('sops'); invalidateKnowledgeCache('sops'); return result }
 export async function deleteSop(id) { if (hasOrbApi) { const result = await deleteKnowledge('sops', id); invalidateKnowledgeCache('sops'); return result } await wait(); const data = read(); data.sops = data.sops.filter((item) => item.id !== id); write(data) }
+export async function deleteSops(ids) { if (hasOrbApi) { const result = await deleteKnowledgeBulk('sops', ids); invalidateKnowledgeCache('sops'); return result } await wait(); const data = read(); const deleted = new Set(ids); data.sops = data.sops.filter((item) => !deleted.has(item.id)); write(data); return { deleted: deleted.size } }
 export async function listFaqs() { if (hasOrbApi) { const result = await cachedKnowledge('faqs'); return result ? result.points.map((record) => mapFaq({ ...record, source: result.source === 'qdrant' ? 'Qdrant' : undefined })) : [] } await wait(); return read().faqs || [] }
 export async function updateFaq(faq) { if (hasOrbApi) { await updateKnowledge('faqs', faq.id, faqPayload(faq)); invalidateKnowledgeCache('faqs'); return faq } await wait(); const data = read(); data.faqs = data.faqs.map((item) => item.id === faq.id ? { ...item, ...faq, updated: 'Just now' } : item); write(data); return faq }
-export async function publishApprovedFaqs() { if (!hasOrbApi) return { published: 0 }; const result = await publishApprovedKnowledge('faqs'); invalidateKnowledgeCache('faqs'); return result }
 export async function deleteFaq(id) { if (hasOrbApi) { const result = await deleteKnowledge('faqs', id); invalidateKnowledgeCache('faqs'); return result } await wait(); const data = read(); data.faqs = data.faqs.filter((item) => item.id !== id); write(data) }
+export async function deleteFaqs(ids) { if (hasOrbApi) { const result = await deleteKnowledgeBulk('faqs', ids); invalidateKnowledgeCache('faqs'); return result } await wait(); const data = read(); const deleted = new Set(ids); data.faqs = data.faqs.filter((item) => !deleted.has(item.id)); write(data); return { deleted: deleted.size } }
 export async function listProducts() { if (hasOrbApi) { const result = await cachedKnowledge('products'); return result ? result.points.map(mapProduct) : [] } await wait(); return read().products || [] }
 export async function syncProductsForActiveBrand(brandName) { if (!hasOrbApi) throw new Error('Connect the Orb API before syncing Shopify products.'); if (!brandName) throw new Error('Choose a brand before syncing Shopify products.'); const result = await syncShopifyProducts({ brandName }); invalidateKnowledgeCache('products'); return result }
 export async function loadProductVariantMetafields(product, brandName, variantId) {
@@ -147,8 +147,7 @@ export async function bulkUploadKnowledge(kind, items) {
       id: uid('faq'),
       question: item.question,
       answer: item.answer,
-      category: item.category || 'Support',
-      status: item.status || 'Draft',
+      status: 'Published',
       source: 'Bulk upload',
       updated: 'Just now',
     }))
@@ -163,7 +162,7 @@ export async function bulkUploadKnowledge(kind, items) {
       situation: item.situation || item.title || '',
       category: item.category || 'Support',
       lifecycle: item.lifecycle_stage || '—',
-      status: item.status || 'Draft',
+      status: 'Published',
       source: 'Bulk upload',
       updated: 'Just now',
       updatedBy: 'Orb user',

@@ -56,7 +56,10 @@ async def publish_points(pool: asyncpg.Pool, settings: Settings, brand_name: str
             payload.update({"brand_name": brand_name, "kind": kind, "orb_id": str(item["id"]), "status": "published"})
             source_text = "\n".join(str(value) for value in payload.values() if isinstance(value, str))
             points.append({"id": str(item["id"]), "vector": await embed_text(pool, settings, source_text), "payload": payload})
-        vector_size = len(points[0]["vector"])
+        # embed_text validates every vector against this configured contract.
+        # Keep collection creation explicit so a provider default can never
+        # silently produce a 1536-dimension Qdrant collection.
+        vector_size = settings.embedding_dimensions
         async with httpx.AsyncClient(timeout=60) as client:
             exists = await client.get(f"{base_url}/collections/{collection}", headers=headers)
             if exists.status_code == 404:
@@ -119,6 +122,48 @@ async def scroll_points(
     return [point for point in points if isinstance(point, dict) and point.get("id") is not None and isinstance(point.get("payload"), dict)]
 
 
+async def delete_knowledge_point(
+    pool: asyncpg.Pool,
+    settings: Settings,
+    brand_name: str,
+    kind: str,
+    item_id: UUID | str,
+) -> None:
+    """Delete one published SOP/FAQ/product point from its brand collection."""
+    await delete_knowledge_points(pool, settings, brand_name, kind, [item_id])
+
+
+async def delete_knowledge_points(
+    pool: asyncpg.Pool,
+    settings: Settings,
+    brand_name: str,
+    kind: str,
+    item_ids: list[UUID | str],
+) -> None:
+    """Hard-delete published knowledge points from one Qdrant collection.
+
+    The operation is deliberately idempotent: an already-missing collection
+    means there is no live knowledge point left to remove.
+    """
+    point_ids = list(dict.fromkeys(str(item_id) for item_id in item_ids if str(item_id).strip()))
+    if not point_ids:
+        return
+    base_url, headers = await _client(pool)
+    collection = collection_name(settings.qdrant_collection_prefix, brand_name, kind)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{base_url}/collections/{collection}/points/delete?wait=true",
+                headers=headers,
+                json={"points": point_ids},
+            )
+            if response.status_code == 404:
+                return
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise PublishUnavailable(f"Qdrant knowledge delete failed: {exc}") from exc
+
+
 async def _ensure_display_collection(client: httpx.AsyncClient, base_url: str, headers: dict[str, str], collection: str, vector_size: int) -> None:
     exists = await client.get(f"{base_url}/collections/{collection}", headers=headers)
     if exists.status_code != 404:
@@ -152,7 +197,13 @@ async def upsert_display_point(
     try:
         vector = await embed_text(pool, settings, source_text)
         async with httpx.AsyncClient(timeout=60) as client:
-            await _ensure_display_collection(client, base_url, headers, collection, len(vector))
+            await _ensure_display_collection(
+                client,
+                base_url,
+                headers,
+                collection,
+                settings.embedding_dimensions,
+            )
             response = await client.put(
                 f"{base_url}/collections/{collection}/points?wait=true",
                 headers=headers,

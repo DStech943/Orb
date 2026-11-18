@@ -207,6 +207,7 @@ class ChatspaceWebSocketClient {
         sender: { ...data.sender, avatar: avatarUrlFromKey(data.sender?.avatar), avatarSources: avatarUrlsFromKey(data.sender?.avatar) },
         content: data.content,
         media: data.media || [],
+        references: data.references || data.message_references || [],
         mentions: data.mentions || [],
         status: data.status || 'read',
         replyToId: data.replyToId || null,
@@ -254,6 +255,33 @@ class ChatspaceWebSocketClient {
 }
 
 export const wsClient = new ChatspaceWebSocketClient()
+
+// Mention targets are deliberately scoped to the selected brand. The database
+// policy permits this read only when the signed-in person belongs to that same
+// brand (or is internal Orb staff).
+export const listBrandChatMembers = async (brandId = activeBrandId()) => {
+  if (!supabase || !brandId) return []
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('brand_assignments')
+    .select('id, name, role, avatar_key, is_online, created_at')
+    .eq('brand_id', brandId)
+    .order('is_online', { ascending: false })
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (Array.isArray(data) ? data : [])
+    .filter((member) => String(member?.name || '').trim())
+    .map((member) => ({
+      id: String(member.id),
+      handle: String(member.name).trim(),
+      label: `@${String(member.name).trim()}`,
+      role: String(member.role || 'client').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      description: member.is_online ? 'Online' : 'Offline',
+      avatar: avatarUrlFromKey(member.avatar_key),
+      avatarSources: avatarUrlsFromKey(member.avatar_key),
+      initials: String(member.name).trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+    }))
+}
 
 export const getClientChatMessages = async (brandName = activeBrandName(), currentUser) => {
   const brand = brandName || 'default_brand'
@@ -420,8 +448,13 @@ export const sendClientChatMessage = async ({
         .from('orb_client_chat_messages')
         .insert(payload)
       if (error) {
-        // Fallback without mentions column if it hasn't been migrated yet
+        // Keep a concise textual fallback for installations that have not run
+        // the reference migration yet. This preserves the shared product even
+        // when the old table only accepts text messages.
         const { mentions, message_references, ...fallbackPayload } = payload
+        if (!fallbackPayload.content && newMessage.references.length) {
+          fallbackPayload.content = `Shared: ${newMessage.references.map((reference) => reference.title).filter(Boolean).join(', ') || 'reference'}`
+        }
         await supabase
           .schema('cx_copilot')
           .from('orb_client_chat_messages')

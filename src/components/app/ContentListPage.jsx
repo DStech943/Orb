@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 
 const titles = { sop: 'SOPs', faq: 'FAQs', product: 'Products' }
+const SOP_DRAFT_HANDOFF_KEY = 'orb:pending-sop-edit'
 
 const productThumbnail = (product = {}) => product.featuredImage?.url
   || (Array.isArray(product.media) ? product.media.map((asset) => asset?.image?.url || asset?.preview?.image?.url).find(Boolean) : '')
@@ -62,7 +63,7 @@ const formatUpdatedAt = (value) => {
   return `${parts.day}-${parts.month}-${parts.year} ${parts.hour}:${parts.minute}`
 }
 
-const updatedByLabel = (item = {}) => item.updatedBy || item.updated_by || (String(item.source || '').toLowerCase().includes('orb') || String(item.source || '').toLowerCase().includes('qdrant') ? 'Orb' : 'Unknown')
+const updatedByLabel = (item = {}) => item.updatedBy || item.updated_by || (String(item.source || '').toLowerCase().includes('orb') ? 'Orb' : 'Not recorded')
 
 function ProductEditor({ product, onChange }) {
   const metafields = Array.isArray(product.metafields) ? product.metafields : []
@@ -383,7 +384,7 @@ function ProductMetafieldDraftReview({ product, draft, onApply }) {
   </section>
 }
 
-export default function ContentListPage({ kind, list, update, remove, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, publishApproved, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null }) {
+export default function ContentListPage({ kind, list, update, remove, removeMany, syncProducts, saveProductMetafields, saveVariantMetafields, loadProductMetafields, loadVariantMetafields, loadThemeTemplates, createItem, extraFilterAction = null, initialDraft = null, assistantDraft = null, trackedVariantMetafield = null, reference = null }) {
   const title = titles[kind] || 'Content'
   const isSop = kind === 'sop'
   const isFaq = kind === 'faq'
@@ -399,14 +400,13 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   const [selected, setSelected] = useState(null)
   const [checked, setChecked] = useState([])
   const [confirm, setConfirm] = useState(false)
-  const [confirmApproveAll, setConfirmApproveAll] = useState(false)
-  const [approving, setApproving] = useState(false)
   const [syncing, setSyncing] = useState(false)
-  const [publishingApproved, setPublishingApproved] = useState(false)
   const [savingShopify, setSavingShopify] = useState(false)
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false)
+  const [orbSopDraftId, setOrbSopDraftId] = useState('')
   const scrollPosition = useRef(0)
   const handledHandoffRef = useRef('')
+  const handledReferenceRef = useRef('')
 
   useEffect(() => {
     const reloadForBrand = () => setBrandVersion((version) => version + 1)
@@ -428,6 +428,24 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     scrollPosition.current = window.scrollY
     setSelected(initialDraft)
   }, [initialDraft])
+  useEffect(() => {
+    if (!isSop || !data.length) return
+    try {
+      const handoff = JSON.parse(window.sessionStorage.getItem(SOP_DRAFT_HANDOFF_KEY) || 'null')
+      if (!handoff?.sopId || !handoff?.draft) return
+      const handoffKey = `sop-edit:${handoff.sopId}:${handoff.createdAt || ''}`
+      if (handledHandoffRef.current === handoffKey) return
+      const savedSop = data.find((item) => item.id === handoff.sopId)
+      if (!savedSop) return
+      handledHandoffRef.current = handoffKey
+      window.sessionStorage.removeItem(SOP_DRAFT_HANDOFF_KEY)
+      scrollPosition.current = window.scrollY
+      setOrbSopDraftId(savedSop.id)
+      setSelected({ ...savedSop, ...handoff.draft, id: savedSop.id })
+    } catch {
+      window.sessionStorage.removeItem(SOP_DRAFT_HANDOFF_KEY)
+    }
+  }, [data, isSop])
   useEffect(() => {
     if (!isProduct || !assistantDraft?.message || !data.length) return
     const handoffKey = `${assistantDraft.target}|${assistantDraft.message}`
@@ -452,6 +470,30 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       return () => { active = false }
     }
   }, [assistantDraft, data, isProduct, loadProductMetafields])
+  useEffect(() => {
+    if (isProduct || !data.length) return
+    const referenceId = String(reference?.id || '').trim()
+    const referenceTerms = [reference?.title, reference?.detail]
+      .map((value) => String(value || '').trim().toLocaleLowerCase())
+      .filter(Boolean)
+    const referenceKey = `${referenceId}|${referenceTerms.join('|')}`
+    if (!referenceKey || handledReferenceRef.current === referenceKey) return
+    handledReferenceRef.current = referenceKey
+
+    const primary = (item) => String(isFaq ? item.question : item.title || '').trim().toLocaleLowerCase()
+    const secondary = (item) => String(isFaq ? item.answer : item.situation || '').trim().toLocaleLowerCase()
+    const exactMatches = data.filter((item) => referenceId
+      ? String(item.id) === referenceId
+      : referenceTerms.some((term) => term === primary(item) || term === secondary(item)))
+    const fuzzyMatches = exactMatches.length ? exactMatches : data.filter((item) => referenceTerms.some((term) => term.length >= 8 && (primary(item).includes(term) || secondary(item).includes(term))))
+    const matchedItem = fuzzyMatches.length === 1 ? fuzzyMatches[0] : null
+    if (matchedItem) {
+      scrollPosition.current = window.scrollY
+      setSelected(matchedItem)
+    } else if (referenceTerms[0]) {
+      setQuery(referenceTerms[0])
+    }
+  }, [data, isFaq, isProduct, reference?.detail, reference?.id, reference?.title])
   const rows = useMemo(() => {
     const filtered = data.filter((item) => {
       const text = [item.title, item.question, item.name, item.description, item.category].filter(Boolean).join(' ').toLowerCase()
@@ -470,10 +512,6 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       return String(left.name || '').localeCompare(String(right.name || ''), undefined, { sensitivity: 'base' })
     })
   }, [data, isProduct, productSort, query, status])
-  const draftIds = useMemo(() => data
-    .filter((item) => String(item.status || '').toLowerCase() === 'draft')
-    .map((item) => item.id), [data])
-  const approvedCount = useMemo(() => data.filter((item) => String(item.status || '').toLowerCase() === 'approved').length, [data])
 
   const openItem = (item) => {
     scrollPosition.current = window.scrollY
@@ -491,13 +529,14 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
   }, [selected])
 
   const toggle = (id) => setChecked((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id])
+  const selectAllVisible = () => setChecked(rows.map((item) => item.id))
   const NEW_ITEM_ID = '__new__'
   const createBlank = () => {
     scrollPosition.current = window.scrollY
     if (isFaq) {
-      setSelected({ id: NEW_ITEM_ID, question: '', answer: '', category: 'Support', status: 'Draft', source: 'Manual', updated: 'Not saved' })
+      setSelected({ id: NEW_ITEM_ID, question: '', answer: '', status: 'Published', source: 'Manual', updated: 'Not saved' })
     } else if (isSop) {
-      setSelected({ id: NEW_ITEM_ID, title: '', situation: '', checkFirst: '', whatToDo: '', whatToSay: '', escalateTo: '', category: 'Support', status: 'Draft', source: 'Manual', updated: 'Not saved' })
+      setSelected({ id: NEW_ITEM_ID, title: '', situation: '', checkFirst: '', whatToDo: '', whatToSay: '', escalateTo: '', category: 'Support', status: 'Published', source: 'Manual', updated: 'Not saved' })
     }
   }
   const isNewItem = selected?.id === NEW_ITEM_ID
@@ -515,31 +554,17 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       reload()
     } catch (saveError) { showToast(saveError.message || 'Could not save this item.') }
   }
-  const approve = async (ids = checked) => {
-    const items = ids.map((id) => data.find((item) => item.id === id)).filter(Boolean)
-    if (!items.length) return
-    setApproving(true)
-    try {
-      await Promise.all(items.map((item) => update({ ...item, status: 'Approved' })))
-      setChecked([])
-      setSelected(null)
-      reload()
-      showToast(`${items.length} ${items.length === 1 ? 'item' : 'items'} approved.`)
-    } catch (approveError) {
-      showToast(approveError.message || 'Could not approve these items.')
-    } finally {
-      setApproving(false)
-    }
-  }
   const deleteItems = async () => {
     try {
       const ids = selected ? [selected.id] : checked
-      await Promise.all(ids.map(remove))
+      if (!ids.length) return
+      if (removeMany && ids.length > 1) await removeMany(ids)
+      else await Promise.all(ids.map(remove))
       setSelected(null)
       setChecked([])
       setConfirm(false)
       reload()
-      showToast('Deleted.')
+      showToast(`${ids.length} ${ids.length === 1 ? 'item' : 'items'} deleted.`)
     } catch (deleteError) { showToast(deleteError.message || 'Could not delete this item.') }
   }
   const sync = async () => {
@@ -550,20 +575,6 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       await reload()
       showToast(`${result?.synced || 0} Shopify ${result?.synced === 1 ? 'product' : 'products'} synced.`)
     } catch (syncError) { showToast(syncError.message || 'Could not sync Shopify products.') } finally { setSyncing(false) }
-  }
-  const publishExistingApproved = async () => {
-    if (!publishApproved) return
-    setPublishingApproved(true)
-    try {
-      const result = await publishApproved()
-      await reload()
-      const count = result?.published || 0
-      showToast(count ? `${count} approved ${count === 1 ? 'item has' : 'items have'} been published to Qdrant.` : 'All approved items are already live for your agent.')
-    } catch (publishError) {
-      showToast(publishError.message || 'Could not publish the approved items to your agent.')
-    } finally {
-      setPublishingApproved(false)
-    }
   }
   const saveMetafieldsToShopify = async () => {
     if (!saveProductMetafields || !selected) return
@@ -628,7 +639,6 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
       <div className="flex flex-wrap gap-2">
         {isProduct && saveProductMetafields && <Button variant="purple" onClick={saveMetafieldsToShopify} disabled={savingShopify}>{savingShopify ? 'Saving to Shopify…' : 'Save metafields to Shopify'}</Button>}
         <Button variant={isProduct && saveProductMetafields ? 'outline' : 'purple'} onClick={save}>{isProduct && saveProductMetafields ? 'Save in Orb only' : isNewItem ? 'Create' : 'Save'}</Button>
-        {!isProduct && !isNewItem && <Button variant="outline" onClick={() => approve([selected.id])}>Approve</Button>}
         {!isNewItem && <Button variant="dark" onClick={() => setConfirm(true)}>Delete</Button>}
       </div>
     )
@@ -640,13 +650,11 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
         {isProduct && <p className="text-xs font-medium uppercase tracking-wide text-primary">Business</p>}
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <h2 className={isProduct ? 'font-display text-[1.75rem] font-medium leading-tight' : 'font-display text-2xl font-medium'}><em>{title}</em></h2>
-          {!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-0.5 text-xs font-medium text-primary">{data.length}</span>}
+          {!isProduct && <span className="rounded-full bg-primary-tint px-2.5 py-1 text-xs font-extrabold text-primary">{data.length} {title.toLowerCase()}</span>}
           {isReadOnly && <span className="rounded-full bg-slate-100 border border-slate-200 px-2.5 py-0.5 text-[11px] font-bold text-slate-600">Read-Only</span>}
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
-        {!isReadOnly && !isProduct && draftIds.length > 0 && <Button variant="outline" onClick={() => setConfirmApproveAll(true)} disabled={approving}><Check size={16} />Approve all drafts ({draftIds.length})</Button>}
-        {!isReadOnly && !isProduct && publishApproved && approvedCount > 0 && <Button variant="outline" onClick={publishExistingApproved} disabled={publishingApproved}>{<RefreshCw size={16} className={publishingApproved ? 'animate-spin' : ''} />}{publishingApproved ? 'Publishing…' : 'Publish approved to agent'}</Button>}
         {isProduct && syncProducts && <Button variant="outline" onClick={sync} disabled={syncing}><RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{syncing ? 'Syncing…' : 'Sync'}</Button>}
         {!isReadOnly && !isProduct && (
           <Button variant="outline" onClick={() => setBulkUploadOpen(true)}>
@@ -661,16 +669,15 @@ export default function ContentListPage({ kind, list, update, remove, syncProduc
     <section className="mt-5 rounded-card border border-line bg-white p-4 shadow-card">
       <div className={`grid items-center gap-3 ${isProduct ? (extraFilterAction ? 'md:grid-cols-[1fr_150px_190px_auto]' : 'md:grid-cols-[1fr_150px_190px]') : 'md:grid-cols-[1fr_150px_150px]'}`}>
         <label className="flex h-10 items-center gap-2 rounded-control border border-line bg-white px-3 text-sm transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/15"><Search size={16} className="text-fg-muted" /><input className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg-muted/70" value={query} placeholder={`Search ${title}`} onChange={(event) => setQuery(event.target.value)} /></label>
-        <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}>{isProduct ? <><option>All</option><option>Active</option><option>Draft</option></> : <><option>All</option><option>Draft</option><option>Approved</option></>}</Select>
+        <Select aria-label="Filter status" value={status} onChange={(event) => setStatus(event.target.value)}>{isProduct ? <><option>All</option><option>Active</option><option>Draft</option></> : <><option>All</option><option>Published</option></>}</Select>
         {isProduct ? <Select aria-label="Sort products" value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="name-asc">Name: A–Z</option><option value="name-desc">Name: Z–A</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option></Select> : <Select aria-label="Sort content"><option>Last updated</option><option>Title</option></Select>}
         {extraFilterAction}
       </div>
-      {!isReadOnly && !isProduct && checked.length > 0 && <div className="mt-4 flex gap-2"><Button variant="purple" size="sm" onClick={() => approve()} disabled={approving}><Check size={15} />Approve selected</Button><Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected</Button></div>}
+      {!isReadOnly && !isProduct && rows.length > 0 && <div className="mt-4 flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" onClick={() => checked.length === rows.length && rows.every((item) => checked.includes(item.id)) ? setChecked([]) : selectAllVisible()}>{checked.length === rows.length && rows.every((item) => checked.includes(item.id)) ? 'Clear selection' : `Select all (${rows.length})`}</Button>{checked.length > 0 && <Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected ({checked.length})</Button>}</div>}
       <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={isFaq ? 'Your agent is ready to learn' : isSop ? 'Give your agent your business processes' : `No ${title} yet`} description={isFaq ? 'Start by adding your first frequently asked question.' : isSop ? 'Give your agent access to your business processes by adding your first SOP.' : ''} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
     </section>
-    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{selected.id === initialDraft?.id && <div className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-slate-700"><strong className="text-ink">Unsaved Orb draft.</strong> Review it, then choose Save or Approve when you are ready.</div>}{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /><Select label="Category" disabled={isReadOnly} value={selected.category || ''} onChange={(event) => setSelected({ ...selected, category: event.target.value })}><option>Support</option><option>Billing</option><option>Product</option></Select></div>}</div>}</div>}</Drawer>
-    <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} description="This item will be permanently removed." />
-    <ConfirmDialog open={confirmApproveAll} onClose={() => setConfirmApproveAll(false)} onConfirm={() => { setConfirmApproveAll(false); approve(draftIds) }} title="Approve all drafts?" description={`${draftIds.length} ${draftIds.length === 1 ? 'draft will' : 'drafts will'} be marked approved and become available to Create with Orb.`} confirmLabel="Approve all" />
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /></div>}</div>}</div>}</Drawer>
+    <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} title={selected || checked.length === 1 ? 'Delete this item?' : `Delete ${checked.length} items?`} description={selected || checked.length === 1 ? 'This item will be permanently removed from Qdrant.' : `These ${checked.length} selected items will be permanently removed from Qdrant.`} confirmLabel={selected || checked.length === 1 ? 'Delete' : 'Delete all selected'} />
     {!isProduct && (
       <BulkUploadModal
         open={bulkUploadOpen}

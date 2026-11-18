@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import {
   ArrowUp,
   Eraser,
+  ExternalLink,
   Flag,
   History,
   Loader2,
@@ -91,6 +92,29 @@ const timeLabel = (createdAt) =>
     minute: "2-digit",
   }).format(createdAt);
 
+const diagnosticDecision = (diagnostic) => {
+  if (diagnostic?.is_handoff) return "Escalated to human";
+  return diagnostic?.route === "auto_send" ? "Auto-send eligible" : "Requires review";
+};
+
+const diagnosticSources = (diagnostic) =>
+  (Array.isArray(diagnostic?.sources) ? diagnostic.sources : []).filter(
+    (source) => source?.collection === "FAQ" || source?.collection === "SOP",
+  );
+
+const diagnosticSourceHref = (source = {}) => {
+  const params = new URLSearchParams({
+    tab: source.collection === "FAQ" ? "faqs" : "sops",
+  });
+  const sourceId = String(source.id || source.orb_id || source.point_id || "").trim();
+  const title = String(source.title || "").trim();
+  const detail = String(source.detail || "").trim();
+  if (sourceId) params.set("reference_id", sourceId);
+  if (title) params.set("reference_title", title);
+  if (detail) params.set("reference_detail", detail);
+  return `/app/brain?${params.toString()}`;
+};
+
 function AgentOrb({ className = "" }) {
   return (
     <span
@@ -114,7 +138,7 @@ function AgentOrb({ className = "" }) {
 
 export default function AgentChat({ embedded = false }) {
   const { data: brandData, loading: brandsLoading } = useAsync(listBrands, []);
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { showToast } = useToast();
   const brands = Array.isArray(brandData) ? brandData : [];
   const [brandId, setBrandId] = useState(
@@ -136,6 +160,7 @@ export default function AgentChat({ embedded = false }) {
   const [noteToSlack, setNoteToSlack] = useState(false);
   const [noteTagged, setNoteTagged] = useState([]);
   const noteKey = useRef(newIdempotencyKey());
+  const [diagnostic, setDiagnostic] = useState(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
   const [openFullscreenByDefault, setOpenFullscreenByDefault] = useState(
@@ -145,6 +170,7 @@ export default function AgentChat({ embedded = false }) {
     () => typeof window !== "undefined" && window.localStorage.getItem(FULLSCREEN_DEFAULT_KEY) === "true",
   );
   const messagesRef = useRef(null);
+  const messageScrollTopRef = useRef(0);
   const [sessions, setSessions] = useState([]);
   const [sessionQuery, setSessionQuery] = useState("");
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -222,6 +248,7 @@ export default function AgentChat({ embedded = false }) {
         setFeedbackTarget(null);
         setReportOpen(false);
         setReportTarget(null);
+        setDiagnostic(null);
         setError("");
         setSessionId(sessionForBrand());
       }
@@ -259,11 +286,16 @@ export default function AgentChat({ embedded = false }) {
     });
   }, [messages, sending]);
 
+  const updateFullscreen = (nextFullscreen) => {
+    messageScrollTopRef.current = messagesRef.current?.scrollTop || 0;
+    setIsFullscreen(nextFullscreen);
+  };
+
   useEffect(() => {
     if (!isFullscreen) return undefined;
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event) => {
-      if (event.key === "Escape") setIsFullscreen(false);
+      if (event.key === "Escape") updateFullscreen(false);
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", closeOnEscape);
@@ -271,6 +303,13 @@ export default function AgentChat({ embedded = false }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (messagesRef.current) messagesRef.current.scrollTop = messageScrollTopRef.current;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [isFullscreen]);
 
   const setFullscreenDefault = (enabled) => {
@@ -294,6 +333,7 @@ export default function AgentChat({ embedded = false }) {
     setFeedbackTarget(null);
     setReportOpen(false);
     setReportTarget(null);
+    setDiagnostic(null);
     setDraft("");
     setError("");
     setSessionId(sessionForBrand());
@@ -305,6 +345,7 @@ export default function AgentChat({ embedded = false }) {
     setFeedbackTarget(null);
     setReportOpen(false);
     setReportTarget(null);
+    setDiagnostic(null);
     setDraft("");
     setError("");
   };
@@ -364,6 +405,7 @@ export default function AgentChat({ embedded = false }) {
       });
       const reply = String(result?.response || result?.reply || "").trim();
       if (!reply) throw new Error("The deployed AI agent returned no reply.");
+      setDiagnostic(result || null);
       setMessages((items) => [
         ...items,
         {
@@ -395,6 +437,15 @@ export default function AgentChat({ embedded = false }) {
     if (!tags.length && !note.trim() && !ideal.trim()) return;
     setSavingFeedback(true);
     try {
+      const conversationHistory = scope === "conversation"
+        ? messages.map((message) => ({
+            role: message.role,
+            text: message.text,
+            created_at: message.createdAt instanceof Date
+              ? message.createdAt.toISOString()
+              : new Date(message.createdAt || Date.now()).toISOString(),
+          }))
+        : [];
       const result = await createBrandAgentFeedback(activeBrand.id, {
         session_id: sessionId,
         scope,
@@ -403,6 +454,7 @@ export default function AgentChat({ embedded = false }) {
         tags,
         note: note.trim(),
         ideal_reply: ideal.trim(),
+        conversation_history: conversationHistory,
       });
       if (result?.feedback) setFeedback((items) => [...items, result.feedback]);
       if (scope === "reply") resetReplyFeedback();
@@ -451,6 +503,13 @@ export default function AgentChat({ embedded = false }) {
       setSavingFeedback(false);
     }
   };
+
+  const qdrantSources = diagnosticSources(diagnostic);
+  const toolsUsed = Array.isArray(diagnostic?.tools_used) ? diagnostic.tools_used.filter(Boolean) : [];
+  const decisionReason = String(diagnostic?.handoff_reason || diagnostic?.route_reason || "").trim();
+  const latency = Number(diagnostic?.latency_ms);
+  const cost = Number(diagnostic?.cost_usd);
+  const totalTokens = Number(diagnostic?.total_tokens);
 
   const toggleFeedbackTag = (tag) => setSelectedTags((tags) => tags.includes(tag) ? tags.filter((item) => item !== tag) : [...tags, tag]);
 
@@ -504,7 +563,7 @@ export default function AgentChat({ embedded = false }) {
             )}
             <button
               type="button"
-              onClick={() => setIsFullscreen((open) => !open)}
+              onClick={() => updateFullscreen(!isFullscreen)}
               className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-xs font-medium text-fg-muted transition hover:border-primary/35 hover:bg-primary-tint/30 hover:text-primary"
               aria-label={isFullscreen ? "Exit full screen" : "Open chat full screen"}
               title={isFullscreen ? "Exit full screen (Esc)" : "Open chat full screen"}
@@ -752,6 +811,35 @@ export default function AgentChat({ embedded = false }) {
               Help improve this brand’s AI without changing its live knowledge yet.
             </p>
           </div>
+
+          {isAdmin && diagnostic && (
+            <section className="mt-4 rounded-2xl border border-line bg-white p-3 shadow-card" aria-label="Latest agent run diagnostics">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">Latest run</p>
+                  <p className={`mt-1 text-xs font-semibold ${diagnostic.is_handoff ? "text-warning" : diagnostic.route === "auto_send" ? "text-success" : "text-primary"}`}>
+                    {diagnosticDecision(diagnostic)}
+                  </p>
+                </div>
+                {diagnostic.is_handoff ? <span className="rounded-full bg-warning-tint px-2 py-0.5 text-[10px] font-medium text-warning">Handoff</span> : null}
+              </div>
+              {decisionReason ? <p className="mt-1.5 text-[11px] leading-4 text-fg-muted">{decisionReason}</p> : null}
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-lg bg-canvas px-2.5 py-2"><p className="font-semibold text-fg-muted">Latency</p><p className="mt-0.5 font-semibold text-ink">{Number.isFinite(latency) ? `${latency} ms` : "—"}</p></div>
+                <div className="rounded-lg bg-canvas px-2.5 py-2"><p className="font-semibold text-fg-muted">LLM usage</p><p className="mt-0.5 font-semibold text-ink">{Number.isFinite(cost) ? `$${cost.toFixed(4)}` : "—"}{Number.isFinite(totalTokens) ? ` · ${totalTokens} tok` : ""}</p></div>
+              </div>
+              <div className="mt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-muted">Tools used</p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {toolsUsed.length ? toolsUsed.map((tool) => <span key={tool} className="rounded-full bg-primary-tint px-2 py-1 text-[10px] font-medium text-primary">{tool}</span>) : <span className="text-[11px] text-fg-muted">None</span>}
+                </div>
+              </div>
+              <details className="mt-3 border-t border-line pt-2.5">
+                <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-muted">FAQs &amp; SOPs used ({qdrantSources.length})</summary>
+                {qdrantSources.length ? <div className="mt-2 space-y-1.5">{qdrantSources.map((source, index) => { const sourceLabel = String(source.title || source.detail || "Untitled").trim(); return <a key={`${source.collection}-${sourceLabel}-${index}`} href={diagnosticSourceHref(source)} target="_blank" rel="noreferrer" title={`Open this ${String(source.collection || "knowledge").toLowerCase()} in AI's Brain`} className="block rounded-lg bg-canvas px-2.5 py-2 transition hover:bg-primary-tint hover:ring-1 hover:ring-indigo-200"><div className="flex items-center gap-1.5"><span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${source.collection === "FAQ" ? "bg-sky-100 text-sky-700" : "bg-violet-100 text-violet-700"}`}>{source.collection}</span><span className="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">{sourceLabel}</span><span className="text-[10px] font-semibold text-fg-muted">{Number(source.score || 0).toFixed(2)}</span><ExternalLink size={12} className="shrink-0 text-fg-muted" aria-hidden="true" /></div></a> })}</div> : <p className="mt-2 text-[11px] text-fg-muted">None</p>}
+              </details>
+            </section>
+          )}
 
           <div className="mt-4 rounded-2xl border border-line bg-white p-3 shadow-sm">
             {feedbackTarget ? (

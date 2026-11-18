@@ -29,18 +29,23 @@ async function appUser(authUser) {
     .maybeSingle();
   const email = String(authUser.email || "").trim().toLowerCase();
   let avatarKey = "";
+  let assignmentRole = "";
   if (email) {
     const [adminResult, assignmentResult] = await Promise.all([
       client.schema("cx_copilot").from("admins").select("avatar_key").eq("email", email).maybeSingle(),
-      client.schema("cx_copilot").from("brand_assignments").select("avatar_key").eq("email", email).order("is_online", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      client.schema("cx_copilot").from("brand_assignments").select("avatar_key, role").eq("email", email).order("is_online", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     avatarKey = String(adminResult.data?.avatar_key || assignmentResult.data?.avatar_key || authUser.user_metadata?.avatar_url || "").trim();
+    assignmentRole = String(assignmentResult.data?.role || "").trim().toLowerCase();
   }
+  const rawProfileRole = String(data?.role || "").trim().toLowerCase();
+  const profileRole = rawProfileRole === "team" ? "agent" : rawProfileRole;
+  const role = profileRole === "admin" ? "admin" : assignmentRole || profileRole || "client";
   return {
     id: authUser.id,
     email: authUser.email || "",
     name: data?.full_name || fallbackName(authUser),
-    role: data?.role || "client",
+    role,
     avatarKey,
     avatar: avatarUrlFromKey(avatarKey),
     avatarSources: avatarUrlsFromKey(avatarKey),

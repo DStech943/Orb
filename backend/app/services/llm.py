@@ -133,7 +133,14 @@ async def embed_text(pool: asyncpg.Pool, settings: Settings, text: str) -> list[
             response = await client.post(
                 embedding_endpoint,
                 headers={"Authorization": f"Bearer {api_key}"},
-                json={"model": model, "input": text[:30_000]},
+                # OpenAI-compatible embedding providers use this to request a
+                # reduced output vector. Qdrant collections must never infer
+                # their dimension from a provider default (for example 1536).
+                json={
+                    "model": model,
+                    "input": text[:30_000],
+                    "dimensions": settings.embedding_dimensions,
+                },
             )
             response.raise_for_status()
             vector = response.json()["data"][0]["embedding"]
@@ -141,4 +148,9 @@ async def embed_text(pool: asyncpg.Pool, settings: Settings, text: str) -> list[
         raise GenerationUnavailable(f"Embedding request failed: {exc}") from exc
     if not isinstance(vector, list) or not all(isinstance(value, (int, float)) for value in vector):
         raise GenerationUnavailable("Embedding provider returned an invalid vector")
+    if len(vector) != settings.embedding_dimensions:
+        raise GenerationUnavailable(
+            f"Embedding provider returned {len(vector)} dimensions; Orb requires "
+            f"{settings.embedding_dimensions}. Configure a matching embedding model or provider output dimension."
+        )
     return [float(value) for value in vector]

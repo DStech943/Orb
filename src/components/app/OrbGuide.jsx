@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
-import { activeBrandName, askOrbGuide, draftOrbWork } from '../../services/orbApi'
+import { useAuth } from '../../context/AuthContext'
+import { activeBrandName, askOrbGuide, chatWithBrandAgent, createAssistantFaq, draftOrbWork } from '../../services/orbApi'
+import { listBrands } from '../../services/brands'
+import { listSops } from '../../services/generation'
 import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, setOrbVoiceWakeEnabled, setOrbVoiceWakeStatus } from '../../lib/orbVoiceWake'
 import { startBrowserDictation } from '../../lib/browserDictation'
 
 const pages = {
   '/app': { title: 'Overview', summary: "This is your brand's at-a-glance workspace for support activity and content progress." },
+  '/app/client-chat': { title: 'Chatspace', summary: 'Coordinate with the Orb operations team in your brand chat.' },
   '/app/workspace': { title: 'Brand workspace', summary: 'Use this page to add the brand context Orb needs for support content.' },
   '/app/operations': { title: 'Operations', summary: 'Record customer-support and product updates, then review the follow-up Orb has queued for this brand.' },
   '/app/chat': { title: 'Agent chat', summary: "Use this page to test the selected brand's deployed support agent." },
@@ -22,6 +26,8 @@ const pages = {
 }
 
 const makeId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+const newAgentSessionId = () => `orb_guide_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : `${Date.now()}${Math.random().toString(36).slice(2, 12)}`}`.slice(0, 64)
+const SOP_DRAFT_HANDOFF_KEY = 'orb:pending-sop-edit'
 
 // Speech recognition frequently transcribes “Orb” as “or” / “orbe”. Keeping
 // those common variants here makes the wake phrase more forgiving without
@@ -37,6 +43,15 @@ const actionDestinations = {
   open_faqs: '/app/brain?tab=faqs',
   open_create_with_orb: '/app/flows?create=orb',
   focus_operational_update: '/app/operations?compose=1',
+}
+const CLIENT_WORKSPACE_PATHS = new Set(['/app', '/app/client-chat', '/app/chat', '/app/flows', '/app/templates', '/app/products'])
+const CLIENT_GUIDE_ACTIONS = new Set(['open_agent_chat', 'open_create_with_orb'])
+const CLIENT_GUIDE_FALLBACK = 'I can help with your brand overview, Chatspace, AI agent, flows, templates, or products.'
+const pathWithoutQuery = (destination = '') => String(destination).split('?')[0]
+const clientSafeDestination = (action, destination, isClient) => {
+  if (!isClient) return destination
+  if (action === 'open_agent_chat') return '/app/chat'
+  return CLIENT_WORKSPACE_PATHS.has(pathWithoutQuery(destination)) ? destination : ''
 }
 const actionLabels = {
   open_agent_chat: 'agent test chat',
@@ -80,6 +95,45 @@ const operationDraftFromRequest = (value) => {
     .trim()
   return draft || original
 }
+const sopPolicyFromRequest = (value) => {
+  const request = String(value || '').trim()
+  const marker = /\b(?:this is the correct sop|the correct sop is|correct sop|correct version)\b\s*:?\s*/i
+  const markerMatch = marker.exec(request)
+  if (!markerMatch) return request
+  return request.slice((markerMatch.index || 0) + markerMatch[0].length).trim() || request
+}
+const sopSearchTerms = (value) => {
+  const beforePolicy = String(value || '').split(/\b(?:this is the correct sop|the correct sop is|correct sop|correct version)\b/i)[0]
+  const target = beforePolicy.match(/\b(?:sop|procedure)\s+(?:for|on|about)?\s*([a-z][a-z\s&/-]*)/i)?.[1] || beforePolicy
+  const words = String(target).toLowerCase().match(/[a-z]{3,}/g) || []
+  const aliases = /\b(?:refund|return|exchange)\b/i.test(value) ? ['refund', 'return', 'returns', 'exchange', 'exchanges', 'replacement'] : []
+  return [...new Set([...words, ...aliases].filter((word) => !['check', 'correct', 'edit', 'update', 'change', 'accordance', 'please', 'sop', 'procedure'].includes(word)))]
+}
+const matchingSops = (sops, request) => {
+  const terms = sopSearchTerms(request)
+  return (Array.isArray(sops) ? sops : [])
+    .map((sop) => {
+      const title = String(sop.title || '').toLowerCase()
+      const searchable = [sop.title, sop.category, sop.situation, sop.whatToDo, sop.whatToSay].filter(Boolean).join(' ').toLowerCase()
+      const score = terms.reduce((total, term) => total + (title.includes(term) ? 5 : 0) + (searchable.includes(term) ? 1 : 0), 0)
+      return { sop, score }
+    })
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score || String(left.sop.title || '').localeCompare(String(right.sop.title || '')))
+    .map(({ sop }) => sop)
+}
+const sopDraftFromRequest = (sop, request) => {
+  const policy = sopPolicyFromRequest(request)
+  const isReturnsPolicy = /\b(?:refund|return|exchange)\b/i.test(policy)
+  if (!isReturnsPolicy) return { ...sop, whatToDo: policy || sop.whatToDo }
+  return {
+    ...sop,
+    situation: 'A customer asks for a return, refund, exchange, credit note, or replacement.',
+    checkFirst: 'Confirm the delivery date and whether the product or packaging is damaged or defective. Confirm that any replacement request is being made within two weeks of delivery.',
+    whatToDo: policy,
+    whatToSay: 'We do not accept returns or exchanges after delivery, including unopened products, unless the product or packaging is damaged or defective. We cannot offer exchanges based on fragrance preference or issue credit notes. If the product or packaging is damaged or defective, we can arrange a replacement when the request is made within two weeks of delivery.',
+  }
+}
 const assistantWorkFromRequest = (value) => {
   const text = String(value || '').trim()
   const isQuestion = /\?$/.test(text) || /^(?:what|why|how|where|when|who|can|could|would|do|does|is|are)\b/i.test(text)
@@ -88,6 +142,7 @@ const assistantWorkFromRequest = (value) => {
   if (
     /\b(?:draft|write|compose|create|make|add|record)\b[\s\S]{0,80}\b(?:operations?|operational\s+(?:update|note)|update|note|message)\b/i.test(text)
   ) return { type: 'draft_operation' }
+  if (/\b(?:sop|sops|procedure)\b/i.test(text) && /\b(?:check|edit|update|correct|replace|revise|amend|change)\b/i.test(text)) return { type: 'sop_edit' }
   if (/\b(?:add|create|make)\s+(?:an?\s+)?faq\b/i.test(text)) return { type: 'faq' }
   if (/\b(?:out of stock|back in stock|pre[ -]?order|restock|expected to be back)\b/i.test(text)) return { type: 'product' }
   if (/\b(?:delayed|delay|late|running late|sale|promotion|ganesh|diwali|operational note|operations?)\b/i.test(text)) return { type: 'operation' }
@@ -106,6 +161,7 @@ const directGuideCommand = (value) => {
     answer: asksWhereToFindIt ? whereAnswer : `Opening ${label}.`,
     autoNavigate: !asksWhereToFindIt,
   })
+  if (/\bchatspace\b/.test(text)) return pageResponse('/app/client-chat', 'Chatspace', 'Chatspace is in the left sidebar.')
   if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: asksWhereToFindIt ? "The agent test chat is in AI's Brain." : 'Opening the agent test chat.', autoNavigate: !asksWhereToFindIt }
   if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: asksWhereToFindIt ? "FAQs are in AI's Brain." : 'Opening FAQs.', autoNavigate: !asksWhereToFindIt }
   if (/\b(?:sop|sops)\b/.test(text)) return { action: 'open_sops', answer: asksWhereToFindIt ? "SOPs are in AI's Brain." : 'Opening SOPs.', autoNavigate: !asksWhereToFindIt }
@@ -124,6 +180,8 @@ const directGuideCommand = (value) => {
 export default function OrbGuide() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isClient = user?.role === 'client'
   const currentPath = pages[location.pathname] ? location.pathname : '/app'
   const current = pages[currentPath]
   const [open, setOpen] = useState(false)
@@ -131,6 +189,9 @@ export default function OrbGuide() {
   const [messages, setMessages] = useState([])
   const [thinking, setThinking] = useState(false)
   const [typedPlaceholder, setTypedPlaceholder] = useState('')
+  const [brandAgentMode, setBrandAgentMode] = useState(false)
+  const [activeBrand, setActiveBrand] = useState(null)
+  const [agentSessionId, setAgentSessionId] = useState(newAgentSessionId)
   const [voiceWakeEnabled, setVoiceWakeEnabled] = useState(isOrbVoiceWakeEnabled)
   const [dictating, setDictating] = useState(false)
   const [dictationError, setDictationError] = useState('')
@@ -148,6 +209,37 @@ export default function OrbGuide() {
   const lastDestinationRef = useRef(null)
   const flowPage = location.pathname === '/app/flows'
   const rotatingPrompts = [`What's happening on ${current.title}?`, 'Where do I create a support flow?', 'Where can I test my AI agent?']
+  const agentName = String(activeBrand?.ai_agent_name || '').trim() || (activeBrand?.name ? `${activeBrand.name} AI` : 'Brand AI')
+
+  useEffect(() => {
+    let live = true
+    const loadActiveBrand = async () => {
+      try {
+        const brands = await listBrands()
+        if (!live) return
+        const selectedId = window.localStorage.getItem('orb_selected_brand') || ''
+        // Never fall back to another brand's agent. A stale or missing brand
+        // selection must remain unconnected until the user selects a brand.
+        setActiveBrand(brands.find((brand) => brand.id === selectedId) || null)
+      } catch { if (live) setActiveBrand(null) }
+    }
+    loadActiveBrand()
+    window.addEventListener('orb:brand-changed', loadActiveBrand)
+    return () => { live = false; window.removeEventListener('orb:brand-changed', loadActiveBrand) }
+  }, [])
+
+  useEffect(() => {
+    if (!activeBrand?.ai_agent_configured) setBrandAgentMode(false)
+  }, [activeBrand?.ai_agent_configured])
+
+  const switchChatMode = (nextBrandAgentMode) => {
+    if (nextBrandAgentMode && (!activeBrand?.id || !activeBrand?.ai_agent_configured)) return
+    setBrandAgentMode(nextBrandAgentMode)
+    setMessages([])
+    setDraft('')
+    draftRef.current = ''
+    setAgentSessionId(newAgentSessionId())
+  }
 
   useEffect(() => { draftRef.current = draft }, [draft])
 
@@ -414,9 +506,31 @@ export default function OrbGuide() {
     // Clear the browser control too. This prevents a late text-input or
     // speech-recognition event from leaving the just-sent prompt visible.
     if (inputRef.current) inputRef.current.value = ''
+    if (brandAgentMode) {
+      if (!activeBrand?.id) {
+        setMessages((items) => [...items, { id: makeId(), role: 'agent', error: true, text: 'Choose a brand with a connected AI agent first.' }])
+        return
+      }
+      setThinking(true)
+      try {
+        const result = await chatWithBrandAgent(activeBrand.id, { message: text, session_id: agentSessionId })
+        const reply = String(result?.response || result?.reply || '').trim()
+        if (!reply) throw new Error(`${agentName} returned no reply.`)
+        setMessages((items) => [...items, { id: makeId(), role: 'agent', text: reply }])
+      } catch (error) {
+        setMessages((items) => [...items, { id: makeId(), role: 'agent', error: true, text: error?.message || `${agentName} could not respond. Please try again.` }])
+      } finally {
+        setThinking(false)
+      }
+      return
+    }
     setPromptReset((value) => value + 1)
     const requestedWork = assistantWorkFromRequest(text)
     if (requestedWork) {
+      if (isClient && requestedWork.type !== 'product') {
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', text: CLIENT_GUIDE_FALLBACK }])
+        return
+      }
       const brandName = activeBrandName()
       if (!brandName) {
         setMessages((items) => [...items, { id: makeId(), role: 'orb', error: true, text: 'Choose a brand before I make this change.' }])
@@ -424,6 +538,30 @@ export default function OrbGuide() {
       }
       setThinking(true)
       try {
+        if (requestedWork.type === 'sop_edit') {
+          const matches = matchingSops(await listSops(), text)
+          if (!matches.length) {
+            setMessages((items) => [...items, { id: makeId(), role: 'orb', error: true, text: 'I could not find an SOP that matches that request. Try the SOP title or a more specific keyword.' }])
+            return
+          }
+          if (matches.length > 1) {
+            setMessages((items) => [...items, {
+              id: makeId(),
+              role: 'orb',
+              text: 'I found multiple SOPs that could match. Which one should I prepare as an editable draft?',
+              sopChoices: matches.slice(0, 5),
+              sopRequest: text,
+            }])
+            return
+          }
+          const sop = matches[0]
+          const destination = '/app/brain?tab=sops'
+          window.sessionStorage.setItem(SOP_DRAFT_HANDOFF_KEY, JSON.stringify({ sopId: sop.id, draft: sopDraftFromRequest(sop, text), createdAt: Date.now() }))
+          lastDestinationRef.current = { destination, destinationLabel: 'SOPs' }
+          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: `Opening “${sop.title}” with your correction as an unsaved draft. Review and save it when you are ready.`, destination, destinationLabel: 'SOPs' }])
+          window.setTimeout(() => navigate(destination), 280)
+          return
+        }
         if (requestedWork.type === 'draft_operation' || requestedWork.type === 'operation') {
           const prepared = await draftOrbWork({ target: 'operation', request: operationDraftFromRequest(text) })
           const message = prepared?.message || operationDraftFromRequest(text)
@@ -441,10 +579,16 @@ export default function OrbGuide() {
             answer: prepared?.answer || fallback.answer,
             category: prepared?.category || 'Product',
           }
-          const destination = `/app/brain?tab=faqs&draftQuestion=${encodeURIComponent(faq.question)}&draftAnswer=${encodeURIComponent(faq.answer)}&draftCategory=${encodeURIComponent(faq.category)}`
+          await createAssistantFaq(faq, brandName)
+          const destination = '/app/brain?tab=faqs'
           lastDestinationRef.current = { destination, destinationLabel: 'FAQs' }
-          setMessages((items) => [...items, { id: makeId(), role: 'orb', text: 'Opening an unsaved FAQ draft for you to review. Nothing will be added until you choose Save.', destination, destinationLabel: 'FAQs' }])
-          window.setTimeout(() => navigate(destination), 280)
+          setMessages((items) => [...items, {
+            id: makeId(),
+            role: 'orb',
+            text: 'Added the FAQ to the brand knowledge and published it to Qdrant.',
+            destination,
+            destinationLabel: 'FAQs',
+          }])
           return
         }
         if (requestedWork.type === 'product') {
@@ -483,7 +627,13 @@ export default function OrbGuide() {
     }
     const directCommand = directGuideCommand(text)
     if (directCommand) {
-      const destination = directCommand.destination || actionDestinations[directCommand.action] || ''
+      const requestedDestination = directCommand.destination || actionDestinations[directCommand.action] || ''
+      const destination = clientSafeDestination(directCommand.action, requestedDestination, isClient)
+      const actionAllowed = !directCommand.action || CLIENT_GUIDE_ACTIONS.has(directCommand.action)
+      if (isClient && (!actionAllowed || !destination)) {
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', text: CLIENT_GUIDE_FALLBACK }])
+        return
+      }
       const destinationLabel = actionLabels[directCommand.action] || pages[destination]?.title || ''
       const flowPrompt = directCommand.flowPrompt || ''
       const resolvedDestination = flowPrompt && destination === actionDestinations.open_create_with_orb
@@ -502,15 +652,20 @@ export default function OrbGuide() {
     try {
       const result = await askOrbGuide({ page_path: currentPath, question: text })
       if (!result?.answer) throw new Error('No guide response')
-      const action = actionDestinations[result?.action] ? result.action : ''
-      const destination = actionDestinations[action] || (pages[result.navigate_to] ? result.navigate_to : '')
+      const requestedAction = actionDestinations[result?.action] ? result.action : ''
+      const action = isClient && !CLIENT_GUIDE_ACTIONS.has(requestedAction) ? '' : requestedAction
+      const requestedDestination = actionDestinations[action] || (pages[result.navigate_to] ? result.navigate_to : '')
+      const destination = clientSafeDestination(action, requestedDestination, isClient)
       const destinationLabel = actionLabels[action] || pages[destination]?.title || ''
       const flowPrompt = action === 'open_create_with_orb' ? flowBriefFromRequest(text) : ''
       const resolvedDestination = flowPrompt && destination === actionDestinations.open_create_with_orb
         ? `${destination}&prompt=${encodeURIComponent(flowPrompt)}`
         : destination
       if (destination) lastDestinationRef.current = { destination: resolvedDestination, destinationLabel }
-      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: result.answer, destination: resolvedDestination, destinationLabel }])
+      const answer = isClient && (requestedAction && !action || requestedDestination && !destination)
+        ? CLIENT_GUIDE_FALLBACK
+        : result.answer
+      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: answer, destination: resolvedDestination, destinationLabel }])
       if (destination && (isNavigationCommand(text) || action)) {
         // Show Orb's acknowledgement briefly, then take the user directly to
         // the validated route without breaking the active conversation.
@@ -530,14 +685,22 @@ export default function OrbGuide() {
     }
   }
 
+  const openSopDraft = (sop, request) => {
+    const destination = '/app/brain?tab=sops'
+    window.sessionStorage.setItem(SOP_DRAFT_HANDOFF_KEY, JSON.stringify({ sopId: sop.id, draft: sopDraftFromRequest(sop, request), createdAt: Date.now() }))
+    lastDestinationRef.current = { destination, destinationLabel: 'SOPs' }
+    setMessages((items) => [...items, { id: makeId(), role: 'orb', text: `Opening “${sop.title}” with your correction as an unsaved draft. Review and save it when you are ready.`, destination, destinationLabel: 'SOPs' }])
+    navigate(destination)
+  }
+
   askRef.current = ask
 
   return <div className="fixed bottom-5 right-5 z-[80] sm:bottom-6">
     {open && <section aria-label="Orb workspace guide" className="orb-guide-panel absolute bottom-16 right-0 flex h-[min(35rem,calc(100vh-8rem))] w-[min(23rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-primary/15 bg-white shadow-2xl shadow-slate-900/15">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-gradient-to-r from-primary-tint/70 to-white px-4 py-3.5"><span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span><div className="min-w-0"><p className="text-sm font-extrabold text-slate-900">Ask Orb</p><p className="truncate text-[11px] text-slate-500">Guiding you through {current.title}</p></div><button type="button" onClick={closeGuide} aria-label="Close Orb guide" className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={17} /></button></header>
+      <header className="flex items-center gap-3 border-b border-slate-200 bg-gradient-to-r from-primary-tint/70 to-white px-4 py-3.5"><span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full"><Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#ffffff" size={1.12} glow={1} hoverIntensity={1} trail={1} rotateOnHover followCursor intro /></span><div className="min-w-0 flex-1"><div className="flex items-center gap-1.5"><p className="text-sm font-extrabold text-slate-900">{brandAgentMode ? `Ask ${agentName}` : 'Ask Orb'}</p><div className="flex rounded-md border border-slate-200 bg-white/80 p-0.5 text-[9px] font-bold"><button type="button" onClick={() => switchChatMode(false)} className={`rounded px-1.5 py-0.5 transition ${!brandAgentMode ? 'bg-primary text-white' : 'text-slate-500 hover:text-slate-800'}`}>Orb</button><button type="button" onClick={() => switchChatMode(true)} disabled={!activeBrand?.id || !activeBrand?.ai_agent_configured} title={!activeBrand?.id ? 'Choose a brand first' : !activeBrand?.ai_agent_configured ? 'This brand has no AI agent URL configured' : undefined} className={`max-w-20 truncate rounded px-1.5 py-0.5 transition disabled:opacity-40 ${brandAgentMode ? 'bg-primary text-white' : 'text-slate-500 hover:text-slate-800'}`}>{agentName}</button></div></div><p className="truncate text-[11px] text-slate-500">{brandAgentMode ? `Testing ${agentName} for ${activeBrand?.name || 'this brand'}` : `Guiding you through ${current.title}`}</p></div><button type="button" onClick={closeGuide} aria-label="Close Orb guide" className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={17} /></button></header>
       <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-4">
         {messages.length === 0 && !thinking && <div aria-live="polite" className="orb-guide-greeting orb-guide-copy inline-flex rounded-2xl rounded-tl-md border border-slate-200 bg-white px-3 py-2.5 shadow-sm">How may I help you?</div>}
-        <div className={messages.length || thinking ? 'space-y-3' : 'mt-5 space-y-3'}>{messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`max-w-[84%] rounded-2xl px-3 py-2.5 shadow-sm ${message.role === 'user' ? 'rounded-br-md bg-primary text-xs leading-5 text-white' : message.error ? 'rounded-bl-md border border-red-200 bg-red-50 text-red-700' : 'orb-guide-copy rounded-bl-md border border-slate-200 bg-white'}`}><p>{message.text}</p>{message.destination && <button type="button" onClick={() => navigate(message.destination)} className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary-tint px-2 py-1 text-[11px] font-bold text-primary transition hover:bg-primary/15">Open {message.destinationLabel || pages[message.destination]?.title || 'page'}<ArrowUpRight size={13} /></button>}</div></div>)}{thinking && <div aria-live="polite" className="orb-guide-thinking orb-guide-copy inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2.5"><span className="orb-guide-thinking__dots" aria-hidden="true"><i /><i /><i /></span>Orb is thinking…</div>}</div>
+        <div className={messages.length || thinking ? 'space-y-3' : 'mt-5 space-y-3'}>{messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : ''}`}><div className={`max-w-[84%] rounded-2xl px-3 py-2.5 shadow-sm ${message.role === 'user' ? 'rounded-br-md bg-primary text-xs leading-5 text-white' : message.error ? 'rounded-bl-md border border-red-200 bg-red-50 text-red-700' : 'orb-guide-copy rounded-bl-md border border-slate-200 bg-white'}`}><p>{message.text}</p>{message.destination && <button type="button" onClick={() => navigate(message.destination)} className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary-tint px-2 py-1 text-[11px] font-bold text-primary transition hover:bg-primary/15">Open {message.destinationLabel || pages[message.destination]?.title || 'page'}<ArrowUpRight size={13} /></button>}{message.sopChoices?.length ? <div className="mt-2 grid gap-1.5">{message.sopChoices.map((sop) => <button key={sop.id} type="button" onClick={() => openSopDraft(sop, message.sopRequest)} className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-xs transition hover:border-primary/40 hover:bg-primary-tint"><span className="block font-bold text-slate-800">{sop.title}</span>{sop.category ? <span className="mt-0.5 block text-[10px] text-slate-500">{sop.category}</span> : null}</button>)}</div> : null}</div></div>)}{thinking && <div aria-live="polite" className="orb-guide-thinking orb-guide-copy inline-flex items-center gap-2 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3 py-2.5"><span className="orb-guide-thinking__dots" aria-hidden="true"><i /><i /><i /></span>Orb is thinking…</div>}</div>
       </div>
       <form onSubmit={ask} className="orb-guide-prompt border-t border-slate-200 bg-white p-3"><div className={`orb-prompt-field rounded-xl border p-3 transition ${thinking ? 'opacity-70' : ''}`}><textarea key={promptReset} ref={inputRef} value={draft} onChange={(event) => { draftRef.current = event.target.value; setDraft(event.target.value) }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(event) } }} disabled={thinking} rows={2} placeholder="" className="block w-full resize-none bg-transparent text-sm leading-5 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed" />{!draft && !thinking && <span className="orb-prompt-field__typing" aria-hidden="true">{typedPlaceholder}<i /></span>}<div className="mt-3 flex items-center gap-3"><span className="orb-prompt-field__icon" aria-hidden="true"><Plus size={18} /></span><span className="flex-1" /><button type="button" onClick={startDictation} disabled={thinking} aria-label={dictating ? 'Stop dictation' : 'Start dictation'} title={dictating ? 'Stop dictation' : 'Dictate your question'} className={`orb-prompt-field__icon grid h-8 w-8 place-items-center rounded-lg transition hover:bg-primary/10 disabled:cursor-not-allowed ${dictating ? 'bg-primary/10 text-primary' : ''}`}>{dictating ? <MicOff size={16} /> : <Mic size={16} />}</button><button type="submit" aria-label="Ask Orb" disabled={!draft.trim() || thinking} className="orb-prompt-field__send grid h-8 w-8 place-items-center rounded-lg text-white transition disabled:cursor-not-allowed">{thinking ? <Loader2 size={15} className="animate-spin" /> : <ArrowUp size={17} strokeWidth={2.5} />}</button></div></div>{dictationError && <p role="alert" className="px-1 pt-2 text-[11px] font-medium text-red-600">{dictationError}</p>}</form>
     </section>}

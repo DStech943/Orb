@@ -1,24 +1,10 @@
-import React, { useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import React from 'react'
 import ContentListPage from '../components/app/ContentListPage'
-import { deleteFaq, listFaqs, publishApprovedFaqs, updateFaq } from '../services/generation'
+import { deleteFaq, deleteFaqs, listFaqs, updateFaq } from '../services/generation'
 import { activeBrandName, createAssistantFaq } from '../services/orbApi'
 
-export default function Faqs() {
-  const [search] = useSearchParams()
-  const initialDraft = useMemo(() => {
-    const question = search.get('draftQuestion') || ''
-    const answer = search.get('draftAnswer') || ''
-    const category = search.get('draftCategory') || 'Support'
-    if (!question && !answer) return null
-    return { id: `orb-faq-draft:${question}:${answer}:${category}`, question, answer, category, status: 'Draft', source: 'Orb draft', updated: 'Not saved' }
-  }, [search])
+export default function Faqs({ reference }) {
+  const createFaq = (faq) => createAssistantFaq({ question: faq.question, answer: faq.answer }, activeBrandName())
 
-  const saveFaq = (faq) => String(faq?.id || '').startsWith('orb-faq-draft:')
-    ? createAssistantFaq({ ...faq, id: undefined }, activeBrandName())
-    : updateFaq(faq)
-
-  const createFaq = (faq) => createAssistantFaq({ question: faq.question, answer: faq.answer, category: faq.category || 'Support' }, activeBrandName())
-
-  return <ContentListPage kind="faq" list={listFaqs} update={saveFaq} remove={deleteFaq} publishApproved={publishApprovedFaqs} initialDraft={initialDraft} createItem={createFaq} />
+  return <ContentListPage kind="faq" list={listFaqs} update={updateFaq} remove={deleteFaq} removeMany={deleteFaqs} createItem={createFaq} reference={reference} />
 }

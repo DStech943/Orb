@@ -26,7 +26,14 @@ async def _internal_shopify_user(request: Request, user: User) -> None:
         "select": "role", "id": f"eq.{user.id}", "limit": "1",
     })
     role = str(rows[0].get("role") or "").lower() if rows else ""
-    if role not in {"admin", "team", "agent", "pod_lead"}:
+    if role == "team":
+        role = "agent"
+    if role not in {"admin", "agent", "pod_lead"} and user.email:
+        assignments = await _supabase_service_rows(request, "brand_assignments", {
+            "select": "role", "email": f"eq.{user.email.lower()}", "order": "is_online.desc,created_at.desc", "limit": "1",
+        })
+        role = str(assignments[0].get("role") or "").lower() if assignments else role
+    if role not in {"admin", "agent", "pod_lead"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Shopify order lookup is available to internal roles only.")
 
 

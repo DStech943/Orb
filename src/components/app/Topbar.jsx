@@ -29,7 +29,7 @@ const brainTabTitles = { faqs: 'FAQs', sops: 'SOPs' }
 export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, logout, isAdmin } = useAuth()
   const { brandName, agentName } = useBrand()
 
   let title = titles[location.pathname] || 'Orb'
@@ -82,9 +82,11 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
             <p className="text-xs capitalize text-fg-muted">{user?.role || 'client'}</p>
           </div>
           <div className="pt-1">
-            <Link role="menuitem" to="/app/settings?tab=profile" className={itemClass}>
-              <UserRound size={15} className="text-fg-muted" /> Profile
-            </Link>
+            {isAdmin && (
+              <Link role="menuitem" to="/app/settings?tab=profile" className={itemClass}>
+                <UserRound size={15} className="text-fg-muted" /> Profile
+              </Link>
+            )}
             {user?.role === 'admin' && (
               <Link role="menuitem" to="/app/settings?tab=team" className={itemClass}>
                 <Users size={15} className="text-fg-muted" /> Manage roles

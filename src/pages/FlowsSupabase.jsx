@@ -307,20 +307,32 @@ const blankFlow = ({ empty = false } = {}) => ({
       ],
   edges: [],
 });
-const normalise = (point) => ({
-  id: point.is_template ? null : point.id,
-  templateId: point.template_id || null,
-  templateVersion: Number(point.template_version || 1),
-  templateCategory: point.category_code || "",
-  isTemplate: Boolean(point.is_template),
-  title: point.payload?.title || "Untitled flow",
-  lifecycle_stage: point.payload?.lifecycle_stage || "",
-  status: point.payload?.status || "draft",
-  nodes: Array.isArray(point.payload?.nodes) ? point.payload.nodes : [],
-  edges: Array.isArray(point.payload?.edges) ? point.payload.edges : [],
-  import_source: point.payload?.import_source,
-  updatedAt: point.payload?.updated_at || point.payload?.created_at || "",
-});
+const flowPayload = (point = {}) => {
+  if (point.payload && typeof point.payload === "object") return point.payload;
+  if (typeof point.payload === "string") {
+    try { return JSON.parse(point.payload); } catch { return {}; }
+  }
+  return {};
+};
+const normalise = (point = {}) => {
+  const payload = flowPayload(point);
+  return {
+    id: point.is_template ? null : point.id,
+    templateId: point.template_id || null,
+    templateVersion: Number(point.template_version || 1),
+    templateCategory: point.category_code || "",
+    isTemplate: Boolean(point.is_template),
+    // Older flow responses expose these fields at the record level, while
+    // current API responses put them inside payload. Support both shapes.
+    title: payload.title || payload.name || point.title || point.name || "Untitled flow",
+    lifecycle_stage: payload.lifecycle_stage || point.lifecycle_stage || "",
+    status: payload.status || point.status || "draft",
+    nodes: Array.isArray(payload.nodes) ? payload.nodes : (Array.isArray(point.nodes) ? point.nodes : []),
+    edges: Array.isArray(payload.edges) ? payload.edges : (Array.isArray(point.edges) ? point.edges : []),
+    import_source: payload.import_source || point.import_source,
+    updatedAt: payload.updated_at || payload.created_at || point.updated_at || point.created_at || "",
+  };
+};
 
 const key = (value) =>
   String(value || "")
@@ -604,7 +616,7 @@ function makeImportedFlows(text, label) {
         if (item.message) {
           const message = add(
             "message",
-            "Customer message",
+            "Message to Customer",
             item.message,
             1430,
             branchY,
@@ -2623,7 +2635,7 @@ function Builder({
     try {
       await createSopFromFlow(draft);
       setAddToBrainOpen(false);
-      showToast("Draft SOP added to AI’s Brain. Review it before publishing.");
+      showToast("SOP added to AI’s Brain and published to Qdrant.");
     } catch (error) {
       showToast(error.message || "Could not create an SOP from this flow.");
     } finally {
@@ -2844,24 +2856,19 @@ function Builder({
             className="min-w-[220px] flex-1 bg-transparent text-lg font-extrabold outline-none"
             aria-label="Flow title"
           />
-          {templateMode ? (
-            <select
-              value={draft.status}
-              onChange={(event) =>
-                setDraft({ ...draft, status: event.target.value })
-              }
-              className="rounded-full border border-primary/20 bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary outline-none"
-              aria-label="Template status"
-            >
-              <option value="draft">Draft</option>
-              <option value="published">Published</option>
-              <option value="archived">Archived</option>
-            </select>
-          ) : (
-            <span className="rounded-full bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary">
-              {draft.templateId ? "brand version" : draft.status}
-            </span>
-          )}
+          <select
+            value={draft.status || "draft"}
+            onChange={(event) =>
+              setDraft({ ...draft, status: event.target.value })
+            }
+            className="rounded-full border border-primary/20 bg-primary-tint px-2.5 py-1 text-[11px] font-bold text-primary outline-none"
+            aria-label="Flow status"
+            title="Choose the flow status, then save the flow"
+          >
+            <option value="draft">Draft</option>
+            <option value="published">Published</option>
+            {templateMode && <option value="archived">Archived</option>}
+          </select>
           {isAdmin && !templateMode && (
             <Button
               size="sm"

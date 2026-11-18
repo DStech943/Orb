@@ -23,6 +23,7 @@ async function listDirectBrands() {
       id: brand.id,
       name: brand.name || String(brand.id),
       ai_agent_name: '',
+      ai_agent_configured: false,
     }))
   } catch { return [] }
 }

@@ -333,7 +333,7 @@ function OverviewBlockCustomizer({ blocks, onChange, saving }) {
   return <details className="absolute right-0 top-0 z-20"><summary aria-label="Customize overview blocks" title="Customize overview blocks" className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-full border border-ink/10 bg-white/60 text-ink/30 shadow-sm transition hover:border-primary/40 hover:text-primary hover:bg-white"><SlidersHorizontal size={13} /></summary><div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-ink/15 bg-white p-3 shadow-lg"><p className="text-xs leading-5 text-muted">Choose which blocks appear for this brand.</p><div className="mt-3 grid gap-2">{OVERVIEW_BLOCK_OPTIONS.map((option) => <label key={option.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-ink/10 p-2.5 hover:border-primary/40"><input type="checkbox" checked={blocks.includes(option.id)} onChange={(event) => onChange(option.id, event.target.checked)} disabled={saving} className="mt-0.5 h-4 w-4 accent-primary" /><span><span className="block text-sm font-bold">{option.label}</span><span className="mt-0.5 block text-xs leading-4 text-muted">{option.description}</span></span></label>)}</div>{saving ? <p className="mt-3 text-xs font-bold text-muted">Saving layout…</p> : null}</div></details>
 }
 
-function MastersheetBanner({ brandName }) {
+function MastersheetBanner({ brandName, canConfigure }) {
   const [liveUrl, setLiveUrl] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -398,7 +398,7 @@ function MastersheetBanner({ brandName }) {
         </div>
 
         <div className="flex items-center gap-2.5">
-          {!isConfigured && (
+          {!isConfigured && canConfigure && (
             <Link
               to="/app/tools"
               className="inline-flex h-9 items-center gap-1.5 rounded-control border border-line-strong bg-white px-3 text-xs font-medium text-ink shadow-card transition hover:border-primary/40 hover:bg-subtle"
@@ -451,7 +451,7 @@ function ActiveOperations({ operations, now, isAdmin, onExtended, status, onRetr
   })
   const active = sorted.filter((operation) => !countdown(operation.expiresAt, now).expired).slice(0, 5)
   const expired = sorted.filter((operation) => countdown(operation.expiresAt, now).expired)
-  return <><Panel title="Active operations" count={active.length} countTone={active.length ? 'success' : 'neutral'} action={{ to: '/app/operations', label: 'View all' }}>{active.length ? <div className="mt-3 divide-y divide-line">{active.map((operation) => { const state = countdown(operation.expiresAt, now); return <article key={operation.id} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{operation.title}</p><div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium"><span className="rounded-full border border-line px-2 py-0.5 capitalize">{operation.kind || 'notice'}</span><span className={state.urgent ? 'text-primary' : 'text-fg-muted'}>{state.label}</span></div></div>{isAdmin && <button type="button" onClick={() => setExtending(operation)} className="shrink-0 text-xs font-semibold text-primary hover:underline">Extend</button>}</div><p className="mt-2 text-xs leading-5 text-fg-muted">{operation.agentBehaviour || 'The agent uses this update while it is active.'}</p></article> })}</div> : <p className="mt-5 text-sm leading-6 text-fg-muted">No active operations. Add an offer or restock date so the agent can use it.</p>}{expired.length > 0 && <details className="mt-4 border-t border-line pt-3"><summary className="cursor-pointer text-xs font-semibold text-fg-muted">Recently expired ({expired.length})</summary><div className="mt-2 divide-y divide-line">{expired.map((operation) => <div key={operation.id} className="py-2"><p className="text-sm font-medium text-fg-muted">{operation.title}</p><p className="mt-1 text-xs text-fg-muted">No longer used by the agent.</p></div>)}</div></details>}</Panel><ExtendOperationModal operation={extending} onClose={() => setExtending(null)} onSaved={(newExpiresAt) => onExtended(extending.id, newExpiresAt)} /></>
+  return <><Panel title="Active operations" count={active.length} countTone={active.length ? 'success' : 'neutral'} action={isAdmin ? { to: '/app/operations', label: 'View all' } : undefined}>{active.length ? <div className="mt-3 divide-y divide-line">{active.map((operation) => { const state = countdown(operation.expiresAt, now); return <article key={operation.id} className="py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{operation.title}</p><div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium"><span className="rounded-full border border-line px-2 py-0.5 capitalize">{operation.kind || 'notice'}</span><span className={state.urgent ? 'text-primary' : 'text-fg-muted'}>{state.label}</span></div></div>{isAdmin && <button type="button" onClick={() => setExtending(operation)} className="shrink-0 text-xs font-semibold text-primary hover:underline">Extend</button>}</div><p className="mt-2 text-xs leading-5 text-fg-muted">{operation.agentBehaviour || 'The agent uses this update while it is active.'}</p></article> })}</div> : <p className="mt-5 text-sm leading-6 text-fg-muted">No active operations.</p>}{expired.length > 0 && <details className="mt-4 border-t border-line pt-3"><summary className="cursor-pointer text-xs font-semibold text-fg-muted">Recently expired ({expired.length})</summary><div className="mt-2 divide-y divide-line">{expired.map((operation) => <div key={operation.id} className="py-2"><p className="text-sm font-medium text-fg-muted">{operation.title}</p><p className="mt-1 text-xs text-fg-muted">No longer used by the agent.</p></div>)}</div></details>}</Panel><ExtendOperationModal operation={extending} onClose={() => setExtending(null)} onSaved={(newExpiresAt) => onExtended(extending.id, newExpiresAt)} /></>
 }
 
 function BrandOverview({ overview, onRetry }) {
@@ -490,7 +490,7 @@ function BrandOverview({ overview, onRetry }) {
         {isAdmin && <div className="relative h-7 w-7"><OverviewBlockCustomizer blocks={blocks} onChange={updateBlocks} saving={savingBlocks} /></div>}
       </div>
       <div className="grid gap-5">
-        <MastersheetBanner brandName={brandName} />
+        <MastersheetBanner brandName={brandName} canConfigure={isAdmin} />
         {/* Equal-height row: every panel stretches to the tallest, so there is never a blank band between cards. */}
         {hasOperationalBlocks && <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {blocks.includes('out_of_stock') && <div className="h-full [&>section]:h-full"><InventoryProducts products={overview.products} status={overview.blockStatus?.products} onRetry={onRetry} /></div>}

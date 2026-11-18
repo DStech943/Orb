@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react'
-import { ClipboardList, FileSpreadsheet, Package, Search, Workflow, X } from 'lucide-react'
+import { ClipboardList, FileSpreadsheet, FileText, Package, Search, Workflow, X } from 'lucide-react'
 import { listProducts } from '../../services/generation'
 import { getBrandMastersheetUrl, listFlows, listMessageTemplates, listOperationalUpdates, searchShopifyOrders } from '../../services/orbApi'
 
@@ -10,15 +10,27 @@ const stock = (product) => (Array.isArray(product?.variants) ? product.variants 
 const imageFor = (product) => product?.featuredImage?.url || product?.media?.find((item) => item?.image?.url)?.image?.url || ''
 const isInternal = (role) => ['admin', 'team', 'agent', 'pod_lead'].includes(String(role || '').toLowerCase())
 const expiry = (value) => { if (!value) return 'No expiry'; const days = Math.ceil((new Date(value).getTime() - Date.now()) / 86400000); return days <= 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}` }
+const flowData = (flow = {}) => {
+  if (flow.payload && typeof flow.payload === 'object') return flow.payload
+  if (typeof flow.payload === 'string') { try { return JSON.parse(flow.payload) } catch { return {} } }
+  return flow
+}
+const flowTitle = (flow) => { const data = flowData(flow); return data.title || data.name || flow?.title || flow?.name || 'Untitled flow' }
+const flowSteps = (flow) => { const data = flowData(flow); return (Array.isArray(data.steps) ? data.steps : Array.isArray(data.nodes) ? data.nodes : []).length }
 
-export function ChatReferenceCapsules({ references = [], tone = 'light', onRemove }) {
+export function ChatReferenceCapsules({ references = [], tone = 'light', onRemove, className = 'mt-2', inline = false }) {
   if (!references.length) return null
   const inverse = tone === 'dark'
-  return <div className="mt-2 flex flex-wrap gap-2">{references.map((reference) => {
-    const content = <><span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md bg-slate-100 text-slate-500">{reference.image ? <img src={reference.image} alt="" className="h-full w-full object-cover" /> : reference.type === 'flow' ? <Workflow size={14} /> : reference.type === 'sheet' ? <FileSpreadsheet size={14} /> : reference.type === 'operation' ? <ClipboardList size={14} /> : <Package size={14} />}</span><span className="min-w-0"><span className="block max-w-48 truncate text-xs font-bold">{reference.title}</span><span className={`block max-w-48 truncate text-[10px] ${inverse ? 'text-white/70' : 'text-slate-500'}`}>{reference.subtitle}</span></span></>
-    const classes = `group/reference inline-flex max-w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition ${inverse ? 'border-white/25 bg-white/10 hover:bg-white/20' : 'border-slate-200 bg-slate-50 hover:border-primary/35 hover:bg-primary/5'}`
-    return <div key={reference.id || `${reference.type}-${reference.title}`} className="relative max-w-full">{reference.href ? <a href={reference.href} target={reference.external ? '_blank' : undefined} rel={reference.external ? 'noreferrer' : undefined} className={classes}>{content}</a> : <div className={classes}>{content}</div>}{onRemove ? <button type="button" onClick={() => onRemove(reference)} aria-label={`Remove ${reference.title}`} className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-slate-700 text-white shadow-sm hover:bg-black"><X size={10} /></button> : null}</div>
-  })}</div>
+  const composer = tone === 'composer'
+  return <span className={`${className} ${inline ? 'inline-flex max-w-full flex-wrap items-center gap-1.5 align-middle' : 'flex flex-wrap gap-2'}`}>{references.map((reference) => {
+    const subtitle = reference.type === 'template' ? 'Template' : reference.subtitle
+    const icon = reference.image ? <img src={reference.image} alt="" className="h-full w-full object-cover" /> : reference.type === 'flow' ? <Workflow size={inline ? 12 : 14} /> : reference.type === 'sheet' ? <FileSpreadsheet size={inline ? 12 : 14} /> : reference.type === 'operation' ? <ClipboardList size={inline ? 12 : 14} /> : reference.type === 'template' ? <FileText size={inline ? 12 : 14} /> : <Package size={inline ? 12 : 14} />
+    const content = inline
+      ? <><span className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500">{icon}</span><span className="max-w-32 truncate text-[11px] font-bold">{reference.title}</span>{subtitle ? <span className={`max-w-20 truncate text-[10px] ${inverse ? 'text-white/70' : composer ? 'text-primary/65' : 'text-slate-500'}`}>{subtitle}</span> : null}</>
+      : <><span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md bg-slate-100 text-slate-500">{icon}</span><span className="min-w-0"><span className="block max-w-48 truncate text-xs font-bold">{reference.title}</span><span className={`block max-w-48 truncate text-[10px] ${inverse ? 'text-white/70' : 'text-slate-500'}`}>{subtitle}</span></span></>
+    const classes = `group/reference inline-flex max-w-full items-center ${inline ? 'gap-1 rounded-full px-1.5 py-1' : 'gap-2 rounded-lg px-2 py-1.5'} border text-left transition ${inverse ? 'border-white/25 bg-white/10 hover:bg-white/20' : composer ? 'border-primary/25 bg-primary/10 hover:bg-primary/15' : 'border-slate-200 bg-slate-50 hover:border-primary/35 hover:bg-primary/5'}`
+    return <span key={reference.id || `${reference.type}-${reference.title}`} className="relative inline-flex max-w-full">{reference.href ? <a href={reference.href} target={reference.external ? '_blank' : undefined} rel={reference.external ? 'noreferrer' : undefined} className={classes}>{content}</a> : <span className={classes}>{content}</span>}{onRemove ? <button type="button" onClick={() => onRemove(reference)} aria-label={`Remove ${reference.title}`} className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-slate-700 text-white shadow-sm hover:bg-black"><X size={10} /></button> : null}</span>
+  })}</span>
 }
 
 const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value, brandName, role, onChoose, commandSelectedIndex = 0 }, ref) {
@@ -26,7 +38,9 @@ const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value,
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const match = String(value || '').match(/^\/(\w*)(?:\s+(.*))?$/)
+  // A slash command can follow normal text so its selected capsule is stored
+  // at that exact point in the outgoing rich-text message.
+  const match = String(value || '').match(/(?:^|\s)\/(\w*)(?:\s+([^]*))?$/)
   const command = match?.[1]?.toLowerCase() || ''
   const query = match?.[2]?.toLowerCase().trim() || ''
   const commands = COMMANDS.filter((item) => !item.internal || isInternal(role))
@@ -65,9 +79,9 @@ const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value,
     const has = (item) => String(item || '').toLowerCase().includes(query)
     if (command === 'products') return data.products.filter((item) => has(item.name)).slice(0, 6).map((item) => ({ type: 'product', id: item.id, title: item.name, subtitle: item.price || 'Product', image: imageFor(item), href: item.url || '/app/products', external: Boolean(item.url) }))
     if (command === 'oos' || command === 'nos') { const products = data.products.filter((item) => command === 'oos' ? stock(item) === 0 : stock(item) > 0 && stock(item) < 7); return [{ type: 'product-set', id: command, title: command === 'oos' ? `Add ${products.length} out-of-stock products` : `Add ${products.length} near-out-of-stock products`, subtitle: command === 'oos' ? 'Inventory is 0' : 'Inventory below 7', products }] }
-    if (command === 'flows') return data.flows.filter((item) => has(item.title || item.name)).slice(0, 6).map((item) => ({ type: 'flow', id: item.id, title: item.title || item.name || 'Untitled flow', subtitle: `${item.status || 'Draft'} · ${(item.steps || item.nodes || []).length} steps`, href: '/app/flows' }))
+    if (command === 'flows') return data.flows.filter((item) => has(flowTitle(item))).slice(0, 6).map((item) => { const flow = flowData(item); return ({ type: 'flow', id: item.id, title: flowTitle(item), subtitle: `${flow.status || item.status || 'Draft'} · ${flowSteps(item)} steps`, href: '/app/flows' }) })
     if (command === 'operation') return data.operations.filter((item) => (!item.expires_at || new Date(item.expires_at) >= new Date()) && has(item.title || item.message)).slice(0, 6).map((item) => ({ type: 'operation', id: item.id, title: item.title || item.message || 'Operational update', subtitle: expiry(item.expires_at), href: '/app/operations' }))
-    if (command === 'template') return data.templates.filter((item) => has(item.name || item.title)).slice(0, 6).map((item) => ({ type: 'template', id: item.id, title: item.name || item.title || 'Untitled template', subtitle: item.category || item.type || 'Template', href: '/app/templates' }))
+    if (command === 'template') return data.templates.filter((item) => has(item.name || item.title)).slice(0, 6).map((item) => ({ type: 'template', id: item.id, title: item.name || item.title || 'Untitled template', subtitle: 'Template', href: '/app/templates' }))
     if (command === 'sheet') return ['refunds', 'replacements', 'cancellations', 'oos'].filter(has).map((tab) => ({ type: 'sheet', id: tab, title: `${tab.charAt(0).toUpperCase()}${tab.slice(1)} sheet`, subtitle: 'Master sheet link', href: data.sheetUrl, external: true }))
     if (command === 'order') return data.orders.map((item) => ({ type: 'order', id: item.id, title: item.name, subtitle: `${item.fulfillment_status} · ${item.payment_status}`, href: item.url, external: true }))
     return []
@@ -98,7 +112,7 @@ const ChatReferenceCommands = forwardRef(function ChatReferenceCommands({ value,
 
   if (!match) return null
   if (!active) return <Menu>{commandOptions.map((item, index) => <button key={item.id} type="button" onClick={() => chooseMenuItem(item)} className={`menu-item ${index === commandSelectedIndex ? 'bg-primary/10' : ''}`}><b>{item.label}</b><span>{item.hint}</span></button>)}</Menu>
-  return <Menu>{loading ? <p className="px-3 py-3 text-xs text-slate-500">Loading {active.label.slice(1)}…</p> : error ? <p className="px-3 py-3 text-xs text-red-600">{error}</p> : options.length ? options.map((item) => <button key={item.id} type="button" onClick={() => onChoose('reference', item)} className="menu-item"><Search size={14} className="text-primary" /><span className="min-w-0"><b className="block truncate">{item.title}</b><span className="block truncate">{item.subtitle}</span></span></button>) : <p className="px-3 py-3 text-xs text-slate-500">No matches found.</p>}</Menu>
+  return <Menu>{loading ? <p className="px-3 py-3 text-xs text-slate-500">Loading {active.label.slice(1)}…</p> : error ? <p className="px-3 py-3 text-xs text-red-600">{error}</p> : options.length ? options.map((item, index) => <button key={item.id} type="button" onClick={() => chooseMenuItem(item)} className={`menu-item ${index === selectedIndex ? 'bg-primary/10' : ''}`}><span className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-md bg-slate-100 text-primary">{item.image ? <img src={item.image} alt="" className="h-full w-full object-cover" /> : <Search size={14} />}</span><span className="min-w-0 flex-1"><b className="block truncate">{item.title}</b><span className="block truncate">{item.subtitle}</span></span></button>) : <p className="px-3 py-3 text-xs text-slate-500">No matches found.</p>}</Menu>
 })
 
 export default ChatReferenceCommands

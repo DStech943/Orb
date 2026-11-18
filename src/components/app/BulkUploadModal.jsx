@@ -13,7 +13,6 @@ import {
 } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
-import Select from '../ui/Select'
 import { bulkUploadKnowledge } from '../../services/generation'
 import { useToast } from '../../context/ToastContext'
 
@@ -73,10 +72,10 @@ export function parseDelimitedText(text) {
   return rows
 }
 
-const FAQ_SAMPLE_CSV = `Question,Answer,Category
-"How do I track my order?","You can track your order using the tracking link sent to your email after shipment.","Orders"
-"What is your return policy?","We accept returns within 30 days of purchase for unused items in original packaging.","Returns"
-"Do you ship internationally?","Yes, we ship to over 50 countries worldwide. Delivery typically takes 7-14 business days.","Shipping"`
+const FAQ_SAMPLE_CSV = `Question,Answer
+"How do I track my order?","You can track your order using the tracking link sent to your email after shipment."
+"What is your return policy?","We accept returns within 30 days of purchase for unused items in original packaging."
+"Do you ship internationally?","Yes, we ship to over 50 countries worldwide. Delivery typically takes 7-14 business days."`
 
 const SOP_SAMPLE_CSV = `Title,Situation,Check First,What To Do,What To Say,Escalate To,Category
 "Damaged Item in Transit","Customer received a broken or leaking item","Ask for clear photos of the damage and order confirmation number","1. Verify photos. 2. Create a free replacement order immediately in Shopify. 3. Email customer confirmation.","I am so sorry about that! I have dispatched a complimentary replacement for you immediately.","Warehouse lead if recurrent","Support"
@@ -92,15 +91,13 @@ export default function BulkUploadModal({
   const { showToast } = useToast()
   const fileInputRef = useRef(null)
 
-  const [mode, setMode] = useState('file') // 'file' | 'paste'
+  const [mode, setMode] = useState('paste') // 'file' | 'paste'
   const [file, setFile] = useState(null)
   const [pastedText, setPastedText] = useState('')
-  const [defaultCategory, setDefaultCategory] = useState(
-    isFaq ? 'Customer support' : 'Support'
-  )
-  const [defaultStatus, setDefaultStatus] = useState('Draft')
+  const [defaultCategory, setDefaultCategory] = useState('Support')
   const [removedIndexes, setRemovedIndexes] = useState(() => new Set())
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState({ completed: 0, total: 0 })
   const [error, setError] = useState('')
 
   const activeContent = mode === 'file' ? (file?.content || '') : pastedText
@@ -121,7 +118,7 @@ export default function BulkUploadModal({
 
     if (isFaq) {
       isHeaderDetected = header.some((col) =>
-        /^(question|q|prompt|faq|title|answer|a|response|reply|category)$/i.test(
+        /^(question|q|prompt|faq|title|answer|a|response|reply)$/i.test(
           col
         )
       )
@@ -141,8 +138,6 @@ export default function BulkUploadModal({
           if (/^(question|q|prompt|faq|query)$/i.test(name)) colMap.question = idx
           else if (/^(answer|a|response|reply|solution|body)$/i.test(name))
             colMap.answer = idx
-          else if (/^(category|cat|topic|type)$/i.test(name))
-            colMap.category = idx
         } else {
           if (/^(title|name|sop|sop.*title)$/i.test(name)) colMap.title = idx
           else if (/^(situation|scenario|condition|trigger)$/i.test(name))
@@ -161,7 +156,7 @@ export default function BulkUploadModal({
     } else {
       // Default positional fallback
       if (isFaq) {
-        colMap = { question: 0, answer: 1, category: 2 }
+        colMap = { question: 0, answer: 1 }
       } else {
         colMap = {
           title: 0,
@@ -187,11 +182,6 @@ export default function BulkUploadModal({
           colMap.question !== undefined ? String(row[colMap.question] || '').trim() : ''
         const answer =
           colMap.answer !== undefined ? String(row[colMap.answer] || '').trim() : ''
-        const category =
-          colMap.category !== undefined && row[colMap.category]
-            ? String(row[colMap.category]).trim()
-            : defaultCategory
-
         if (!question || !answer) {
           skipped++
           continue
@@ -200,8 +190,6 @@ export default function BulkUploadModal({
         items.push({
           question,
           answer,
-          category: category || defaultCategory,
-          status: defaultStatus,
         })
       } else {
         const title =
@@ -244,16 +232,17 @@ export default function BulkUploadModal({
           whatToSay,
           escalateTo,
           category: category || defaultCategory,
-          status: defaultStatus,
         })
       }
     }
 
     return { items, skippedCount: skipped }
-  }, [activeContent, defaultCategory, defaultStatus, isFaq])
+  }, [activeContent, defaultCategory, isFaq])
 
   const visibleItems = useMemo(
-    () => parsedItems.filter((_, idx) => !removedIndexes.has(idx)),
+    () => parsedItems
+      .map((item, index) => ({ item, originalIndex: index }))
+      .filter(({ originalIndex }) => !removedIndexes.has(originalIndex)),
     [parsedItems, removedIndexes]
   )
 
@@ -319,35 +308,25 @@ export default function BulkUploadModal({
 
     setUploading(true)
     setError('')
+    setUploadProgress({ completed: 0, total: visibleItems.length })
 
     try {
       const kindKey = isFaq ? 'faqs' : 'sops'
-      const payloadItems = visibleItems.map((item) => ({
-        ...item,
-        status: defaultStatus,
-        category: item.category || defaultCategory,
-      }))
-
-      const result = await bulkUploadKnowledge(kindKey, payloadItems)
-      const count = result?.created ?? payloadItems.length
-      const published = result?.published ?? 0
-      if (published > 0) {
-        showToast(
-          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')} and published to your agent.`
-        )
-      } else if (result?.qdrant_error) {
-        showToast(
-          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}, but publishing to your agent ran into an issue: ${result.qdrant_error}. Click "Publish approved to Qdrant" to retry.`
-        )
-      } else if (defaultStatus === 'Draft') {
-        showToast(
-          `Imported ${count} ${isFaq ? (count === 1 ? 'FAQ draft' : 'FAQ drafts') : (count === 1 ? 'SOP draft' : 'SOP drafts')}. Click "Approve all drafts" to publish them to Qdrant.`
-        )
-      } else {
-        showToast(
-          `Successfully imported ${count} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')}.`
-        )
+      const payloadItems = visibleItems.map(({ item }) => isFaq
+        ? { question: item.question, answer: item.answer }
+        : { ...item, category: item.category || defaultCategory })
+      const batchSize = 20
+      let published = 0
+      for (let index = 0; index < payloadItems.length; index += batchSize) {
+        const chunk = payloadItems.slice(index, index + batchSize)
+        const result = await bulkUploadKnowledge(kindKey, chunk)
+        published += Number(result?.published ?? result?.created ?? chunk.length)
+        setUploadProgress({ completed: Math.min(published, payloadItems.length), total: payloadItems.length })
       }
+      const count = payloadItems.length
+      showToast(
+        `Published ${published} ${isFaq ? (count === 1 ? 'FAQ' : 'FAQs') : (count === 1 ? 'SOP' : 'SOPs')} directly to your agent.`
+      )
       if (onSuccess) onSuccess()
       onClose()
     } catch (err) {
@@ -509,7 +488,7 @@ export default function BulkUploadModal({
               }}
               placeholder={
                 isFaq
-                  ? 'Question,Answer,Category\n"What is your return policy?","We accept returns within 30 days.","Returns"'
+                  ? 'Question\tAnswer\nWhat is your return policy?\tWe accept returns within 30 days.'
                   : 'Title,Situation,Check First,What To Do,What To Say,Escalate To,Category\n"Damaged Item","Item damaged in transit","Ask for photos","Dispatch replacement immediately","We have dispatched a new item for you.","Warehouse","Support"'
               }
               className="w-full rounded-lg border border-slate-300 p-3 font-mono text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary"
@@ -528,8 +507,13 @@ export default function BulkUploadModal({
           </div>
         )}
 
-        {/* Settings: Default Category & Status */}
-        <div className="grid gap-3 sm:grid-cols-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+        {/* SOP settings; FAQ rows are always just Question + Answer. */}
+        {isFaq ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-800">
+            Every valid Question / Answer row is published directly to this brand’s agent knowledge.
+          </div>
+        ) : (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
           <label className="grid gap-1 text-xs font-bold text-slate-700">
             Default Category
             <span className="text-[11px] font-normal text-slate-500">
@@ -550,21 +534,8 @@ export default function BulkUploadModal({
               <option value="General">General</option>
             </select>
           </label>
-          <label className="grid gap-1 text-xs font-bold text-slate-700">
-            Initial Status
-            <span className="text-[11px] font-normal text-slate-500">
-              Draft (needs your approval first) or Approved (your agent can use it right away)
-            </span>
-            <select
-              value={defaultStatus}
-              onChange={(e) => setDefaultStatus(e.target.value)}
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary"
-            >
-              <option value="Draft">Draft (review before your agent uses it)</option>
-              <option value="Approved">Approved (your agent can use it right away)</option>
-            </select>
-          </label>
         </div>
+        )}
 
         {/* Skipped rows warning if any */}
         {skippedCount > 0 && (
@@ -607,7 +578,6 @@ export default function BulkUploadModal({
                       <>
                         <th className="px-3 py-2">Question</th>
                         <th className="px-3 py-2">Answer</th>
-                        <th className="px-3 py-2 w-28">Category</th>
                       </>
                     ) : (
                       <>
@@ -621,7 +591,7 @@ export default function BulkUploadModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {visibleItems.map((item, index) => (
+                  {visibleItems.map(({ item, originalIndex }, index) => (
                     <tr key={index} className="hover:bg-slate-50/70 transition">
                       <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">
                         {index + 1}
@@ -633,11 +603,6 @@ export default function BulkUploadModal({
                           </td>
                           <td className="px-3 py-2 text-slate-600 max-w-[280px] truncate">
                             {item.answer}
-                          </td>
-                          <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
-                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold">
-                              {item.category || defaultCategory}
-                            </span>
                           </td>
                         </>
                       ) : (
@@ -668,7 +633,7 @@ export default function BulkUploadModal({
                       <td className="px-2 py-2 text-center">
                         <button
                           type="button"
-                          onClick={() => handleRemoveItem(index)}
+                          onClick={() => handleRemoveItem(originalIndex)}
                           className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
                           title="Exclude this row"
                           aria-label={`Exclude row ${index + 1}`}
@@ -680,6 +645,21 @@ export default function BulkUploadModal({
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {uploading && (
+          <div className="space-y-1.5 rounded-lg border border-primary/20 bg-primary-tint/20 p-3 text-xs font-semibold text-primary">
+            <div className="flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              Publishing {uploadProgress.completed} of {uploadProgress.total} directly to your agent…
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-primary/15">
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-200"
+                style={{ width: `${uploadProgress.total ? (uploadProgress.completed / uploadProgress.total) * 100 : 0}%` }}
+              />
             </div>
           </div>
         )}
@@ -715,7 +695,7 @@ export default function BulkUploadModal({
               {uploading ? (
                 <>
                   <Loader2 size={15} className="animate-spin" />
-                  Importing…
+                  Publishing {uploadProgress.completed}/{uploadProgress.total}…
                 </>
               ) : (
                 <>

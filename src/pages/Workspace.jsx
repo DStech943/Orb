@@ -26,7 +26,7 @@ const profileOf = (brand) => ({
 
 export default function Workspace() {
   const [params, setParams] = useSearchParams()
-  const { user } = useAuth()
+  const { isAdmin } = useAuth()
   const { brand, brandName, agentName } = useBrand()
   const { showToast } = useToast()
   const requested = params.get('tab')
@@ -117,7 +117,7 @@ export default function Workspace() {
         <div className="p-5 pb-8 sm:p-6">
           {active === 'business' && (
             <>
-              <BrandCategorySetup isAdmin={user?.role === 'admin'} />
+              <BrandCategorySetup isAdmin={isAdmin} />
               <div className="mt-8 grid max-w-2xl gap-5 border-t border-line pt-6">
                 <div>
                   <h3 className="text-base font-semibold">About {brandName || 'this brand'}</h3>
@@ -143,7 +143,7 @@ export default function Workspace() {
             </>
           )}
           {active === 'source' && <PipelineWorkspace />}
-          {active === 'voice' && <BrandVoiceSetup isAdmin={user?.role === 'admin'} />}
+          {active === 'voice' && <BrandVoiceSetup isAdmin={isAdmin} />}
           {active === 'chat' && <AgentChat embedded />}
         </div>
       </section>

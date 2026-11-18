@@ -27,6 +27,9 @@ import { useAuth } from '../../context/AuthContext'
 import { useBrand } from '../../context/BrandContext'
 import { getChatspaceUnreadStatus, wsClient } from '../../services/clientChat'
 
+// Mirrors CLIENT_WORKSPACE_PATHS in app/ClientWorkspaceRoute.jsx, plus the feedback page.
+const CLIENT_PATHS = new Set(['/app', '/app/client-chat', '/app/chat', '/app/flows', '/app/templates', '/app/products', '/app/feedback'])
+
 const tabIs = (...values) => (path, params, expected) => path === expected && values.includes(params.get('tab') || '')
 
 // Information architecture: grouped around what a brand team is trying to do.
@@ -117,6 +120,7 @@ function NavItem({ item, collapsed, active, unread, mentioned, mentionCount, onN
 
 export default function Sidebar({ mobile = false, onClose, collapsed = false, onToggleCollapse }) {
   const { user } = useAuth() || {}
+  const isClient = user?.role === 'client'
   const { brandName, agentName } = useBrand()
   const location = useLocation()
   const [chat, setChat] = useState({ unread: 0, mentioned: false, mentions: 0 })
@@ -137,6 +141,12 @@ export default function Sidebar({ mobile = false, onClose, collapsed = false, on
     }
   }, [user, brandName])
 
+  // Brand members only get the pages meant for their workspace (see ClientWorkspaceRoute);
+  // staff roles see everything. Feedback is open to both.
+  const sections = useMemo(
+    () => (isClient ? SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => CLIENT_PATHS.has(item.to.split('?')[0])) })).filter((section) => section.items.length) : SECTIONS),
+    [isClient],
+  )
   const params = useMemo(() => new URLSearchParams(location.search), [location.search])
   const isActive = (item) => {
     if (item.match) return item.match(location.pathname, params)
@@ -171,7 +181,7 @@ export default function Sidebar({ mobile = false, onClose, collapsed = false, on
       </div>
 
       <nav aria-label="App navigation" className={`-mx-1 min-h-0 flex-1 overflow-y-auto px-1 pb-4 ${isCollapsed ? 'no-scrollbar' : 'thin-scroll'}`}>
-        {SECTIONS.map((section, index) => (
+        {sections.map((section, index) => (
           <div key={section.label} className={index === 0 ? '' : isCollapsed ? 'mt-2' : 'mt-5'}>
             {!isCollapsed && <p className="mb-1 animate-fade-in px-2.5 text-[11px] font-medium uppercase tracking-wide text-fg-muted/80">{section.label}</p>}
             <div className={`grid ${isCollapsed ? 'gap-0.5 rounded-2xl border border-white/80 bg-white/50 p-1 shadow-[0_1px_2px_rgba(120,70,20,0.06)]' : 'gap-0.5'}`}>
