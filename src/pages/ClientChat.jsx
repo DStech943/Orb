@@ -520,6 +520,18 @@ export default function ClientChat() {
     if (distanceFromBottom < 220) scrollToBottom(false)
   }, [messages.length, loading])
 
+  // Typing is rendered as the final row in the conversation (rather than an
+  // overlay above the composer). Keep readers who are already at the latest
+  // message pinned to that row while it appears and disappears. People reading
+  // older history are intentionally left where they are.
+  useLayoutEffect(() => {
+    if (!initialScrollAppliedRef.current || !messages.length) return
+    const element = scrollContainerRef.current
+    if (!element) return
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
+    if (distanceFromBottom < 160) scrollToBottom(false)
+  }, [messages.length, typingUsers.length])
+
   useEffect(() => {
     setLoading(true)
     loadMessages()
@@ -1584,6 +1596,31 @@ export default function ClientChat() {
         )}
         <div ref={messagesEndRef} />
 
+        {typingUsers.length > 0 && messages.length > 0 && (
+          <div
+            className="flex min-h-10 items-center gap-2"
+            aria-live="polite"
+            aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}
+          >
+            <div className="flex -space-x-2">
+              {typingUsers.slice(0, 3).map((person) => (
+                <Avatar
+                  key={person.id}
+                  name={person.name}
+                  src={person.avatar}
+                  className="h-8 w-8 rounded-full border-2 border-white text-[10px] shadow-sm"
+                  fallbackClassName="border-white bg-slate-500"
+                />
+              ))}
+            </div>
+            <span className="inline-flex h-10 items-center gap-1 rounded-full bg-slate-100 px-4 shadow-sm">
+              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.2s]" />
+              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.1s]" />
+              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500" />
+            </span>
+          </div>
+        )}
+
         {/* Scroll To Bottom Floating Button */}
         {showScrollBottom && (
           <button
@@ -1661,27 +1698,6 @@ export default function ClientChat() {
                 )
               })}
             </div>
-          </div>
-        )}
-
-        {typingUsers.length > 0 && (
-          <div className="absolute bottom-full left-5 z-20 mb-2 flex items-center gap-2" aria-live="polite" aria-label={`${typingUsers.map((person) => person.name).join(', ')} typing`}>
-            <div className="flex -space-x-2">
-              {typingUsers.slice(0, 3).map((person) => (
-                <Avatar
-                  key={person.id}
-                  name={person.name}
-                  src={person.avatar}
-                  className="h-8 w-8 rounded-full border-2 border-white text-[10px] shadow-sm"
-                  fallbackClassName="border-white bg-slate-500"
-                />
-              ))}
-            </div>
-            <span className="inline-flex h-10 items-center gap-1 rounded-full bg-slate-100 px-4 shadow-sm">
-              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.2s]" />
-              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.1s]" />
-              <i className="h-2.5 w-2.5 animate-bounce rounded-full bg-slate-500" />
-            </span>
           </div>
         )}
 
