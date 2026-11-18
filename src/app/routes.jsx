@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from './ProtectedRoute'
+import ClientWorkspaceRoute from './ClientWorkspaceRoute'
 import AppLayout from '../layouts/AppLayout'
 import OrbLoader from '../components/ui/OrbLoader'
 
@@ -35,20 +36,22 @@ export default function AppRoutes() {
         <Route path="/signup" element={<Signup />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
-            <Route path="/app" element={<Overview />} />
-            <Route path="/app/workspace" element={<Workspace />} />
-            <Route path="/app/client-chat" element={<ClientChat />} />
-            <Route path="/app/operations" element={<Operations />} />
-            <Route path="/app/chat" element={<AgentChat />} />
-            <Route path="/app/brain" element={<AIsBrain />} />
-            <Route path="/app/sops" element={<Navigate to="/app/brain?tab=sops" replace />} />
-            <Route path="/app/faqs" element={<Navigate to="/app/brain?tab=faqs" replace />} />
-            <Route path="/app/products" element={<Products />} />
-            <Route path="/app/flows" element={<Flows />} />
-            <Route path="/app/templates" element={<Templates />} />
-            <Route path="/app/tools" element={<Tools />} />
-            <Route path="/app/settings" element={<Settings />} />
-            <Route path="/app/knowledge-packs" element={<Navigate to="/app" replace />} />
+            <Route element={<ClientWorkspaceRoute />}>
+              <Route path="/app" element={<Overview />} />
+              <Route path="/app/workspace" element={<Workspace />} />
+              <Route path="/app/client-chat" element={<ClientChat />} />
+              <Route path="/app/operations" element={<Operations />} />
+              <Route path="/app/chat" element={<AgentChat />} />
+              <Route path="/app/brain" element={<AIsBrain />} />
+              <Route path="/app/sops" element={<Navigate to="/app/brain?tab=sops" replace />} />
+              <Route path="/app/faqs" element={<Navigate to="/app/brain?tab=faqs" replace />} />
+              <Route path="/app/products" element={<Products />} />
+              <Route path="/app/flows" element={<Flows />} />
+              <Route path="/app/templates" element={<Templates />} />
+              <Route path="/app/tools" element={<Tools />} />
+              <Route path="/app/settings" element={<Settings />} />
+              <Route path="/app/knowledge-packs" element={<Navigate to="/app" replace />} />
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />

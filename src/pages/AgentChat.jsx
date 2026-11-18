@@ -125,6 +125,7 @@ function AgentOrb({ className = "" }) {
 }
 
 export default function AgentChat({ embedded = false }) {
+  const { isAdmin } = useAuth();
   const { data: brandData, loading: brandsLoading } = useAsync(listBrands, []);
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -604,7 +605,7 @@ export default function AgentChat({ embedded = false }) {
             </p>
           </div>
 
-          {diagnostic && (
+          {isAdmin && diagnostic && (
             <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm" aria-label="Latest agent run diagnostics">
               <div className="flex items-start justify-between gap-3">
                 <div>

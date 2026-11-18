@@ -15,7 +15,7 @@ import PipelineWorkspace from '../components/app/PipelineWorkspace'
 
 export default function Workspace() {
   const location = useLocation()
-  const { user } = useAuth()
+  const { isAdmin } = useAuth()
   const { showToast } = useToast()
   const [active, setActive] = useState(() => {
     const tab = new URLSearchParams(location.search).get('tab')
@@ -84,7 +84,7 @@ export default function Workspace() {
       <Tabs tabs={tabs} active={active} onChange={setActive} />
       <div className="p-5 sm:p-6">
         {active === 'business' && <>
-          <BrandCategorySetup isAdmin={user?.role === 'admin'} />
+          <BrandCategorySetup isAdmin={isAdmin} />
           <div className="mt-6 grid max-w-2xl gap-4 border-t border-ink/15 pt-6">
             <div>
               <p className="text-xs font-extrabold uppercase tracking-widest text-purple">Brand profile</p>
@@ -99,7 +99,7 @@ export default function Workspace() {
           </div>
         </>}
         {active === 'source' && <PipelineWorkspace />}
-        {active === 'voice' && <BrandVoiceSetup isAdmin={user?.role === 'admin'} />}
+        {active === 'voice' && <BrandVoiceSetup isAdmin={isAdmin} />}
         {active === 'chat' && <AgentChat embedded />}
       </div>
     </section>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ArrowUpRight, Loader2, Mic, MicOff, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Orb from '../Orb'
+import { useAuth } from '../../context/AuthContext'
 import { activeBrandName, askOrbGuide, chatWithBrandAgent, createAssistantFaq, draftOrbWork } from '../../services/orbApi'
 import { listBrands } from '../../services/brands'
 import { listSops } from '../../services/generation'
@@ -10,6 +11,7 @@ import { startBrowserDictation } from '../../lib/browserDictation'
 
 const pages = {
   '/app': { title: 'Overview', summary: "This is your brand's at-a-glance workspace for support activity and content progress." },
+  '/app/client-chat': { title: 'Chatspace', summary: 'Coordinate with the Orb operations team in your brand chat.' },
   '/app/workspace': { title: 'Brand workspace', summary: 'Use this page to add the brand context Orb needs for support content.' },
   '/app/operations': { title: 'Operations', summary: 'Record customer-support and product updates, then review the follow-up Orb has queued for this brand.' },
   '/app/chat': { title: 'Agent chat', summary: "Use this page to test the selected brand's deployed support agent." },
@@ -41,6 +43,15 @@ const actionDestinations = {
   open_faqs: '/app/brain?tab=faqs',
   open_create_with_orb: '/app/flows?create=orb',
   focus_operational_update: '/app/operations?compose=1',
+}
+const CLIENT_WORKSPACE_PATHS = new Set(['/app', '/app/client-chat', '/app/chat', '/app/flows', '/app/templates', '/app/products'])
+const CLIENT_GUIDE_ACTIONS = new Set(['open_agent_chat', 'open_create_with_orb'])
+const CLIENT_GUIDE_FALLBACK = 'I can help with your brand overview, Chatspace, AI agent, flows, templates, or products.'
+const pathWithoutQuery = (destination = '') => String(destination).split('?')[0]
+const clientSafeDestination = (action, destination, isClient) => {
+  if (!isClient) return destination
+  if (action === 'open_agent_chat') return '/app/chat'
+  return CLIENT_WORKSPACE_PATHS.has(pathWithoutQuery(destination)) ? destination : ''
 }
 const actionLabels = {
   open_agent_chat: 'agent test chat',
@@ -150,6 +161,7 @@ const directGuideCommand = (value) => {
     answer: asksWhereToFindIt ? whereAnswer : `Opening ${label}.`,
     autoNavigate: !asksWhereToFindIt,
   })
+  if (/\bchatspace\b/.test(text)) return pageResponse('/app/client-chat', 'Chatspace', 'Chatspace is in the left sidebar.')
   if (/\b(?:chat|test).*(?:ai|agent)|\b(?:ai|agent).*(?:chat|test)\b|\b(?:agent\s+)?chat\b/.test(text)) return { action: 'open_agent_chat', answer: asksWhereToFindIt ? "The agent test chat is in AI's Brain." : 'Opening the agent test chat.', autoNavigate: !asksWhereToFindIt }
   if (/\bfaq/.test(text)) return { action: 'open_faqs', answer: asksWhereToFindIt ? "FAQs are in AI's Brain." : 'Opening FAQs.', autoNavigate: !asksWhereToFindIt }
   if (/\b(?:sop|sops)\b/.test(text)) return { action: 'open_sops', answer: asksWhereToFindIt ? "SOPs are in AI's Brain." : 'Opening SOPs.', autoNavigate: !asksWhereToFindIt }
@@ -168,6 +180,8 @@ const directGuideCommand = (value) => {
 export default function OrbGuide() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isClient = user?.role === 'client'
   const currentPath = pages[location.pathname] ? location.pathname : '/app'
   const current = pages[currentPath]
   const [open, setOpen] = useState(false)
@@ -513,6 +527,10 @@ export default function OrbGuide() {
     setPromptReset((value) => value + 1)
     const requestedWork = assistantWorkFromRequest(text)
     if (requestedWork) {
+      if (isClient && requestedWork.type !== 'product') {
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', text: CLIENT_GUIDE_FALLBACK }])
+        return
+      }
       const brandName = activeBrandName()
       if (!brandName) {
         setMessages((items) => [...items, { id: makeId(), role: 'orb', error: true, text: 'Choose a brand before I make this change.' }])
@@ -609,7 +627,13 @@ export default function OrbGuide() {
     }
     const directCommand = directGuideCommand(text)
     if (directCommand) {
-      const destination = directCommand.destination || actionDestinations[directCommand.action] || ''
+      const requestedDestination = directCommand.destination || actionDestinations[directCommand.action] || ''
+      const destination = clientSafeDestination(directCommand.action, requestedDestination, isClient)
+      const actionAllowed = !directCommand.action || CLIENT_GUIDE_ACTIONS.has(directCommand.action)
+      if (isClient && (!actionAllowed || !destination)) {
+        setMessages((items) => [...items, { id: makeId(), role: 'orb', text: CLIENT_GUIDE_FALLBACK }])
+        return
+      }
       const destinationLabel = actionLabels[directCommand.action] || pages[destination]?.title || ''
       const flowPrompt = directCommand.flowPrompt || ''
       const resolvedDestination = flowPrompt && destination === actionDestinations.open_create_with_orb
@@ -628,15 +652,20 @@ export default function OrbGuide() {
     try {
       const result = await askOrbGuide({ page_path: currentPath, question: text })
       if (!result?.answer) throw new Error('No guide response')
-      const action = actionDestinations[result?.action] ? result.action : ''
-      const destination = actionDestinations[action] || (pages[result.navigate_to] ? result.navigate_to : '')
+      const requestedAction = actionDestinations[result?.action] ? result.action : ''
+      const action = isClient && !CLIENT_GUIDE_ACTIONS.has(requestedAction) ? '' : requestedAction
+      const requestedDestination = actionDestinations[action] || (pages[result.navigate_to] ? result.navigate_to : '')
+      const destination = clientSafeDestination(action, requestedDestination, isClient)
       const destinationLabel = actionLabels[action] || pages[destination]?.title || ''
       const flowPrompt = action === 'open_create_with_orb' ? flowBriefFromRequest(text) : ''
       const resolvedDestination = flowPrompt && destination === actionDestinations.open_create_with_orb
         ? `${destination}&prompt=${encodeURIComponent(flowPrompt)}`
         : destination
       if (destination) lastDestinationRef.current = { destination: resolvedDestination, destinationLabel }
-      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: result.answer, destination: resolvedDestination, destinationLabel }])
+      const answer = isClient && (requestedAction && !action || requestedDestination && !destination)
+        ? CLIENT_GUIDE_FALLBACK
+        : result.answer
+      setMessages((items) => [...items, { id: makeId(), role: 'orb', text: answer, destination: resolvedDestination, destinationLabel }])
       if (destination && (isNavigationCommand(text) || action)) {
         // Show Orb's acknowledgement briefly, then take the user directly to
         // the validated route without breaking the active conversation.

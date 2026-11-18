@@ -29,6 +29,7 @@ export default function Sidebar({
   onToggleCollapse,
 }) {
   const { user } = useAuth() || {}
+  const isClient = user?.role === 'client'
   const [agentName, setAgentName] = useState('AI')
   const [chatUnread, setChatUnread] = useState(0)
   const [chatMentioned, setChatMentioned] = useState(false)
@@ -89,6 +90,9 @@ export default function Sidebar({
     { to: '/app/tools', label: 'Tools', icon: Wrench },
     { to: '/app/settings', label: 'Settings', icon: Settings },
   ]
+  const visibleLinks = isClient
+    ? links.filter((link) => ['/app', '/app/client-chat', '/app/chat', '/app/flows', '/app/templates', '/app/products'].includes(link.to))
+    : links
 
   const isCollapsed = collapsed && !mobile
 
@@ -139,7 +143,7 @@ export default function Sidebar({
         )}
       </div>
       <nav aria-label="App navigation" className="grid gap-2">
-        {links.map(({ to, label, icon: Icon, end, count }) => {
+        {visibleLinks.map(({ to, label, icon: Icon, end, count }) => {
           const isChatspace = count === 'chatspace'
           const badgeValue = isChatspace ? chatUnread : counts[count]
           const hasUnreadPing = isChatspace && chatUnread > 0

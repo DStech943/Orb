@@ -135,7 +135,7 @@ function DailySlackReportPanel() {
 }
 
 export default function Settings() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { showToast } = useToast();
   const [params, setParams] = useSearchParams();
   const active = params.get("tab") || "profile";
@@ -195,7 +195,7 @@ export default function Settings() {
   const [feedbackUpdatingId, setFeedbackUpdatingId] = useState("");
   const products = useAsync(listProducts, []);
   const sources = useAsync(listSources, []);
-  const visibleTabs = user?.role === "admin" ? [...tabs, { id: "agents", label: "AI agents" }, { id: "feedback", label: "AI feedback" }] : tabs;
+  const visibleTabs = isAdmin ? [...tabs, { id: "agents", label: "AI agents" }, { id: "feedback", label: "AI feedback" }] : tabs;
   useEffect(() => {
     const warn = (event) => {
       if (dirty) {
@@ -217,7 +217,7 @@ export default function Settings() {
     };
   }, []);
   useEffect(() => {
-    if (active !== "agents" || user?.role !== "admin") return undefined;
+    if (active !== "agents" || !isAdmin) return undefined;
     let cancelled = false;
     setAgentLoading(true);
     setAgentError("");
@@ -231,9 +231,9 @@ export default function Settings() {
       .catch((error) => !cancelled && setAgentError(error.message || "Could not load brands."))
       .finally(() => !cancelled && setAgentLoading(false));
     return () => { cancelled = true; };
-  }, [active, user?.role]);
+  }, [active, isAdmin]);
   useEffect(() => {
-    if (active !== "agents" || !agentBrandId || user?.role !== "admin") return undefined;
+    if (active !== "agents" || !agentBrandId || !isAdmin) return undefined;
     let cancelled = false;
     setAgentLoading(true);
     setAgentError("");
@@ -255,9 +255,9 @@ export default function Settings() {
       .catch((error) => !cancelled && setAgentError(error.message || "Could not load this agent connection."))
       .finally(() => !cancelled && setAgentLoading(false));
     return () => { cancelled = true; };
-  }, [active, agentBrandId, user?.role]);
+  }, [active, agentBrandId, isAdmin]);
   useEffect(() => {
-    if (active !== "feedback" || user?.role !== "admin") return undefined;
+    if (active !== "feedback" || !isAdmin) return undefined;
     let cancelled = false;
     setFeedbackLoading(true);
     setFeedbackError("");
@@ -271,7 +271,7 @@ export default function Settings() {
       .catch((error) => !cancelled && setFeedbackError(error.message || "Could not load brands."))
       .finally(() => !cancelled && setFeedbackLoading(false));
     return () => { cancelled = true; };
-  }, [active, user?.role]);
+  }, [active, isAdmin]);
   const loadFeedback = async (brandId = feedbackBrandId) => {
     if (!brandId) return;
     setFeedbackLoading(true);
@@ -286,8 +286,8 @@ export default function Settings() {
     }
   };
   useEffect(() => {
-    if (active === "feedback" && feedbackBrandId && user?.role === "admin") loadFeedback(feedbackBrandId);
-  }, [active, feedbackBrandId, user?.role]);
+    if (active === "feedback" && feedbackBrandId && isAdmin) loadFeedback(feedbackBrandId);
+  }, [active, feedbackBrandId, isAdmin]);
   const tabChange = (next) => {
     if (dirty && !window.confirm("You have unsaved changes. Leave this tab?"))
       return;
@@ -475,7 +475,7 @@ export default function Settings() {
           )}
           {active === "business" && (
             <>
-              <BrandCategorySetup isAdmin={user?.role === "admin"} />
+              <BrandCategorySetup isAdmin={isAdmin} />
               <div className="grid max-w-xl gap-4">
               <Input
                 label="Business or brand name"
@@ -699,7 +699,7 @@ export default function Settings() {
               </div>
             </div>
           )}
-          {active === "agents" && user?.role === "admin" && (
+          {active === "agents" && isAdmin && (
             <div className="grid max-w-2xl gap-5">
               <div>
                 <h3 className="text-xl font-extrabold">Brand AI agents</h3>
@@ -779,7 +779,7 @@ export default function Settings() {
               )}
             </div>
           )}
-          {active === "feedback" && user?.role === "admin" && (
+          {active === "feedback" && isAdmin && (
             <div className="grid max-w-4xl gap-5">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>

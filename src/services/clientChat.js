@@ -256,6 +256,33 @@ class ChatspaceWebSocketClient {
 
 export const wsClient = new ChatspaceWebSocketClient()
 
+// Mention targets are deliberately scoped to the selected brand. The database
+// policy permits this read only when the signed-in person belongs to that same
+// brand (or is internal Orb staff).
+export const listBrandChatMembers = async (brandId = activeBrandId()) => {
+  if (!supabase || !brandId) return []
+  const { data, error } = await supabase
+    .schema('cx_copilot')
+    .from('brand_assignments')
+    .select('id, name, role, avatar_key, is_online, created_at')
+    .eq('brand_id', brandId)
+    .order('is_online', { ascending: false })
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (Array.isArray(data) ? data : [])
+    .filter((member) => String(member?.name || '').trim())
+    .map((member) => ({
+      id: String(member.id),
+      handle: String(member.name).trim(),
+      label: `@${String(member.name).trim()}`,
+      role: String(member.role || 'client').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      description: member.is_online ? 'Online' : 'Offline',
+      avatar: avatarUrlFromKey(member.avatar_key),
+      avatarSources: avatarUrlsFromKey(member.avatar_key),
+      initials: String(member.name).trim().split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+    }))
+}
+
 export const getClientChatMessages = async (brandName = activeBrandName(), currentUser) => {
   const brand = brandName || 'default_brand'
   const key = `${STORAGE_PREFIX}${brand}`

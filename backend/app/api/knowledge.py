@@ -255,6 +255,7 @@ FLOW_CONTEXT_STOPWORDS = frozenset({
 
 ORB_GUIDE_PAGES = {
     "/app": {"name": "Overview", "purpose": "Check the selected brand's high-level activity, including crawling and content progress."},
+    "/app/client-chat": {"name": "Chatspace", "purpose": "Coordinate with the Orb operations team in your brand chat."},
     "/app/workspace": {"name": "Brand workspace", "purpose": "Set the brand context and the information Orb uses while creating support content."},
     "/app/operations": {"name": "Operations", "purpose": "Record customer-support and product updates for the selected brand, then route them to the appropriate operational follow-up."},
     "/app/brain": {"name": "AI's Brain", "purpose": "Review the SOPs and FAQs that guide the brand's support agent."},
@@ -268,9 +269,17 @@ ORB_GUIDE_PAGES = {
     "/app/settings": {"name": "Settings", "purpose": "Manage your profile, team access, and application preferences."},
 }
 
+# Clients use the same application shell as the operations team, but the guide
+# must only describe and navigate within their brand-facing workspace.
+CLIENT_ORB_GUIDE_PAGES = frozenset({
+    "/app", "/app/client-chat", "/app/chat", "/app/flows", "/app/templates", "/app/products",
+})
+
 GUIDE_ACTIONS = frozenset({
     "open_agent_chat", "open_sops", "open_faqs", "open_create_with_orb", "focus_operational_update",
 })
+CLIENT_GUIDE_ACTIONS = frozenset({"open_agent_chat", "open_create_with_orb"})
+STAFF_ROLES = frozenset({"admin", "agent", "pod_lead"})
 
 ORB_GUIDE_SYSTEM = """You are Orb, the concise in-product guide for a customer-support workspace.
 Answer the user's question about the product or where to perform a task. Explain the current page accurately
@@ -439,13 +448,41 @@ def _flow_assist_csv(generated: Any) -> tuple[str, str]:
     return title, output.getvalue()
 
 
+async def _workspace_role(request: Request, user: User) -> str:
+    """Resolve the effective workspace role from a profile or brand assignment."""
+    if request.app.state.settings.auth_disabled:
+        return "admin"
+    rows = await _supabase_rows(request, "orb_profiles", {"select": "role", "id": f"eq.{user.id}", "limit": "1"})
+    profile_role = str(rows[0].get("role") or "").lower() if rows else ""
+    if profile_role == "team":
+        profile_role = "agent"
+    if profile_role in STAFF_ROLES:
+        return profile_role
+    if user.email:
+        assignments = await _supabase_rows(
+            request,
+            "brand_assignments",
+            {"select": "role", "email": f"eq.{user.email.lower()}", "order": "is_online.desc,created_at.desc", "limit": "1"},
+        )
+        assignment_role = str(assignments[0].get("role") or "").lower() if assignments else ""
+        if assignment_role in STAFF_ROLES:
+            return assignment_role
+        if assignment_role == "client":
+            return assignment_role
+    return profile_role or "client"
+
+
 async def _admin(request: Request, user: User = Depends(current_user)) -> User:
     if request.app.state.settings.auth_disabled:
         return user
-    rows = await _supabase_rows(request, "orb_profiles", {"select": "role", "id": f"eq.{user.id}", "limit": "1"})
-    if not rows or rows[0].get("role") != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access is required")
+    if await _workspace_role(request, user) not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Internal staff access is required")
     return user
+
+
+async def _is_client_workspace_user(request: Request, user: User) -> bool:
+    """Return whether this signed-in member has the restricted client view."""
+    return await _workspace_role(request, user) not in STAFF_ROLES
 
 
 def _supabase_headers(request: Request, *, write: bool = False, prefer: str | None = None) -> dict[str, str]:
@@ -1527,17 +1564,30 @@ def _agent_reply(payload: Any) -> str:
 
 
 @router.post("/orb-guide")
-async def ask_orb_guide(payload: OrbGuideRequest, request: Request, _: User = Depends(current_user)) -> dict[str, str]:
+async def ask_orb_guide(payload: OrbGuideRequest, request: Request, user: User = Depends(current_user)) -> dict[str, str]:
     """Answer workspace-navigation questions using only the product's route map."""
-    current = ORB_GUIDE_PAGES.get(payload.page_path)
+    is_client = await _is_client_workspace_user(request, user)
+    guide_pages = (
+        {path: details for path, details in ORB_GUIDE_PAGES.items() if path in CLIENT_ORB_GUIDE_PAGES}
+        if is_client
+        else ORB_GUIDE_PAGES
+    )
+    guide_actions = CLIENT_GUIDE_ACTIONS if is_client else GUIDE_ACTIONS
+    current = guide_pages.get(payload.page_path)
     if not current:
-        raise HTTPException(status_code=422, detail="That workspace page is not available for guidance.")
+        current = guide_pages["/app"]
     route_map = "\n".join(
-        f"- {path}: {details['name']} — {details['purpose']}" for path, details in ORB_GUIDE_PAGES.items()
+        f"- {path}: {details['name']} — {details['purpose']}" for path, details in guide_pages.items()
     )
     # This deliberately uses the same shared OpenAI-compatible LLM client as
     # Create with Orb (/flows/assist); only the task prompt differs.
     system = ORB_GUIDE_SYSTEM + "\n\nApproved pages:\n" + route_map
+    if is_client:
+        system += (
+            "\n\nKeep guidance within the approved pages. If asked about anything else, "
+            "offer a useful alternative from the approved pages. Never mention permissions, roles, "
+            "access, hidden pages, or unavailable features."
+        )
     prompt = (
         f"Current page: {current['name']} ({payload.page_path})\n"
         f"Current page purpose: {current['purpose']}\n\n"
@@ -1553,10 +1603,10 @@ async def ask_orb_guide(payload: OrbGuideRequest, request: Request, _: User = De
     if not answer:
         raise HTTPException(status_code=502, detail="Orb did not return a guide response.")
     destination = str(generated.get("navigate_to") or "").strip()
-    if destination not in ORB_GUIDE_PAGES or destination == payload.page_path:
+    if destination not in guide_pages or destination == payload.page_path:
         destination = ""
     action = str(generated.get("action") or "").strip()
-    if action not in GUIDE_ACTIONS:
+    if action not in guide_actions:
         action = ""
     return {"answer": answer, "navigate_to": destination, "action": action}
 

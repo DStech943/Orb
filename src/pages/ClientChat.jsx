@@ -26,11 +26,12 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Avatar from '../components/ui/Avatar'
 import ChatReferenceCommands, { ChatReferenceCapsules } from '../components/chat/ChatReferences'
-import { activeBrandName } from '../services/orbApi'
+import { activeBrandId, activeBrandName } from '../services/orbApi'
 import { startBrowserDictation } from '../lib/browserDictation'
 import {
   PRESET_REACTIONS,
   getClientChatMessages,
+  listBrandChatMembers,
   markChatspaceAsRead,
   sendClientChatMessage,
   subscribeToChatMessages,
@@ -116,9 +117,11 @@ export default function ClientChat() {
   const [dictationError, setDictationError] = useState('')
   const [slashCommandIndex, setSlashCommandIndex] = useState(0)
   const [composerRevision, setComposerRevision] = useState(0)
+  const [assignedMembers, setAssignedMembers] = useState([])
 
   const fileInputRef = useRef(null)
   const slashMenuRef = useRef(null)
+  const mentionOptionRefs = useRef([])
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const inputMessageRef = useRef('')
@@ -430,59 +433,37 @@ export default function ClientChat() {
     return () => window.removeEventListener('focus', onFocus)
   }, [brandName])
 
-  // Dynamic mention targets combining presets + actual participants
-  const mentionTargets = useMemo(() => {
-    const list = [...PRESET_MENTIONS]
-    const seenNames = new Set(list.map((m) => m.handle.toLowerCase()))
-
-    // Always include current logged-in user in mention targets
-    if (currentUserName && currentUserName !== 'You' && !seenNames.has(currentUserName.toLowerCase())) {
-      seenNames.add(currentUserName.toLowerCase())
-      list.push({
-        id: `user-${currentUserName}`,
-        handle: currentUserName,
-        label: `@${currentUserName}`,
-        role: user?.role === 'admin' ? 'Admin' : 'You',
-        description: 'Mention yourself / account',
-        avatar: user?.avatar,
-        initials: currentUserName.slice(0, 2).toUpperCase(),
-      })
+  useEffect(() => {
+    let live = true
+    const loadAssignedMembers = async () => {
+      try {
+        const members = await listBrandChatMembers(activeBrandId())
+        if (live) setAssignedMembers(members)
+      } catch {
+        if (live) setAssignedMembers([])
+      }
     }
+    loadAssignedMembers()
+    window.addEventListener('orb:brand-changed', loadAssignedMembers)
+    return () => {
+      live = false
+      window.removeEventListener('orb:brand-changed', loadAssignedMembers)
+    }
+  }, [brandName])
 
-    messages.forEach((m) => {
-      const name = m.sender?.name?.trim()
-      if (name && !seenNames.has(name.toLowerCase()) && name !== 'You') {
-        seenNames.add(name.toLowerCase())
-        list.push({
-          id: `member-${name}`,
-          handle: name,
-          label: `@${name}`,
-          role: m.sender.role === 'team' ? 'Orb Team' : 'Member',
-          description: `Direct message to ${name}`,
-          avatar: m.sender.avatar,
-          initials: m.sender.initials || name.slice(0, 2).toUpperCase(),
-        })
-      }
-      if (Array.isArray(m.mentions)) {
-        m.mentions.forEach((mentionName) => {
-          const clean = String(mentionName || '').trim()
-          if (clean && !seenNames.has(clean.toLowerCase())) {
-            seenNames.add(clean.toLowerCase())
-            list.push({
-              id: `mention-${clean}`,
-              handle: clean,
-              label: `@${clean}`,
-              role: 'Member',
-              description: `Mention ${clean}`,
-              initials: clean.slice(0, 2).toUpperCase(),
-            })
-          }
-        })
-      }
+  // Individual mentions come only from the active brand's assignments. This
+  // avoids exposing people from another brand through prior chat history.
+  const mentionTargets = useMemo(() => {
+    const list = [...PRESET_MENTIONS.slice(0, 2)]
+    const seenNames = new Set(list.map((item) => item.handle.toLowerCase()))
+    assignedMembers.forEach((member) => {
+      const name = String(member.handle || '').trim()
+      if (!name || seenNames.has(name.toLowerCase())) return
+      seenNames.add(name.toLowerCase())
+      list.push(member)
     })
-
     return list
-  }, [messages, currentUserName, user])
+  }, [assignedMembers])
 
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
@@ -501,6 +482,14 @@ export default function ClientChat() {
         m.description?.toLowerCase().includes(q)
     )
   }, [mentionTargets, mentionMenuOpen, mentionQuery])
+
+  // Keep the keyboard-selected mention in view as the user moves through a
+  // longer list. The active row is still selected even when it falls below
+  // the popup's viewport, so this is deliberately tied to its index.
+  useEffect(() => {
+    if (!mentionMenuOpen || !filteredMentions.length) return
+    mentionOptionRefs.current[mentionSelectedIndex]?.scrollIntoView({ block: 'nearest' })
+  }, [filteredMentions.length, mentionMenuOpen, mentionSelectedIndex])
 
   // Build comprehensive mention regex supporting full names and preventing greedy word matching
   const buildMentionRegex = useMemo(() => {
@@ -1441,7 +1430,9 @@ export default function ClientChat() {
                 return (
                   <button
                     key={item.id}
+                    ref={(node) => { mentionOptionRefs.current[idx] = node }}
                     type="button"
+                    aria-selected={isSelected}
                     onMouseEnter={() => setMentionSelectedIndex(idx)}
                     onClick={() => insertMention(item)}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition ${

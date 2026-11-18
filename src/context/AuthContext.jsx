@@ -8,6 +8,8 @@ import React, {
 import * as authService from "../services/authSupabase";
 
 const AuthContext = createContext(null);
+export const STAFF_ROLES = new Set(["admin", "agent", "pod_lead"]);
+export const isStaffRole = (role) => STAFF_ROLES.has(String(role || "").toLowerCase());
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -37,7 +39,10 @@ export function AuthProvider({ children }) {
     () => ({
       user,
       loading,
-      isAdmin: user?.role === "admin",
+      // Kept as `isAdmin` for existing component APIs. All Orb staff roles
+      // currently share the operational workspace; only clients are limited.
+      isAdmin: isStaffRole(user?.role),
+      isStaff: isStaffRole(user?.role),
       authMode: "supabase",
       login: async (details) => {
         const next = await authService.login(details);

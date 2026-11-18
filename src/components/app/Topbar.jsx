@@ -216,7 +216,7 @@ function SlackEscalation() {
 export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const { data: fetchedBrands, loading: brandsLoading } = useAsync(
     listBrands,
     [],
@@ -276,7 +276,7 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
         <h1 className="mr-auto text-lg font-extrabold tracking-tight sm:text-xl">
           {title}
         </h1>
-        {user?.role === "admin" && (
+        {isAdmin && (
           <label className="hidden items-center gap-2 rounded-md border-2 border-ink bg-white px-2 py-2 text-xs font-bold sm:flex">
             <span className="text-muted">Brand</span>
             <select
@@ -323,14 +323,16 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
               {user?.role || "client"}
             </p>
           </div>
-          <Link
-            role="menuitem"
-            to="/app/settings?tab=profile"
-            className="block px-3 py-2 text-sm font-bold hover:bg-peach"
-          >
-            Profile
-          </Link>
-          {user?.role === "admin" && (
+          {isAdmin && (
+            <Link
+              role="menuitem"
+              to="/app/settings?tab=profile"
+              className="block px-3 py-2 text-sm font-bold hover:bg-peach"
+            >
+              Profile
+            </Link>
+          )}
+          {isAdmin && (
             <Link
               role="menuitem"
               to="/app/settings?tab=team"
