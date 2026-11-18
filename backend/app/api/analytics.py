@@ -16,8 +16,9 @@ import asyncio
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from uuid import UUID
 
 import httpx
@@ -31,7 +32,10 @@ logger = logging.getLogger("orb.analytics")
 
 router = APIRouter(prefix="/api", tags=["brand analytics"])
 
-RANGE_DAYS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
+RangeId = Literal["today", "yesterday", "7d", "15d", "30d", "custom"]
+# "Last N days" is N calendar days ending today (today included, so far).
+ROLLING_DAYS = {"7d": 7, "15d": 15, "30d": 30}
+MAX_CUSTOM_DAYS = 180
 # Orb's default workspace timezone (see overview block settings); used for day and hour buckets.
 ANALYTICS_TIMEZONE = "Asia/Kolkata"
 _CACHE_SECONDS = 60
@@ -52,6 +56,59 @@ UNAVAILABLE = {
         "reason": "Orders and AI-attributed revenue are not connected yet.",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Date ranges
+# ---------------------------------------------------------------------------
+def _analytics_tz():
+    """The workspace timezone. India has no daylight saving, so a fixed offset is an exact
+    fallback where the system has no timezone database."""
+    try:
+        return ZoneInfo(ANALYTICS_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        return timezone(timedelta(hours=5, minutes=30))
+
+
+def resolve_window(range_id: str, from_date: date | None = None, to_date: date | None = None, now: datetime | None = None) -> dict[str, datetime]:
+    """Turn a range choice into exact UTC instants, aligned to calendar days in the workspace
+    timezone, plus the equally long window just before it for the comparison.
+
+    today / yesterday / last N days / a custom from-to (both days inclusive). A window that
+    reaches today ends at the current moment, and its comparison window ends at the same time of
+    day earlier, so a half-finished day is never compared against a whole one.
+    """
+    now = now or datetime.now(timezone.utc)
+    tz = _analytics_tz()
+    today = now.astimezone(tz).date()
+
+    def midnight(day: date) -> datetime:
+        return datetime.combine(day, dtime.min, tzinfo=tz).astimezone(timezone.utc)
+
+    if range_id == "today":
+        first = last = today
+    elif range_id == "yesterday":
+        first = last = today - timedelta(days=1)
+    elif range_id in ROLLING_DAYS:
+        first, last = today - timedelta(days=ROLLING_DAYS[range_id] - 1), today
+    elif range_id == "custom":
+        if from_date is None or to_date is None:
+            raise HTTPException(status_code=422, detail="Choose both a start date and an end date.")
+        if from_date > to_date:
+            raise HTTPException(status_code=422, detail="The start date must be on or before the end date.")
+        if from_date > today:
+            raise HTTPException(status_code=422, detail="The start date cannot be in the future.")
+        first, last = from_date, min(to_date, today)
+        if (last - first).days + 1 > MAX_CUSTOM_DAYS:
+            raise HTTPException(status_code=422, detail=f"Choose a range of at most {MAX_CUSTOM_DAYS} days.")
+    else:
+        raise HTTPException(status_code=422, detail="Unknown date range.")
+
+    days = (last - first).days + 1
+    start = midnight(first)
+    end = min(midnight(last + timedelta(days=1)), now)
+    shift = timedelta(days=days)
+    return {"start": start, "end": end, "previous_start": start - shift, "previous_end": end - shift, "days": days}
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +311,7 @@ def shape_analytics(brand_id: UUID, range_id: str, current: dict[str, Any], prev
         "timezone": ANALYTICS_TIMEZONE,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "period": {"from": (current.get("range") or {}).get("from"), "to": (current.get("range") or {}).get("to")},
+        "previous_period": {"from": (previous.get("range") or {}).get("from"), "to": (previous.get("range") or {}).get("to")},
         "summary": now,
         "comparison": {
             "conversations_started": _change(now["conversations_started"], before["conversations_started"]),
@@ -304,22 +362,24 @@ def shape_analytics(brand_id: UUID, range_id: str, current: dict[str, Any], prev
 async def brand_analytics(
     brand_id: UUID,
     request: Request,
-    range: Literal["today", "7d", "30d", "90d"] = Query(default="30d"),
+    range: RangeId = Query(default="30d"),
+    from_date: date | None = Query(default=None, alias="from"),
+    to_date: date | None = Query(default=None, alias="to"),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     await _authorize_brand(request, user, brand_id)
-    key = (str(brand_id), range)
+    window = resolve_window(range, from_date, to_date)
+    key = (str(brand_id), range, str(from_date) if range == "custom" else "", str(to_date) if range == "custom" else "")
     cached = _cache.get(key)
     if cached and time.monotonic() - cached[0] < _CACHE_SECONDS:
         return cached[1]
-    days = RANGE_DAYS[range]
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=days)
     current, previous = await asyncio.gather(
-        _rpc_analytics(request, brand_id, start, end),
-        _rpc_analytics(request, brand_id, start - timedelta(days=days), start),
+        _rpc_analytics(request, brand_id, window["start"], window["end"]),
+        _rpc_analytics(request, brand_id, window["previous_start"], window["previous_end"]),
     )
     result = shape_analytics(brand_id, range, current, previous)
+    if len(_cache) > 300:
+        _cache.clear()
     _cache[key] = (time.monotonic(), result)
     return result
 
@@ -390,7 +450,9 @@ def _conversation_out(row: dict[str, Any]) -> dict[str, Any]:
 async def list_conversations(
     brand_id: UUID,
     request: Request,
-    range: Literal["today", "7d", "30d", "90d"] = Query(default="30d"),
+    range: RangeId = Query(default="30d"),
+    from_date: date | None = Query(default=None, alias="from"),
+    to_date: date | None = Query(default=None, alias="to"),
     status: Literal["all", "open", "resolved"] = Query(default="all"),
     platform: str | None = Query(default=None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$"),
     search: str | None = Query(default=None, max_length=120),
@@ -399,11 +461,11 @@ async def list_conversations(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     await _authorize_brand(request, user, brand_id)
-    since = datetime.now(timezone.utc) - timedelta(days=RANGE_DAYS[range])
+    window = resolve_window(range, from_date, to_date)
+    start, end = window["start"].isoformat(), window["end"].isoformat()
     params = {
         "select": "id,platform,customer_details,last_message_preview,latest_message_direction,workflow_status,created_at,resolved_at,last_activity_at,tags:meta_data->genie_auto_tags,summary:meta_data->>genie_auto_summary",
         "brand_id": f"eq.{brand_id}",
-        "last_activity_at": f"gte.{since.isoformat()}",
         "order": "last_activity_at.desc.nullslast",
         "limit": str(limit),
         "offset": str(offset),
@@ -414,9 +476,14 @@ async def list_conversations(
         params["workflow_status"] = "neq.resolved"
     if platform:
         params["platform"] = f"eq.{platform}"
+    # A conversation belongs to the period if it started in it OR its latest message was in it, so
+    # a chat that began yesterday and continued today still shows under "Yesterday".
+    in_period = f"or(and(last_activity_at.gte.{start},last_activity_at.lt.{end}),and(created_at.gte.{start},created_at.lt.{end}))"
     term = clean_search(search)
     if len(term) >= 2:
-        params["or"] = f"(last_message_preview.ilike.*{term}*,customer_details->>senderName.ilike.*{term}*)"
+        params["and"] = f"({in_period},or(last_message_preview.ilike.*{term}*,customer_details->>senderName.ilike.*{term}*))"
+    else:
+        params["and"] = f"({in_period})"
     rows, total = await _service_get(request, "chat_threads", params, count=True)
     return {
         "items": [_conversation_out(row) for row in rows],

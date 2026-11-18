@@ -1,6 +1,7 @@
 """Brand analytics and conversations: access control, calculations and query safety."""
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -77,6 +78,78 @@ def test_empty_brand_yields_none_not_fake_defaults() -> None:
     assert s["median_hours_to_resolve"] is None and s["first_reply"]["median_seconds"] is None
     assert out["comparison"]["conversations_started"]["change_pct"] is None
     assert out["topics"]["coverage_pct"] is None and out["trends"] == []
+
+
+# ------------------------------------------------------------------ date ranges
+IST = timezone(timedelta(hours=5, minutes=30))
+NOW = datetime(2026, 11, 18, 12, 30, tzinfo=IST)            # Wednesday midday, IST
+
+
+def local(value: datetime) -> str:
+    return value.astimezone(IST).strftime("%Y-%m-%d %H:%M")
+
+
+def test_today_runs_from_local_midnight_until_now() -> None:
+    w = an.resolve_window("today", now=NOW)
+    assert local(w["start"]) == "2026-11-18 00:00" and w["end"] == NOW and w["days"] == 1
+    assert local(w["previous_start"]) == "2026-11-17 00:00" and local(w["previous_end"]) == "2026-11-17 12:30"   # yesterday up to the same time
+
+
+def test_yesterday_is_the_whole_previous_day_compared_with_the_day_before() -> None:
+    w = an.resolve_window("yesterday", now=NOW)
+    assert (local(w["start"]), local(w["end"])) == ("2026-11-17 00:00", "2026-11-18 00:00")
+    assert (local(w["previous_start"]), local(w["previous_end"])) == ("2026-11-16 00:00", "2026-11-17 00:00")
+
+
+@pytest.mark.parametrize("range_id,days,first_day", [("7d", 7, "2026-11-12"), ("15d", 15, "2026-11-04"), ("30d", 30, "2026-10-20")])
+def test_last_n_days_are_n_calendar_days_ending_today(range_id, days, first_day) -> None:
+    w = an.resolve_window(range_id, now=NOW)
+    assert w["days"] == days and local(w["start"]) == f"{first_day} 00:00" and w["end"] == NOW
+    assert w["end"] - w["start"] == w["previous_end"] - w["previous_start"]            # equally long comparison window
+    assert w["start"] - w["previous_start"] == timedelta(days=days)
+
+
+def test_a_custom_range_includes_both_days_and_compares_with_the_days_before() -> None:
+    w = an.resolve_window("custom", date(2026, 11, 1), date(2026, 11, 10), now=NOW)
+    assert (local(w["start"]), local(w["end"]), w["days"]) == ("2026-11-01 00:00", "2026-11-11 00:00", 10)
+    assert (local(w["previous_start"]), local(w["previous_end"])) == ("2026-10-22 00:00", "2026-11-01 00:00")
+
+
+def test_a_custom_range_ending_today_or_later_stops_at_now() -> None:
+    w = an.resolve_window("custom", date(2026, 11, 16), date(2026, 12, 25), now=NOW)       # an end date in the future
+    assert w["end"] == NOW and w["days"] == 3 and local(w["start"]) == "2026-11-16 00:00"
+
+
+def test_day_boundaries_follow_the_workspace_timezone_not_utc() -> None:
+    now = datetime(2026, 11, 18, 20, 0, tzinfo=timezone.utc)            # already 01:30 on the 19th in India
+    w = an.resolve_window("today", now=now)
+    assert local(w["start"]) == "2026-11-19 00:00"
+
+
+@pytest.mark.parametrize("args,fragment", [
+    (("custom", None, None), "both"),
+    (("custom", date(2026, 11, 5), None), "both"),
+    (("custom", date(2026, 11, 10), date(2026, 11, 1)), "on or before"),
+    (("custom", date(2026, 11, 19), date(2026, 11, 20)), "future"),
+    (("custom", date(2026, 1, 1), date(2026, 11, 18)), "at most 180"),
+    (("decade", None, None), "Unknown"),
+])
+def test_invalid_ranges_are_refused_with_a_plain_message(args, fragment) -> None:
+    with pytest.raises(HTTPException) as caught:
+        an.resolve_window(*args, now=NOW)
+    assert caught.value.status_code == 422 and fragment in caught.value.detail
+
+
+def test_exactly_the_maximum_custom_range_is_allowed() -> None:
+    w = an.resolve_window("custom", date(2026, 5, 23), date(2026, 11, 18), now=NOW)       # 180 days
+    assert w["days"] == 180
+
+
+def test_the_response_names_both_periods() -> None:
+    cur = raw()
+    prev = raw(range={"from": "2026-09-19T00:00:00+00:00", "to": "2026-10-19T00:00:00+00:00", "timezone": "Asia/Kolkata"})
+    out = an.shape_analytics(BRAND, "custom", cur, prev)
+    assert out["range"] == "custom" and out["period"]["from"].startswith("2026-10-19") and out["previous_period"]["from"].startswith("2026-09-19")
 
 
 # ------------------------------------------------------------------ AI / team split
@@ -266,15 +339,22 @@ def test_analytics_compares_two_equal_periods_and_caches(api) -> None:
     first = api.get(f"/api/brands/{BRAND}/analytics?range=7d")
     assert first.status_code == 200 and first.json()["summary"]["customer_messages"] == 900
     (_, cur_start, cur_end), (_, prev_start, prev_end) = api.state.rpc
-    assert (cur_end - cur_start).days == 7 and prev_end == cur_start and (prev_end - prev_start).days == 7
+    assert prev_end - prev_start == cur_end - cur_start and cur_start - prev_start == timedelta(days=7)   # an equally long window, 7 days earlier
     api.get(f"/api/brands/{BRAND}/analytics?range=7d")
     assert len(api.state.rpc) == 2                         # second call came from the short cache
-    api.get(f"/api/brands/{BRAND}/analytics?range=90d")
+    api.get(f"/api/brands/{BRAND}/analytics?range=15d")
     assert len(api.state.rpc) == 4                         # a different range is a different query
+    api.get(f"/api/brands/{BRAND}/analytics?range=custom&from=2026-11-01&to=2026-11-03")
+    api.get(f"/api/brands/{BRAND}/analytics?range=custom&from=2026-11-01&to=2026-11-04")
+    assert len(api.state.rpc) == 8                         # custom dates are part of the cache key
 
 
 def test_analytics_rejects_bad_range_and_unauthorised_users(api) -> None:
     assert api.get(f"/api/brands/{BRAND}/analytics?range=forever").status_code == 422
+    assert api.get(f"/api/brands/{BRAND}/analytics?range=90d").status_code == 422          # replaced by the custom range
+    assert api.get(f"/api/brands/{BRAND}/analytics?range=custom").status_code == 422       # custom needs both dates
+    assert api.get(f"/api/brands/{BRAND}/analytics?range=custom&from=2026-11-10&to=2026-11-01").status_code == 422
+    assert api.get(f"/api/brands/{BRAND}/analytics?range=custom&from=yesterday&to=today").status_code == 422
     assert api.get("/api/brands/not-a-uuid/analytics").status_code == 422
     api.state.denied = True
     assert api.get(f"/api/brands/{BRAND}/analytics").status_code == 403 and not api.state.rpc
@@ -287,15 +367,28 @@ def test_conversation_list_is_scoped_filtered_and_masked(api) -> None:
     assert table == "chat_threads" and params["brand_id"] == f"eq.{BRAND}"
     assert params["workflow_status"] == "neq.resolved" and params["platform"] == "eq.zoko"
     assert params["limit"] == "10" and params["offset"] == "20"
-    assert "*ord er x*" in params["or"] and "(x)" not in params["or"].replace("(last_message_preview", "")   # wildcards/parens stripped
+    assert "*ord er x*" in params["and"] and "(x)" not in params["and"].replace("(last_message_preview", "")   # wildcards/parens stripped
+    assert "last_activity_at" in params["and"] and "created_at" in params["and"] and "last_activity_at" not in params   # period bounds are inside the grouped filter
     body = resp.json(); item = body["items"][0]
     assert body["total"] == 42 and item["customer_name"] == "Asha" and item["contact"] == "••••3210"
     assert item["status"] == "open" and item["topics"] == ["Order Status"] and item["summary"] == "Asks about delivery."
     assert "919876543210" not in resp.text and "conversation_id" not in resp.text      # the real number never leaves the server
 
 
+def test_conversation_list_filters_by_the_chosen_period(api) -> None:
+    api.get(f"/api/brands/{BRAND}/conversations?range=yesterday")
+    params = api.state.gets[-1][1]
+    window = an.resolve_window("yesterday")
+    assert window["start"].isoformat() in params["and"] and window["end"].isoformat() in params["and"]
+    assert "ilike" not in params["and"]                          # no search term, no search filter
+    api.get(f"/api/brands/{BRAND}/conversations?range=custom&from=2026-11-01&to=2026-11-03&search=order")
+    params = api.state.gets[-1][1]
+    assert "ilike" in params["and"] and "or(and(last_activity_at" in params["and"]
+    assert api.get(f"/api/brands/{BRAND}/conversations?range=custom").status_code == 422
+
+
 def test_conversation_list_validates_inputs(api) -> None:
-    for query in ("limit=0", "limit=101", "offset=-1", "status=deleted", "platform=a%20b", "range=1y"):
+    for query in ("limit=0", "limit=101", "offset=-1", "status=deleted", "platform=a%20b", "range=1y", "range=90d"):
         assert api.get(f"/api/brands/{BRAND}/conversations?{query}").status_code == 422, query
 
 

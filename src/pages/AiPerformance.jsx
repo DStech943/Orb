@@ -5,9 +5,10 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Too
 import PageHeader from '../components/ui/PageHeader'
 import Button from '../components/ui/Button'
 import { useBrand } from '../context/BrandContext'
-import { DATE_RANGES } from '../services/aiAnalytics'
+import { DEFAULT_RANGE } from '../services/aiAnalytics'
+import DateRangeFilter from '../components/analytics/DateRangeFilter'
 import useBrandAnalytics from '../hooks/useBrandAnalytics'
-import { AnalyticsGate, CHART_TOOLTIP, NotAvailable, SENDER_META, SENDER_ORDER, StatCard, dayLabel, duration, hourLabel, hours, num, percent } from '../components/analytics/parts'
+import { AnalyticsGate, CHART_TOOLTIP, NotAvailable, SENDER_META, SENDER_ORDER, StatCard, dayLabel, duration, hourLabel, hours, num, percent, periodLabel } from '../components/analytics/parts'
 
 const TABS = [
   { id: 'overview', label: 'Performance Overview' },
@@ -62,9 +63,9 @@ const splitText = (r) => SENDER_ORDER.map((key) => `${SENDER_META[key].label} ${
 export default function AiPerformance({ defaultTab = 'overview' }) {
   const [params, setParams] = useSearchParams()
   const activeTab = params.get('tab') || defaultTab
-  const [rangeId, setRangeId] = useState('30d')
+  const [range, setRange] = useState(DEFAULT_RANGE)
   const { agentName } = useBrand()
-  const analytics = useBrandAnalytics(rangeId)
+  const analytics = useBrandAnalytics(range)
 
   return (
     <div className="space-y-6 pb-12">
@@ -74,18 +75,7 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
         description={`How your customers' conversations with ${agentName} are going, from your real conversation data.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-control border border-line-strong bg-white p-1 shadow-card">
-              {DATE_RANGES.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => setRangeId(r.id)}
-                  className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${rangeId === r.id ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:text-ink'}`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
+            <DateRangeFilter value={range} onChange={setRange} />
             <Button variant="secondary" size="sm" onClick={analytics.reload}>
               <RefreshCw size={14} className={analytics.status === 'loading' ? 'animate-spin' : ''} />
               Refresh
@@ -119,6 +109,12 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
 
           return (
             <>
+              {periodLabel(data.period, data.timezone) && (
+                <p className="text-xs text-fg-muted">
+                  Showing <span className="font-semibold text-ink">{periodLabel(data.period, data.timezone)}</span>
+                  {periodLabel(data.previous_period, data.timezone) ? ` · changes compare with ${periodLabel(data.previous_period, data.timezone)}` : ''}
+                </p>
+              )}
               {empty && (
                 <p className="rounded-card border border-line bg-subtle/60 px-4 py-3 text-sm text-fg-muted">
                   No customer conversations were recorded in this period, so there is nothing to chart yet.

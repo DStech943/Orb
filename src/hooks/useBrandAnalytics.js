@@ -9,11 +9,17 @@ import { getAiPerformanceMetrics } from '../services/aiAnalytics'
  * list is still loading the brand context holds a placeholder brand; analytics are never
  * requested for it.
  */
-export default function useBrandAnalytics(rangeId = '30d') {
+// A stable text key for a range, so the data reloads when the range changes and not on every render.
+const rangeKey = (range) => (typeof range === 'string' ? range : `${range?.id || '30d'}|${range?.from || ''}|${range?.to || ''}`)
+
+export default function useBrandAnalytics(range = '30d') {
   const { brand, brandId, loading: brandsLoading } = useBrand()
   const usable = Boolean(brandId) && !brand?.isPlaceholder
   const [state, setState] = useState({ status: 'idle', data: null, error: '' })
   const request = useRef(0)
+  const rangeRef = useRef(range)
+  rangeRef.current = range
+  const key = rangeKey(range)
 
   const load = useCallback(async () => {
     if (!usable) {
@@ -23,12 +29,12 @@ export default function useBrandAnalytics(rangeId = '30d') {
     const ticket = ++request.current
     setState((current) => ({ status: 'loading', data: current.data?.brand_id === brandId ? current.data : null, error: '' }))
     try {
-      const data = await getAiPerformanceMetrics(brandId, rangeId)
+      const data = await getAiPerformanceMetrics(brandId, rangeRef.current)
       if (ticket === request.current) setState({ status: 'ready', data, error: '' })
     } catch (cause) {
       if (ticket === request.current) setState({ status: 'error', data: null, error: cause?.message || 'Could not load analytics.' })
     }
-  }, [usable, brandId, rangeId, brandsLoading])
+  }, [usable, brandId, key, brandsLoading])
 
   useEffect(() => {
     load()

@@ -269,8 +269,19 @@ export const reportBrandAgentIssue = (brandId, payload, idempotencyKey) =>
   });
 // Real, brand-scoped analytics and conversations for the client dashboard. The API reads
 // them from the live conversation tables and refuses anyone without access to the brand.
+// `range` is a preset id ("today", "yesterday", "7d", "15d", "30d") or { id, from, to } where a
+// custom range carries its two YYYY-MM-DD dates.
+export const rangeQuery = (range) => {
+  const choice = typeof range === "string" ? { id: range } : range || { id: "30d" };
+  const query = new URLSearchParams({ range: choice.id || "30d" });
+  if (choice.id === "custom") {
+    query.set("from", choice.from || "");
+    query.set("to", choice.to || "");
+  }
+  return query;
+};
 export const getBrandAnalytics = (brandId, range = "30d") =>
-  request(`/api/brands/${encodeURIComponent(brandId)}/analytics?range=${encodeURIComponent(range)}`, {
+  request(`/api/brands/${encodeURIComponent(brandId)}/analytics?${rangeQuery(range)}`, {
     cacheTtl: 60_000,
     // The database aggregates thousands of messages, which can take a few seconds.
     timeout: 75_000,
@@ -283,7 +294,10 @@ export const getBrandCatalogSummary = (brandId) =>
     timeout: 40_000,
   });
 export const listBrandConversationThreads =(brandId, { range = "30d", status = "all", platform = "", search = "", limit = 25, offset = 0 } = {}) => {
-  const query = new URLSearchParams({ range, status, limit: String(limit), offset: String(offset) });
+  const query = rangeQuery(range);
+  query.set("status", status);
+  query.set("limit", String(limit));
+  query.set("offset", String(offset));
   if (platform) query.set("platform", platform);
   if (search.trim()) query.set("search", search.trim());
   return request(`/api/brands/${encodeURIComponent(brandId)}/conversations?${query}`, { cacheTtl: 0, timeout: 45_000 });

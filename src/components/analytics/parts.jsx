@@ -25,6 +25,18 @@ export const dayLabel = (iso) => {
 
 export const hourLabel = (hour) => (hour === 0 ? '12 AM' : hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`)
 
+/** "12 Nov - 18 Nov" for an API period, in the workspace timezone. `to` is the first instant AFTER the period. */
+export function periodLabel(period, timeZone = 'Asia/Kolkata') {
+  if (!period?.from || !period?.to) return ''
+  const start = new Date(period.from)
+  const end = new Date(new Date(period.to).getTime() - 1000)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ''
+  const fmt = (date) => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone })
+  const a = fmt(start)
+  const b = fmt(end)
+  return a === b ? a : `${a} – ${b}`
+}
+
 // ---- building blocks -------------------------------------------------------------------
 /** Change against the previous period of the same length. Nothing is shown with no baseline. */
 export function Delta({ change, unit = '%', goodWhen = 'up' }) {

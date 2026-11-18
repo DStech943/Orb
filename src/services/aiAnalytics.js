@@ -9,16 +9,23 @@
 
 import { getBrandAnalytics } from './orbApi'
 
+// Presets are calendar days in the workspace timezone: "Today" is midnight until now,
+// "Yesterday" is the whole previous day, and "Last N days" ends today. A custom range is a
+// from and to date, both days included.
 export const DATE_RANGES = [
-  { id: 'today', label: 'Last 24 hours', days: 1 },
-  { id: '7d', label: 'Last 7 days', days: 7 },
-  { id: '30d', label: 'Last 30 days', days: 30 },
-  { id: '90d', label: 'Last 90 days', days: 90 },
+  { id: 'today', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
+  { id: '7d', label: 'Last 7 days' },
+  { id: '15d', label: 'Last 15 days' },
+  { id: '30d', label: 'Last 30 days' },
+  { id: 'custom', label: 'Custom range' },
 ]
+export const MAX_CUSTOM_DAYS = 180
+export const DEFAULT_RANGE = { id: '30d' }
 
-export async function getAiPerformanceMetrics(brandId, rangeId = '30d') {
+export async function getAiPerformanceMetrics(brandId, range = DEFAULT_RANGE) {
   if (!brandId) throw new Error('Choose a brand to see its analytics.')
-  const data = await getBrandAnalytics(brandId, rangeId)
+  const data = await getBrandAnalytics(brandId, range)
   if (!data) throw new Error('The Orb API is not connected, so analytics are unavailable.')
   return data
 }

@@ -5,7 +5,8 @@ import PageHeader from '../components/ui/PageHeader'
 import Button from '../components/ui/Button'
 import { useBrand } from '../context/BrandContext'
 import { getBusinessIntelligence } from '../services/businessIntelligence'
-import { DATE_RANGES } from '../services/aiAnalytics'
+import { DEFAULT_RANGE } from '../services/aiAnalytics'
+import DateRangeFilter from '../components/analytics/DateRangeFilter'
 import useBrandAnalytics from '../hooks/useBrandAnalytics'
 import { AnalyticsGate, NotAvailable, StatCard, num } from '../components/analytics/parts'
 
@@ -65,9 +66,9 @@ function buildInsights(analytics, commerce) {
 export default function BusinessIntelligence({ defaultTab = 'insights' }) {
   const [params, setParams] = useSearchParams()
   const activeTab = params.get('tab') || defaultTab
-  const [rangeId, setRangeId] = useState('30d')
+  const [range, setRange] = useState(DEFAULT_RANGE)
   const { brand, brandId, brandName } = useBrand()
-  const analytics = useBrandAnalytics(rangeId)
+  const analytics = useBrandAnalytics(range)
   const usable = Boolean(brandId) && !brand?.isPlaceholder
 
   const [commerce, setCommerce] = useState(null)
@@ -98,13 +99,7 @@ export default function BusinessIntelligence({ defaultTab = 'insights' }) {
         description={`What ${brandName || 'your'} customers are asking about, from real conversations and your product catalog.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-control border border-line-strong bg-white p-1 shadow-card">
-              {DATE_RANGES.map((r) => (
-                <button key={r.id} type="button" onClick={() => setRangeId(r.id)} className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${rangeId === r.id ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:text-ink'}`}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
+            <DateRangeFilter value={range} onChange={setRange} />
             <Button variant="secondary" size="sm" onClick={refresh}>
               <RefreshCw size={14} className={analytics.status === 'loading' || commerceLoading ? 'animate-spin' : ''} />
               Refresh

@@ -5,7 +5,8 @@ import Button from '../components/ui/Button'
 import Drawer from '../components/ui/Drawer'
 import OrbLoader from '../components/ui/OrbLoader'
 import { useBrand } from '../context/BrandContext'
-import { DATE_RANGES } from '../services/aiAnalytics'
+import { DEFAULT_RANGE } from '../services/aiAnalytics'
+import DateRangeFilter from '../components/analytics/DateRangeFilter'
 import { getConversationMessages, listBrandConversations } from '../services/conversations'
 import { SENDER_META } from '../components/analytics/parts'
 
@@ -38,7 +39,8 @@ export default function Conversations() {
   const { brand, brandId, agentName, loading: brandsLoading } = useBrand()
   const usable = Boolean(brandId) && !brand?.isPlaceholder
 
-  const [rangeId, setRangeId] = useState('30d')
+  const [range, setRange] = useState(DEFAULT_RANGE)
+  const rangeKey = `${range.id}|${range.from || ''}|${range.to || ''}`
   const [status, setStatus] = useState('all')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -56,12 +58,12 @@ export default function Conversations() {
     const mine = ++ticket.current
     setState((current) => ({ ...current, status: 'loading', error: '' }))
     try {
-      const result = await listBrandConversations(brandId, { range: rangeId, status, search, limit: PAGE_SIZE, offset: page * PAGE_SIZE })
+      const result = await listBrandConversations(brandId, { range, status, search, limit: PAGE_SIZE, offset: page * PAGE_SIZE })
       if (mine === ticket.current) setState({ status: 'ready', items: result.items || [], total: result.total || 0, error: '' })
     } catch (cause) {
       if (mine === ticket.current) setState({ status: 'error', items: [], total: 0, error: cause?.message || 'Could not load conversations.' })
     }
-  }, [usable, brandsLoading, brandId, rangeId, status, search, page])
+  }, [usable, brandsLoading, brandId, rangeKey, status, search, page])
 
   useEffect(() => {
     load()
@@ -70,7 +72,7 @@ export default function Conversations() {
   // Any change to what is being listed starts again from the first page.
   useEffect(() => {
     setPage(0)
-  }, [brandId, rangeId, status, search])
+  }, [brandId, rangeKey, status, search])
 
   const openConversation = async (item) => {
     setSelected(item)
@@ -97,7 +99,7 @@ export default function Conversations() {
       <PageHeader
         eyebrow="Customer Experience"
         title="Customer Conversations"
-        description={`Real conversations your customers have had with ${agentName} and your team.`}
+        description={`Real conversations your customers have had with ${agentName} and your team. A conversation is listed if it started or had a message in the selected period.`}
         actions={
           <Button variant="secondary" size="sm" onClick={load}>
             <RefreshCw size={14} className={state.status === 'loading' ? 'animate-spin' : ''} />
@@ -127,10 +129,7 @@ export default function Conversations() {
               </button>
             ))}
           </div>
-          <select value={rangeId} onChange={(event) => setRangeId(event.target.value)} aria-label="Time range"
-            className="rounded-control border border-line-strong bg-white px-2.5 py-1.5 text-xs font-semibold text-ink focus:border-primary focus:outline-none">
-            {DATE_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
+          <DateRangeFilter value={range} onChange={setRange} />
         </div>
       </div>
 
