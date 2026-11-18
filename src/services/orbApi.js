@@ -225,8 +225,8 @@ export const chatWithDeployedAgent = (brandId, payload) =>
     method: "POST",
     body: JSON.stringify(payload),
     invalidateCache: false,
-    // The API waits up to 60s for the deployed agent's reply; the default 1.2s local timeout
-    // would cut every real answer off.
+    // The API waits up to 60s for the deployed agent's reply; the default timeout
+    // would cut slower answers off.
     timeout: 75_000,
   });
 export const hasBrandAgentApi = Boolean(agentBaseUrl);
@@ -273,25 +273,25 @@ export const getBrandAnalytics = (brandId, range = "30d") =>
   request(`/api/brands/${encodeURIComponent(brandId)}/analytics?range=${encodeURIComponent(range)}`, {
     cacheTtl: 60_000,
     // The database aggregates thousands of messages, which can take a few seconds.
-    timeout: 45_000,
+    timeout: 75_000,
   });
 // A light view of the synced catalog (name, handle, stock). The full product records run to
 // megabytes, which is far more than a dashboard card needs.
 export const getBrandCatalogSummary = (brandId) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/catalog-summary`, {
     cacheTtl: 60_000,
-    timeout: 20_000,
+    timeout: 40_000,
   });
 export const listBrandConversationThreads =(brandId, { range = "30d", status = "all", platform = "", search = "", limit = 25, offset = 0 } = {}) => {
   const query = new URLSearchParams({ range, status, limit: String(limit), offset: String(offset) });
   if (platform) query.set("platform", platform);
   if (search.trim()) query.set("search", search.trim());
-  return request(`/api/brands/${encodeURIComponent(brandId)}/conversations?${query}`, { cacheTtl: 0, timeout: 25_000 });
+  return request(`/api/brands/${encodeURIComponent(brandId)}/conversations?${query}`, { cacheTtl: 0, timeout: 45_000 });
 };
 export const getBrandConversationMessages = (brandId, threadId) =>
   request(`/api/brands/${encodeURIComponent(brandId)}/conversations/${encodeURIComponent(threadId)}/messages`, {
     cacheTtl: 0,
-    timeout: 25_000,
+    timeout: 45_000,
   });
 // One saved report with its conversation snapshot, for the page the Slack link opens.
 // Supabase RLS decides who may read it: admins and members of the report's brand.
@@ -354,9 +354,9 @@ export const listKnowledge = (
   brandName
     ? request(
         `/api/knowledge/${kind}?brand_name=${encodeURIComponent(brandName)}&limit=${Math.min(500, Math.max(1, Number(limit) || 500))}`,
-        // Up to 500 records come from the vector store, which can take longer than the 1.2 s
-        // local default; cutting it short made pages report an empty catalog.
-        { cacheTtl: 45_000, timeout: 20_000 },
+        // Up to 500 records come from the vector store, which can be slow;
+        // cutting it short made pages report an empty catalog.
+        { cacheTtl: 45_000, timeout: 60_000 },
       )
     : Promise.resolve(null);
 export const updateKnowledge = (
@@ -572,7 +572,7 @@ export const cancelCrawl = (crawlJobId) =>
 export const getShopifyCredentialStatus = (brandName) =>
   request(
     `/api/shopify/credentials?brand_name=${encodeURIComponent(brandName)}`,
-    { timeout: 15_000 },
+    { timeout: 40_000 },
   );
 export const importShopifySource = ({
   domain,

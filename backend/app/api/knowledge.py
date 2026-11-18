@@ -535,7 +535,7 @@ async def _supabase_rows(request: Request, table: str, params: dict[str, str]) -
     settings = request.app.state.settings
     headers = _supabase_headers(request)
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}", params=params, headers=headers)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=503, detail="Supabase REST request failed") from exc
@@ -557,7 +557,7 @@ async def _supabase_service_rows(request: Request, table: str, params: dict[str,
     """Read a private table with the backend's service role, never the browser."""
     settings = request.app.state.settings
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
                 f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
                 params=params,
@@ -579,7 +579,7 @@ async def _supabase_private_rows(request: Request, table: str, params: dict[str,
     """Read Brand Voice data through Orb's normal publishable-key API path."""
     settings = request.app.state.settings
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
                 f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
                 params=params,
@@ -601,7 +601,7 @@ async def _supabase_write(
     """Write through Supabase REST so a separate Postgres URL is never required."""
     settings = request.app.state.settings
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.request(
                 method,
                 f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
@@ -630,7 +630,7 @@ async def _supabase_service_write(
     """Write private product records using the server-only service role."""
     settings = request.app.state.settings
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.request(
                 method,
                 f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
@@ -712,7 +712,7 @@ async def _supabase_private_write(
 ) -> list[dict[str, Any]]:
     settings = request.app.state.settings
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.request(
                 method,
                 f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
