@@ -438,6 +438,35 @@ def test_output_says_whether_the_slack_message_itself_was_posted() -> None:
     assert "slack_message_ts" not in partial                     # the raw Slack timestamp is not exposed
 
 
+def test_feedback_list_survives_a_column_that_has_not_been_migrated_yet(monkeypatch) -> None:
+    """A missing newer column must not take the whole feedback list down."""
+    from app.api import knowledge as kn
+
+    selects: list[str] = []
+
+    async def rows(request, table, params):
+        selects.append(params["select"])
+        if "conversation_history" in params["select"]:
+            raise HTTPException(status_code=503, detail="Supabase could not read orb_agent_feedback (400): column orb_agent_feedback.conversation_history does not exist")
+        return [{"id": "f1", "session_id": "orb_0123456789abcdef", "scope": "conversation", "note": "hello", "status": "open", "created_at": "2026-11-18T10:00:00+00:00"}]
+
+    async def brand(request, brand_id):
+        return {"id": BRAND_ID}
+
+    monkeypatch.setattr(kn, "_supabase_rows", rows)
+    monkeypatch.setattr(kn, "_remote_brand", brand)
+    app = FastAPI(); app.state.settings = settings(); app.include_router(kn.router)
+    app.dependency_overrides[current_user] = lambda: USER
+    response = TestClient(app).get(f"/api/brands/{BRAND_ID}/agent-feedback?session_id=orb_0123456789abcdef")
+    assert response.status_code == 200
+    (item,) = response.json()["feedback"]
+    assert item["id"] == "f1" and item["conversation_history"] == []          # the missing field just comes back empty
+    assert "conversation_history" in selects[0] and "conversation_history" not in selects[-1] and len(selects) == 2
+    # And the safe set stays safe: it must contain none of the migrated columns.
+    for column in ("conversation_history", "kind", "category", "severity", "tagged_people", "slack_"):
+        assert column not in kn._AGENT_FEEDBACK_LEGACY_COLUMNS
+
+
 # ------------------------------------------------- notes sent to the team (no category)
 def test_note_may_be_short_but_a_report_may_not() -> None:
     note = fr.AgentIssueReport(**report_body(category=None, description="Great chat"))

@@ -1,5 +1,5 @@
 import React from 'react'
-import { ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, UserRound, Users } from 'lucide-react'
+import { ChevronDown, Eye, LogOut, Menu, PanelLeftClose, PanelLeftOpen, UserRound, Users } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Avatar from '../ui/Avatar'
 import Dropdown from '../ui/Dropdown'
@@ -9,9 +9,16 @@ import { useBrand } from '../../context/BrandContext'
 
 const titles = {
   '/app': 'Overview',
+  '/app/performance': 'AI Performance',
+  '/app/performance/messages': 'Message Analytics',
+  '/app/performance/satisfaction': 'Customer Satisfaction',
+  '/app/conversations': 'Conversations',
+  '/app/insights': 'Business Insights',
+  '/app/sales': 'Sales & Revenue',
+  '/app/product-insights': 'Product Insights',
   '/app/workspace': 'AI configuration',
   '/app/client-chat': 'Chatspace',
-  '/app/chat': 'Test your agent',
+  '/app/chat': 'Test Assistant',
   '/app/feedback': 'Feedback & issues',
   '/app/operations': 'Operations',
   '/app/brain': "AI's Brain",
@@ -29,7 +36,7 @@ const brainTabTitles = { faqs: 'FAQs', sops: 'SOPs' }
 export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, switchRole, canSwitchRole, isPreviewingClient, realRole } = useAuth()
   const { brandName, agentName } = useBrand()
 
   let title = titles[location.pathname] || 'Orb'
@@ -68,6 +75,16 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
           {brandName && <span aria-hidden="true" className="text-line-strong">/</span>}
           <h1 className="truncate text-sm font-semibold text-ink">{title}</h1>
         </nav>
+        {isPreviewingClient && (
+          <button
+            type="button"
+            onClick={() => switchRole(null)}
+            className="hidden items-center gap-1.5 rounded-full border border-primary/30 bg-primary-tint px-3 py-1 text-xs font-semibold text-primary transition-colors hover:bg-white sm:inline-flex"
+            title="You are seeing Orb as a client would. Click to go back."
+          >
+            Previewing client view · Exit
+          </button>
+        )}
         <ShareFeedback />
         <Dropdown
           trigger={({ open, toggle }) => (
@@ -79,7 +96,19 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
         >
           <div className="border-b border-line px-2.5 pb-2 pt-1.5">
             <p className="truncate text-sm font-medium">{user?.name || user?.email || 'Your account'}</p>
-            <p className="text-xs capitalize text-fg-muted">{user?.role || 'client'}</p>
+            <div className="mt-0.5 flex items-center justify-between">
+              <span className="text-xs capitalize text-fg-muted">Role: {user?.role || 'client'}{isPreviewingClient ? ' (preview)' : ''}</span>
+              {/* Only staff can preview the client view; a client is never offered the staff one. */}
+              {canSwitchRole && (
+                <button
+                  type="button"
+                  onClick={() => switchRole(isPreviewingClient ? null : 'client')}
+                  className="text-[11px] font-bold text-primary hover:underline"
+                >
+                  {isPreviewingClient ? `Back to ${realRole === 'admin' ? 'admin' : 'staff'} view` : 'Preview as client'}
+                </button>
+              )}
+            </div>
           </div>
           <div className="pt-1">
             {isAdmin && (

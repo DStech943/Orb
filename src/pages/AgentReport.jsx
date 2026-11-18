@@ -122,10 +122,10 @@ export default function AgentReport() {
     }
   };
 
-  const backTo = isAdmin ? "/app/settings?tab=feedback" : "/app/chat";
+  // One list for everyone: feedback and issue reports are the same page.
   const back = (
-    <Link to={backTo} className="inline-flex items-center gap-1.5 text-sm font-bold text-muted hover:text-ink">
-      <ArrowLeft size={15} /> {isAdmin ? "AI feedback" : "Agent chat"}
+    <Link to="/app/feedback" className="inline-flex items-center gap-1.5 text-sm font-bold text-muted hover:text-ink">
+      <ArrowLeft size={15} /> Feedback & issues
     </Link>
   );
 

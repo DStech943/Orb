@@ -1803,8 +1803,11 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_AGENT_FEEDBACK_LEGACY_COLUMNS = "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,conversation_history,status,created_at"
-_AGENT_FEEDBACK_REPORT_COLUMNS = f"{_AGENT_FEEDBACK_LEGACY_COLUMNS},kind,category,severity,tagged_people,slack_delivery_status,slack_message_ts"
+# The columns that exist before ANY of the later feedback migrations. The list falls back to
+# exactly these, so a migration that has not been applied yet degrades the list (it just lacks
+# the newer fields) instead of breaking it. Never add a migrated column here.
+_AGENT_FEEDBACK_LEGACY_COLUMNS = "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at"
+_AGENT_FEEDBACK_REPORT_COLUMNS = f"{_AGENT_FEEDBACK_LEGACY_COLUMNS},conversation_history,kind,category,severity,tagged_people,slack_delivery_status,slack_message_ts"
 
 
 @router.get("/brands/{brand_id}/agent-feedback")

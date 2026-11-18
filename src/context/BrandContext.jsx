@@ -61,10 +61,24 @@ export function BrandProvider({ children }) {
     return () => window.removeEventListener('orb:brand-changed', onForeignChange)
   }, [load])
 
-  // Fall back to the first accessible brand if the stored one is unavailable to this user.
+  // Fall back to the selected/stored brand or a sensible default if the brand list is loading or empty
   const brand = useMemo(() => {
-    if (!brands.length) return null
-    return brands.find((item) => item.id === selectedId) || brands[0]
+    if (brands.length) {
+      return brands.find((item) => item.id === selectedId) || brands[0]
+    }
+    const fallbackId = selectedId || readStored() || '00000000-0000-0000-0000-000000000002'
+    const fallbackName = (typeof window !== 'undefined' && window.localStorage.getItem(STORAGE_KEYS.name)) || 'Nutrova'
+    const fallbackAgent = (typeof window !== 'undefined' && window.localStorage.getItem(STORAGE_KEYS.agent)) || `${fallbackName} AI`
+    return {
+      id: fallbackId,
+      name: fallbackName,
+      ai_agent_name: fallbackAgent,
+      ai_agent_configured: true,
+      isFallback: true,
+      // Only a brand with nothing remembered at all is a placeholder; a remembered brand is real
+      // and is used straight away while the list loads (the server checks access regardless).
+      isPlaceholder: !(selectedId || readStored()),
+    }
   }, [brands, selectedId])
 
   // A layout effect, so the selected brand is already in localStorage before any page's

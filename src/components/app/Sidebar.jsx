@@ -1,23 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
-  BookOpenCheck,
+  BarChart3,
   BrainCircuit,
   ClipboardList,
-  CircleHelp,
-  Database,
   FileText,
   FlaskConical,
   GitBranch,
   LayoutDashboard,
+  Lightbulb,
   MessageSquare,
   MessageSquareWarning,
   PackageSearch,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
+  Settings as SettingsIcon,
   SlidersHorizontal,
-  UserCog,
-  Building2,
   X,
 } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
@@ -27,43 +25,44 @@ import { useAuth } from '../../context/AuthContext'
 import { useBrand } from '../../context/BrandContext'
 import { getChatspaceUnreadStatus, wsClient } from '../../services/clientChat'
 
-// Mirrors CLIENT_WORKSPACE_PATHS in app/ClientWorkspaceRoute.jsx, plus the feedback page.
-const CLIENT_PATHS = new Set(['/app', '/app/client-chat', '/app/chat', '/app/flows', '/app/templates', '/app/products', '/app/feedback'])
+// One entry per PAGE. Pages that have their own tab bar (AI Performance, Business Insights,
+// AI's Brain, AI configuration, Settings) are listed once; the tabs live on the page itself.
+// `also` lists other routes that belong to the same entry so it stays highlighted there.
+const onPath = (...prefixes) => (path) => prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
 
-const tabIs = (...values) => (path, params, expected) => path === expected && values.includes(params.get('tab') || '')
+const OVERVIEW = { to: '/app', label: 'Overview', icon: LayoutDashboard, end: true }
+const AI_PERFORMANCE = { to: '/app/performance', label: 'AI Performance', icon: BarChart3 }
+const CONVERSATIONS = { to: '/app/conversations', label: 'Conversations', icon: MessageSquare }
+// Business Insights, Sales & Revenue and Product Insights are tabs of one page.
+const BUSINESS_INSIGHTS = { to: '/app/insights', label: 'Business Insights', icon: Lightbulb, match: onPath('/app/insights', '/app/sales', '/app/product-insights') }
+const CHAT = { to: '/app/chat', label: 'Chat with AI', icon: FlaskConical, agentLabel: true }
+const CHATSPACE = { to: '/app/client-chat', label: 'Chatspace', icon: MessageSquare, unread: true }
+// Feedback and issue reports are one list; a single report is a page inside it.
+const FEEDBACK = { to: '/app/feedback', label: 'Feedback & issues', icon: MessageSquareWarning, match: onPath('/app/feedback', '/app/reports') }
 
-// Information architecture: grouped around what a brand team is trying to do.
-// Every destination below already existed as a route; nothing is duplicated.
-const SECTIONS = [
+// Brand members (client portal)
+const CLIENT_SECTIONS = [
+  { label: 'Workspace', items: [OVERVIEW] },
+  { label: 'Insights', items: [AI_PERFORMANCE, CONVERSATIONS, BUSINESS_INSIGHTS] },
+  { label: 'Agent', items: [CHAT, CHATSPACE, FEEDBACK] },
+  { label: 'Connections', items: [{ to: '/app/tools', label: 'Integrations', icon: Plug }] },
+]
+
+// Datastraw staff (operations)
+const ADMIN_SECTIONS = [
+  { label: 'Workspace', items: [OVERVIEW] },
+  { label: 'Insights', items: [AI_PERFORMANCE, CONVERSATIONS, BUSINESS_INSIGHTS] },
   {
-    label: 'Workspace',
-    items: [{ to: '/app', label: 'Overview', icon: LayoutDashboard, end: true }],
-  },
-  {
-    label: 'Knowledge',
+    label: 'Knowledge & AI',
     items: [
-      { to: '/app/brain?tab=faqs', label: 'FAQs', icon: CircleHelp, match: (p, q) => tabIs('faqs')(p, q, '/app/brain') },
-      { to: '/app/brain?tab=sops', label: 'SOPs', icon: BookOpenCheck, match: (p, q) => tabIs('sops')(p, q, '/app/brain') },
-      { to: '/app/workspace?tab=source', label: 'Knowledge sources', icon: Database, match: (p, q) => tabIs('source')(p, q, '/app/workspace') },
-    ],
-  },
-  {
-    label: 'Agent configuration',
-    items: [
-      { to: '/app/workspace', label: 'AI configuration', icon: SlidersHorizontal, match: (p, q) => p === '/app/workspace' && q.get('tab') !== 'source' },
-      { to: '/app/brain', label: "AI's Brain", icon: BrainCircuit, match: (p, q) => p === '/app/brain' && !['faqs', 'sops'].includes(q.get('tab') || '') },
+      // FAQs and SOPs are tabs inside AI's Brain; knowledge sources and voice are tabs inside AI configuration.
+      { to: '/app/brain', label: "AI's Brain", icon: BrainCircuit },
+      { to: '/app/workspace', label: 'AI configuration', icon: SlidersHorizontal },
       { to: '/app/flows', label: 'Flows', icon: GitBranch },
       { to: '/app/templates', label: 'Templates', icon: FileText },
     ],
   },
-  {
-    label: 'Agent experience',
-    items: [
-      { to: '/app/chat', label: 'Chat with AI', icon: FlaskConical, agentLabel: true },
-      { to: '/app/client-chat', label: 'Chatspace', icon: MessageSquare, unread: true },
-      { to: '/app/feedback', label: 'Feedback & issues', icon: MessageSquareWarning },
-    ],
-  },
+  { label: 'Agent', items: [CHAT, CHATSPACE, FEEDBACK] },
   {
     label: 'Business',
     items: [
@@ -72,14 +71,11 @@ const SECTIONS = [
     ],
   },
   {
-    label: 'Integrations',
-    items: [{ to: '/app/tools', label: 'Connected tools', icon: Plug }],
-  },
-  {
-    label: 'Settings',
+    label: 'Setup',
     items: [
-      { to: '/app/settings?tab=team', label: 'Workspace settings', icon: Building2, match: (p, q) => tabIs('team', 'billing')(p, q, '/app/settings') },
-      { to: '/app/settings?tab=profile', label: 'Account settings', icon: UserCog, match: (p, q) => p === '/app/settings' && !['team', 'billing'].includes(q.get('tab') || '') },
+      { to: '/app/tools', label: 'Integrations', icon: Plug },
+      // Profile, team, notifications and billing are tabs inside Settings.
+      { to: '/app/settings', label: 'Settings', icon: SettingsIcon },
     ],
   },
 ]
@@ -141,10 +137,10 @@ export default function Sidebar({ mobile = false, onClose, collapsed = false, on
     }
   }, [user, brandName])
 
-  // Brand members only get the pages meant for their workspace (see ClientWorkspaceRoute);
-  // staff roles see everything. Feedback is open to both.
+  // Brand members get the dedicated Client Portal IA (AI Performance, Conversations, BI);
+  // staff roles see the full Operations & Knowledge portal.
   const sections = useMemo(
-    () => (isClient ? SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => CLIENT_PATHS.has(item.to.split('?')[0])) })).filter((section) => section.items.length) : SECTIONS),
+    () => (isClient ? CLIENT_SECTIONS : ADMIN_SECTIONS),
     [isClient],
   )
   const params = useMemo(() => new URLSearchParams(location.search), [location.search])

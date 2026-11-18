@@ -17,6 +17,7 @@ import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import Skeleton from '../components/ui/Skeleton'
 import { useOverview } from '../services/overview'
+import ClientOverview from '../components/overview/ClientOverview'
 import AgentHome from '../components/overview/AgentHome'
 import Panel from '../components/ui/Panel'
 import { activeBrandId, extendOperation, getBrandMastersheetUrl, getShopifyVariantMetafieldTracker } from '../services/orbApi'
@@ -503,9 +504,87 @@ function BrandOverview({ overview, onRetry }) {
   </div>
 }
 
-export default function Overview() {
+// The Operations & Knowledge view is the only place that needs the SOP, FAQ, flow and product
+// data, so it is loaded here and nowhere else. (It used to load for every visitor, which made
+// the client dashboard wait on, and compete with, five requests it never displayed.)
+function OpsOverview() {
   const { data: overview, loading, error, reload } = useOverview()
-  if (loading && !overview) return <div className="mx-auto grid w-full max-w-7xl gap-5" aria-busy="true"><Skeleton className="h-44" /><div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]"><Skeleton className="h-72" /><Skeleton className="h-72" /></div><Skeleton className="h-28" /></div>
-  if (error && !overview) return <EmptyState icon={AlertTriangle} title="We couldn’t load this workspace." description="Check your connection and try again." action="Try again" onAction={reload} />
-  return overview ? <BrandOverview overview={overview} onRetry={reload} /> : null
+
+  if (loading && !overview) {
+    return (
+      <div className="mx-auto grid w-full max-w-7xl gap-5" aria-busy="true">
+        <Skeleton className="h-44" />
+        <div className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
+          <Skeleton className="h-72" />
+          <Skeleton className="h-72" />
+        </div>
+        <Skeleton className="h-28" />
+      </div>
+    )
+  }
+
+  if (error && !overview) {
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        title="We couldn’t load this workspace."
+        description="Check your connection and try again."
+        action="Try again"
+        onAction={reload}
+      />
+    )
+  }
+
+  if (!overview) return null
+  return <BrandOverview overview={overview} onRetry={reload} />
+}
+
+export default function Overview() {
+  const { user } = useAuth()
+  const isClient = user?.role === 'client'
+  const [adminViewMode, setAdminViewMode] = useState('client') // 'client' or 'ops'
+
+  // Clients always see the client-facing AI Performance & Business Overview, and none of the
+  // operations data is fetched for them.
+  if (isClient) {
+    return (
+      <div className="mx-auto w-full max-w-7xl">
+        <ClientOverview />
+      </div>
+    )
+  }
+
+  // If admin/staff user, allow toggling between the Client Experience and Internal Operations
+  return (
+    <div className="mx-auto w-full max-w-7xl space-y-4">
+      <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary-tint/60 px-4 py-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+          <Sparkles size={14} />
+          <span>Staff Workspace View</span>
+        </div>
+        <div className="flex rounded-control border border-primary/30 bg-white p-0.5 shadow-xs">
+          <button
+            type="button"
+            onClick={() => setAdminViewMode('client')}
+            className={`rounded-lg px-3 py-1 text-xs font-bold transition-colors ${
+              adminViewMode === 'client' ? 'bg-primary text-white shadow-xs' : 'text-fg-muted hover:text-ink'
+            }`}
+          >
+            Client Portal (Performance & BI)
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdminViewMode('ops')}
+            className={`rounded-lg px-3 py-1 text-xs font-bold transition-colors ${
+              adminViewMode === 'ops' ? 'bg-primary text-white shadow-xs' : 'text-fg-muted hover:text-ink'
+            }`}
+          >
+            Operations & Knowledge
+          </button>
+        </div>
+      </div>
+
+      {adminViewMode === 'client' ? <ClientOverview /> : <OpsOverview />}
+    </div>
+  )
 }

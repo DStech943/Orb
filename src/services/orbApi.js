@@ -46,8 +46,14 @@ const notifyFlowsChanged = () => {
   window.dispatchEvent(new CustomEvent("orb:flows-changed"));
 };
 
+let backendUnavailableUntil = 0;
+
 const request = async (path, options = {}) => {
   if (!hasOrbApi) return null;
+  const isLocalBackend = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+  if (isLocalBackend && Date.now() < backendUnavailableUntil) {
+    throw new Error("Orb API backend is offline (cooldown active)");
+  }
   const { cacheTtl = 0, invalidateCache = true, ...fetchOptions } = options;
   const { data } = await supabase?.auth.getSession();
   const token = data?.session?.access_token;
@@ -62,30 +68,54 @@ const request = async (path, options = {}) => {
     return apiReadRequests.get(cacheKey);
 
   const run = async () => {
-    const response = await fetch(`${baseUrl}${path}`, {
-      ...fetchOptions,
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        "Content-Type": "application/json",
-        ...(fetchOptions.headers || {}),
-      },
-    });
-    if (!response.ok)
-      throw new Error(
-        (await response.json().catch(() => null))?.detail ||
-          "Orb API request failed.",
-      );
-    if (response.status === 204) return null;
-    if (!response.headers.get("content-type")?.includes("application/json")) {
-      throw new Error(
-        "Orb API returned a non-JSON response. Set VITE_ORB_API_URL to the public Railway orb-api domain and redeploy the frontend.",
-      );
+    const controller = new AbortController();
+    const timeoutMs = fetchOptions.timeout || (isLocalBackend ? 1200 : 3000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        ...fetchOptions,
+        signal: controller.signal,
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          "Content-Type": "application/json",
+          ...(fetchOptions.headers || {}),
+        },
+      });
+      clearTimeout(timeoutId);
+      backendUnavailableUntil = 0;
+      if (!response.ok) {
+        // The backend answered, so it is online. Keep the status on the error so the
+        // offline cooldown below is never triggered by an ordinary error response.
+        const failure = new Error(
+          (await response.json().catch(() => null))?.detail ||
+            "Orb API request failed.",
+        );
+        failure.status = response.status;
+        throw failure;
+      }
+      if (response.status === 204) return null;
+      if (!response.headers.get("content-type")?.includes("application/json")) {
+        throw new Error(
+          "Orb API returned a non-JSON response. Set VITE_ORB_API_URL to the public Railway orb-api domain and redeploy the frontend.",
+        );
+      }
+      const payload = await response.json();
+      if (method === "GET" && cacheTtl && requestEpoch === apiReadCacheEpoch)
+        apiReadCache.set(cacheKey, { savedAt: Date.now(), data: payload });
+      if (method !== "GET" && invalidateCache) clearApiReadCache();
+      return payload;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      // Only a failed connection means the backend is down (fetch rejects with a
+      // TypeError). An error response, or one slow request being timed out, must not
+      // make every other request on the page report "offline".
+      if (isLocalBackend && err instanceof TypeError) {
+        backendUnavailableUntil = Date.now() + 15000;
+      }
+      if (err?.name === "AbortError")
+        throw new Error("The Orb API took too long to respond. Try again.");
+      throw err;
     }
-    const payload = await response.json();
-    if (method === "GET" && cacheTtl && requestEpoch === apiReadCacheEpoch)
-      apiReadCache.set(cacheKey, { savedAt: Date.now(), data: payload });
-    if (method !== "GET" && invalidateCache) clearApiReadCache();
-    return payload;
   };
   if (method !== "GET" || !cacheTtl) return run();
   const pending = run().finally(() => apiReadRequests.delete(cacheKey));
@@ -231,6 +261,32 @@ export const reportBrandAgentIssue = (brandId, payload, idempotencyKey) =>
     body: JSON.stringify(payload),
     headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {},
   });
+// Real, brand-scoped analytics and conversations for the client dashboard. The API reads
+// them from the live conversation tables and refuses anyone without access to the brand.
+export const getBrandAnalytics = (brandId, range = "30d") =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/analytics?range=${encodeURIComponent(range)}`, {
+    cacheTtl: 60_000,
+    // The database aggregates thousands of messages, which can take a few seconds.
+    timeout: 45_000,
+  });
+// A light view of the synced catalog (name, handle, stock). The full product records run to
+// megabytes, which is far more than a dashboard card needs.
+export const getBrandCatalogSummary = (brandId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/catalog-summary`, {
+    cacheTtl: 60_000,
+    timeout: 20_000,
+  });
+export const listBrandConversationThreads =(brandId, { range = "30d", status = "all", platform = "", search = "", limit = 25, offset = 0 } = {}) => {
+  const query = new URLSearchParams({ range, status, limit: String(limit), offset: String(offset) });
+  if (platform) query.set("platform", platform);
+  if (search.trim()) query.set("search", search.trim());
+  return request(`/api/brands/${encodeURIComponent(brandId)}/conversations?${query}`, { cacheTtl: 0, timeout: 25_000 });
+};
+export const getBrandConversationMessages = (brandId, threadId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/conversations/${encodeURIComponent(threadId)}/messages`, {
+    cacheTtl: 0,
+    timeout: 25_000,
+  });
 // One saved report with its conversation snapshot, for the page the Slack link opens.
 // Supabase RLS decides who may read it: admins and members of the report's brand.
 export const getBrandAgentFeedbackReport = (brandId, feedbackId) =>
@@ -292,7 +348,9 @@ export const listKnowledge = (
   brandName
     ? request(
         `/api/knowledge/${kind}?brand_name=${encodeURIComponent(brandName)}&limit=${Math.min(500, Math.max(1, Number(limit) || 500))}`,
-        { cacheTtl: 45_000 },
+        // Up to 500 records come from the vector store, which can take longer than the 1.2 s
+        // local default; cutting it short made pages report an empty catalog.
+        { cacheTtl: 45_000, timeout: 20_000 },
       )
     : Promise.resolve(null);
 export const updateKnowledge = (
@@ -508,6 +566,7 @@ export const cancelCrawl = (crawlJobId) =>
 export const getShopifyCredentialStatus = (brandName) =>
   request(
     `/api/shopify/credentials?brand_name=${encodeURIComponent(brandName)}`,
+    { timeout: 15_000 },
   );
 export const importShopifySource = ({
   domain,

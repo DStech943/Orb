@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import time
 
 import asyncpg
 import httpx
@@ -16,6 +17,10 @@ from app.pipeline import advance_completed_crawl, create_crawl_pipeline
 from app.scraper.shopify import ShopifyAdminUnavailable, _admin_query, _plain_html, admin_domain, list_admin_products, list_admin_resources
 
 router = APIRouter(prefix="/api/shopify", tags=["shopify"])
+
+# Monotonic time until which the direct Vault connection is skipped after it failed to connect.
+_direct_vault_down_until = 0.0
+_DIRECT_VAULT_RETRY_SECONDS = 60
 
 
 async def _internal_shopify_user(request: Request, user: User) -> None:
@@ -279,9 +284,14 @@ async def _direct_vault_credentials(request: Request, brand_name: str) -> tuple[
     database role behind SUPABASE_DATABASE_URL must be permitted to read
     vault.decrypted_secrets (normally the project's postgres/service role).
     """
+    global _direct_vault_down_until
     database_url = request.app.state.settings.supabase_database_url
     if not database_url:
         return None, None, "direct_database_not_configured"
+    # A direct connection that just failed is not retried for a minute: every attempt against an
+    # unreachable database waits out the full connect timeout before the REST fallback runs.
+    if time.monotonic() < _direct_vault_down_until:
+        return None, None, "direct_database_unavailable"
     token_name, domain_name = _shopify_vault_names(brand_name)
     connection = None
     try:
@@ -299,6 +309,7 @@ async def _direct_vault_credentials(request: Request, brand_name: str) -> tuple[
         domain = str(row["shopify_domain"] or "").strip() if row else ""
         return (domain or None), (token or None), "direct_vault" if domain and token else "missing"
     except (asyncpg.PostgresError, OSError, TimeoutError, ValueError):
+        _direct_vault_down_until = time.monotonic() + _DIRECT_VAULT_RETRY_SECONDS
         return None, None, "direct_database_unavailable"
     finally:
         if connection is not None:

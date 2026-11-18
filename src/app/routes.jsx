@@ -23,6 +23,9 @@ const Templates = lazy(() => import('../pages/Templates'))
 const Tools = lazy(() => import('../pages/Tools'))
 const Settings = lazy(() => import('../pages/Settings'))
 const NotFound = lazy(() => import('../pages/NotFound'))
+const AiPerformance = lazy(() => import('../pages/AiPerformance'))
+const Conversations = lazy(() => import('../pages/Conversations'))
+const BusinessIntelligence = lazy(() => import('../pages/BusinessIntelligence'))
 
 const Loading = () => (
   <div className="min-h-screen bg-[#F7F8FC]">
@@ -44,6 +47,16 @@ export default function AppRoutes() {
             <Route path="/app/reports/:brandId/:feedbackId" element={<AgentReport />} />
             <Route element={<ClientWorkspaceRoute />}>
               <Route path="/app" element={<Overview />} />
+              <Route path="/app/performance" element={<AiPerformance defaultTab="overview" />} />
+              <Route path="/app/performance/messages" element={<AiPerformance defaultTab="messages" />} />
+              <Route path="/app/performance/satisfaction" element={<AiPerformance defaultTab="satisfaction" />} />
+              <Route path="/app/conversations" element={<Conversations />} />
+              <Route path="/app/insights" element={<BusinessIntelligence defaultTab="insights" />} />
+              <Route path="/app/sales" element={<BusinessIntelligence defaultTab="sales" />} />
+              <Route path="/app/product-insights" element={<BusinessIntelligence defaultTab="products" />} />
+              {/* The old "Reports & Issues" list was the same data as Feedback & issues. */}
+              <Route path="/app/reports" element={<Navigate to="/app/feedback" replace />} />
+              <Route path="/app/integrations" element={<Navigate to="/app/tools" replace />} />
               <Route path="/app/workspace" element={<Workspace />} />
               <Route path="/app/client-chat" element={<ClientChat />} />
               <Route path="/app/operations" element={<Operations />} />
