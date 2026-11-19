@@ -48,6 +48,14 @@ const CLIENT_SECTIONS = [
   { label: 'Connections', items: [{ to: '/app/tools', label: 'Integrations', icon: Plug }] },
 ]
 
+// Laani brand members: strictly limited client portal
+// Exposes ONLY: Workspace (Overview) and AI (Chat with Tanya, Chatspace).
+// Insights, Integrations and Feedback are completely hidden.
+const LAANI_CLIENT_SECTIONS = [
+  { label: 'Workspace', items: [OVERVIEW] },
+  { label: 'AI', items: [CHAT, CHATSPACE] },
+]
+
 // Datastraw staff (operations)
 const ADMIN_SECTIONS = [
   { label: 'Workspace', items: [OVERVIEW] },
@@ -117,7 +125,7 @@ function NavItem({ item, collapsed, active, unread, mentioned, mentionCount, onN
 export default function Sidebar({ mobile = false, onClose, collapsed = false, onToggleCollapse }) {
   const { user } = useAuth() || {}
   const isClient = user?.role === 'client'
-  const { brandName, agentName } = useBrand()
+  const { brandName, agentName, isLaani } = useBrand()
   const location = useLocation()
   const [chat, setChat] = useState({ unread: 0, mentioned: false, mentions: 0 })
   const isCollapsed = collapsed && !mobile
@@ -138,11 +146,12 @@ export default function Sidebar({ mobile = false, onClose, collapsed = false, on
   }, [user, brandName])
 
   // Brand members get the dedicated Client Portal IA (AI Performance, Conversations, BI);
-  // staff roles see the full Operations & Knowledge portal.
-  const sections = useMemo(
-    () => (isClient ? CLIENT_SECTIONS : ADMIN_SECTIONS),
-    [isClient],
-  )
+  // staff roles see the full Operations & Knowledge portal. Laani client has a minimal IA.
+  const sections = useMemo(() => {
+    if (!isClient) return ADMIN_SECTIONS
+    if (isLaani) return LAANI_CLIENT_SECTIONS
+    return CLIENT_SECTIONS
+  }, [isClient, isLaani])
   const params = useMemo(() => new URLSearchParams(location.search), [location.search])
   const isActive = (item) => {
     if (item.match) return item.match(location.pathname, params)

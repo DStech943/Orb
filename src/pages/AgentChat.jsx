@@ -6,7 +6,6 @@ import {
   Eraser,
   ExternalLink,
   Flag,
-  History,
   Loader2,
   Maximize2,
   MessageCircleMore,
@@ -18,7 +17,6 @@ import {
 } from "lucide-react";
 import Orb from "../components/Orb";
 import ReportIssueModal, { issueCategoryLabel } from "../components/chat/ReportIssueModal";
-import TeammatePicker from "../components/chat/TeammatePicker";
 import Avatar from "../components/ui/Avatar";
 import { buildTranscript, newIdempotencyKey } from "../lib/transcript";
 import { timeAgo } from "../lib/format";
@@ -157,9 +155,6 @@ export default function AgentChat({ embedded = false }) {
   const [idealReply, setIdealReply] = useState("");
   const [overallNote, setOverallNote] = useState("");
   const [savingFeedback, setSavingFeedback] = useState(false);
-  const [noteToSlack, setNoteToSlack] = useState(false);
-  const [noteTagged, setNoteTagged] = useState([]);
-  const noteKey = useRef(newIdempotencyKey());
   const [diagnostic, setDiagnostic] = useState(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState(null);
@@ -172,8 +167,6 @@ export default function AgentChat({ embedded = false }) {
   const messagesRef = useRef(null);
   const messageScrollTopRef = useRef(0);
   const [sessions, setSessions] = useState([]);
-  const [sessionQuery, setSessionQuery] = useState("");
-  const [sessionsOpen, setSessionsOpen] = useState(false);
   const activeBrand = brands.find((brand) => brand.id === brandId) || brands[0];
   const configuredAgentName = String(activeBrand?.ai_agent_name || "").trim();
   const agentName = agentNameOverride || configuredAgentName || "AI";
@@ -467,43 +460,6 @@ export default function AgentChat({ embedded = false }) {
     }
   };
 
-  // A note sent to Slack is saved as feedback like any other, and also attaches the
-  // conversation and notifies the team. The server treats a report without a category
-  // as a note.
-  const saveNoteToSlack = async () => {
-    if (!activeBrand?.id || !sessionId || savingFeedback) return;
-    const note = overallNote.trim();
-    const transcript = buildTranscript(messages);
-    if (!note || !transcript.length) return;
-    setSavingFeedback(true);
-    try {
-      const result = await reportBrandAgentIssue(
-        activeBrand.id,
-        {
-          session_id: sessionId,
-          description: note,
-          tagged_people: noteTagged,
-          transcript,
-          total_message_count: messages.length,
-        },
-        noteKey.current,
-      );
-      if (result?.feedback) setFeedback((items) => [...items, result.feedback]);
-      setOverallNote("");
-      setNoteTagged([]);
-      noteKey.current = newIdempotencyKey();
-      showToast(
-        result?.feedback?.slack_delivery_status === "failed"
-          ? "Note saved. Slack delivery failed, so the team can resend it."
-          : "Note sent to the team on Slack.",
-      );
-    } catch (cause) {
-      showToast(cause?.message || "Could not send the note.", "error");
-    } finally {
-      setSavingFeedback(false);
-    }
-  };
-
   const qdrantSources = diagnosticSources(diagnostic);
   const toolsUsed = Array.isArray(diagnostic?.tools_used) ? diagnostic.tools_used.filter(Boolean) : [];
   const decisionReason = String(diagnostic?.handoff_reason || diagnostic?.route_reason || "").trim();
@@ -540,17 +496,6 @@ export default function AgentChat({ embedded = false }) {
         </div>}
         <div className="ml-auto flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {!embedded && (
-              <button
-                type="button"
-                onClick={() => setSessionsOpen((open) => !open)}
-                aria-expanded={sessionsOpen}
-                className="inline-flex h-9 items-center gap-2 rounded-control border border-line bg-white px-3 text-xs font-medium text-fg-muted transition hover:border-primary/35 hover:text-primary xl:hidden"
-              >
-                <History size={15} />
-                Sessions
-              </button>
-            )}
             {!embedded && (
               <button
                 type="button"
@@ -601,67 +546,6 @@ export default function AgentChat({ embedded = false }) {
         </div>
       </div>
       <section className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-white lg:flex-row ${isFullscreen ? "rounded-none border-0 shadow-none" : "rounded-2xl border border-line shadow-card"}`}>
-        {!embedded && (
-          <aside aria-label="Test sessions" className={`${sessionsOpen ? "flex" : "hidden"} max-h-64 w-full shrink-0 flex-col border-b border-line bg-white lg:max-h-none xl:flex xl:w-64 xl:border-b-0 xl:border-r`}>
-            <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4">
-              <h3 className="text-sm font-semibold text-ink">Test sessions</h3>
-              <button type="button" onClick={newConversation} className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-primary transition hover:bg-primary-tint">
-                <Plus size={13} /> New
-              </button>
-            </div>
-            <label className="relative mx-4 mb-2 block">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" aria-hidden="true" />
-              <input
-                value={sessionQuery}
-                onChange={(event) => setSessionQuery(event.target.value)}
-                placeholder="Search sessions"
-                aria-label="Search test sessions"
-                className="h-9 w-full rounded-lg border border-line bg-canvas pl-8 pr-2 text-sm focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/15"
-              />
-            </label>
-            <ul className="thin-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-              {(() => {
-                const term = sessionQuery.trim().toLowerCase();
-                const known = sessions.filter((item) => !term || String(item.title || "").toLowerCase().includes(term));
-                const current = known.some((item) => item.id === sessionId) || term ? [] : [{ id: sessionId, title: "New test", messageCount: 0, updatedAt: Date.now(), draft: true }];
-                const rows = [...current, ...known];
-                if (!rows.length) {
-                  return <li className="px-3 py-8 text-center text-sm text-fg-muted">{term ? "No sessions match your search." : "Your testing playground is ready. Start a conversation with your agent."}</li>;
-                }
-                return rows.map((item) => {
-                  const active = item.id === sessionId;
-                  return (
-                    <li key={item.id} className="group relative">
-                      <button
-                        type="button"
-                        onClick={() => openSession(item.id)}
-                        aria-current={active ? "true" : undefined}
-                        className={`mb-0.5 w-full rounded-lg px-3 py-2 text-left transition-colors duration-150 ${active ? "bg-primary-tint" : "hover:bg-subtle"}`}
-                      >
-                        <span className={`block truncate pr-5 text-sm ${active ? "font-medium text-primary" : "text-ink"}`}>{item.title || "New test"}</span>
-                        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-fg-muted">
-                          {active && <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />}
-                          {active ? "Active" : `${item.messageCount || 0} messages`} · {item.draft && !messages.length ? "not started" : timeAgo(item.updatedAt)}
-                        </span>
-                      </button>
-                      {!item.draft && (
-                        <button
-                          type="button"
-                          onClick={() => deleteSession(item.id)}
-                          aria-label={`Delete test session ${item.title || ""}`}
-                          className="absolute right-2 top-2 hidden h-6 w-6 place-items-center rounded-md text-fg-muted hover:bg-white hover:text-danger group-hover:grid group-focus-within:grid"
-                        >
-                          <X size={13} />
-                        </button>
-                      )}
-                    </li>
-                  );
-                });
-              })()}
-            </ul>
-            <p className="border-t border-line px-4 py-2.5 text-[11px] leading-4 text-fg-muted">Sessions are remembered in this browser for {activeBrand?.name || "this brand"}.</p>
-          </aside>
-        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-line">
           <header className="flex items-center gap-3 border-b border-line bg-white px-5 py-4 sm:px-6">
             <AgentOrb className="h-10 w-10 shadow-sm" />
@@ -946,37 +830,13 @@ export default function AgentChat({ embedded = false }) {
               rows={3}
               className="mt-2 w-full resize-y rounded-lg border border-line bg-white px-2.5 py-2 text-xs leading-5 text-ink outline-none transition placeholder:text-fg-muted/70 focus:border-primary focus:ring-4 focus:ring-primary/15"
             />
-            <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs font-semibold text-ink">
-              <input
-                type="checkbox"
-                checked={noteToSlack}
-                onChange={(event) => setNoteToSlack(event.target.checked)}
-                disabled={savingFeedback}
-                className="mt-0.5 h-3.5 w-3.5 rounded border-line-strong text-primary focus:ring-primary"
-              />
-              <span>
-                Also send to the team on Slack
-                <span className="block font-normal text-fg-muted">Posts this note with the full conversation attached.</span>
-              </span>
-            </label>
-            {noteToSlack && (
-              <div className="mt-2 grid gap-1.5">
-                <p className="text-xs font-medium text-ink">
-                  Notify teammates <span className="font-normal text-fg-muted">(optional)</span>
-                </p>
-                <TeammatePicker brandId={activeBrand?.id} active={noteToSlack} value={noteTagged} onChange={setNoteTagged} disabled={savingFeedback} variant="compact" />
-                {!messages.length && (
-                  <p className="text-[11px] leading-4 text-warning">Send a message to the agent first. The conversation is attached to the Slack note.</p>
-                )}
-              </div>
-            )}
             <button
               type="button"
-              disabled={savingFeedback || !overallNote.trim() || (noteToSlack && !messages.length)}
-              onClick={() => (noteToSlack ? saveNoteToSlack() : saveFeedback({ scope: "conversation", note: overallNote }))}
-              className="mt-2 rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={savingFeedback || !overallNote.trim()}
+              onClick={() => saveFeedback({ scope: "conversation", note: overallNote })}
+              className="mt-3 rounded-lg border border-line-strong bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {savingFeedback ? (noteToSlack ? "Sending…" : "Saving…") : noteToSlack ? "Add note & notify team" : "Add overall note"}
+              {savingFeedback ? "Saving…" : "Add overall note"}
             </button>
           </div>
 

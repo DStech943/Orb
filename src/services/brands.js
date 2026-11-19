@@ -8,6 +8,19 @@ let cachedForUser = ''
 let brandRequest = null
 const STAFF_ROLES = new Set(['admin', 'agent', 'pod_lead'])
 
+export const LAANI_BRAND_ID = '0b7d7744-a847-4fb7-a54c-771ca0f1b98e'
+
+export const isLaaniBrand = (brandOrName) => {
+  if (!brandOrName) return false
+  if (typeof brandOrName === 'string') {
+    const s = brandOrName.trim().toLowerCase()
+    return s === 'laani' || s === LAANI_BRAND_ID
+  }
+  const id = String(brandOrName?.id || '').toLowerCase()
+  const name = String(brandOrName?.name || '').trim().toLowerCase()
+  return name === 'laani' || id === LAANI_BRAND_ID
+}
+
 async function currentBrandAccess() {
   if (!supabase) return { isStaff: false, brandIds: [], cacheKey: 'no-supabase' }
   try {

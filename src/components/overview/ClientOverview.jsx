@@ -22,10 +22,11 @@ import { loadFeedback } from '../../lib/feedbackData'
 import { StatCard, num, percent } from '../analytics/parts'
 import Button from '../ui/Button'
 import Skeleton from '../ui/Skeleton'
+import LaaniOverview from './LaaniOverview'
 
 const CHANNELS = { zoko: 'WhatsApp', instagram: 'Instagram', facebook: 'Facebook' }
 
-export default function ClientOverview({ overview = {} }) {
+function StandardClientOverview({ overview = {} }) {
   const { user, isAdmin } = useAuth()
   const { brand, brandId, brandName, agentName } = useBrand()
   const usable = Boolean(brandId) && !brand?.isPlaceholder
@@ -224,4 +225,16 @@ export default function ClientOverview({ overview = {} }) {
       </div>
     </div>
   )
+}
+
+export default function ClientOverview({ overview = {} }) {
+  const { isLaani } = useBrand()
+
+  // For the Laani brand, render the simplified business landing page without conversation analytics.
+  if (isLaani) {
+    return <LaaniOverview overview={overview} />
+  }
+
+  // Other client brands retain their standard conversation & store overview.
+  return <StandardClientOverview overview={overview} />
 }

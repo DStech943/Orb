@@ -42,11 +42,11 @@ export default function AppRoutes() {
         <Route path="/signup" element={<BrutalStyle><Signup /></BrutalStyle>} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
-            {/* Feedback pages are open to brand members as well as staff. */}
-            <Route path="/app/feedback" element={<Feedback />} />
-            <Route path="/app/reports/:brandId/:feedbackId" element={<AgentReport />} />
             <Route element={<ClientWorkspaceRoute />}>
               <Route path="/app" element={<Overview />} />
+              {/* Feedback pages are open to brand members as well as staff. */}
+              <Route path="/app/feedback" element={<Feedback />} />
+              <Route path="/app/reports/:brandId/:feedbackId" element={<AgentReport />} />
               <Route path="/app/performance" element={<AiPerformance defaultTab="overview" />} />
               <Route path="/app/performance/messages" element={<AiPerformance defaultTab="messages" />} />
               <Route path="/app/performance/satisfaction" element={<AiPerformance defaultTab="satisfaction" />} />

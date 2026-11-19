@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { invalidateBrandCache, listBrands } from '../services/brands'
+import { invalidateBrandCache, isLaaniBrand, listBrands } from '../services/brands'
 import { useAuth } from './AuthContext'
 
 /**
@@ -75,9 +75,6 @@ export function BrandProvider({ children }) {
       ai_agent_name: fallbackAgent,
       ai_agent_configured: true,
       isFallback: true,
-      // Only a brand with nothing remembered at all is a placeholder; a remembered brand is real
-      // and is used straight away while the list loads (the server checks access regardless).
-      isPlaceholder: !(selectedId || readStored()),
     }
   }, [brands, selectedId])
 
@@ -107,6 +104,7 @@ export function BrandProvider({ children }) {
       brandId: brand?.id || '',
       brandName: brand?.name || '',
       agentName: String(brand?.ai_agent_name || '').trim() || 'AI',
+      isLaani: isLaaniBrand(brand),
       loading,
       error,
       // The list is already limited to the user's accessible brands by the API.
