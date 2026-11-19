@@ -35,8 +35,10 @@ const timeLabel = (date) =>
   new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
 
 const choiceClass = (active) =>
-  `rounded-md border-2 border-ink px-3 py-2 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-purple ${
-    active ? "bg-primary text-white" : "bg-white hover:bg-primary-tint"
+  `group relative rounded-xl border p-3 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 ${
+    active
+      ? "border-primary bg-primary text-white shadow-sm ring-1 ring-primary"
+      : "border-line bg-white text-ink hover:border-primary/40 hover:bg-subtle/50"
   }`;
 
 export default function ReportIssueModal({
@@ -126,72 +128,118 @@ export default function ReportIssueModal({
   };
 
   return (
-    <Modal open={open} onClose={close} title="Report an issue" maxWidth="max-w-2xl">
-      <form className="grid gap-5" onSubmit={submit} noValidate>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-2 border-purple/30 bg-peach p-3 text-sm">
-          <p className="font-extrabold">{brandName || "Selected brand"}</p>
-          <span className="text-xs text-muted">Agent: {agentName}</span>
-          <span className="text-xs text-muted">Session {String(sessionId || "").slice(-8)}</span>
+    <Modal
+      open={open}
+      onClose={close}
+      title="Report an issue"
+      maxWidth="max-w-2xl"
+      footer={
+        <div>
+          {error && (
+            <p role="alert" className="mb-3 rounded-lg border border-danger/25 bg-danger-tint px-3 py-2 text-xs font-medium text-danger">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-fg-muted leading-relaxed">
+              The conversation and session details will be saved with this report.
+            </p>
+            <div className="flex shrink-0 items-center justify-end gap-2.5">
+              <Button type="button" variant="secondary" size="sm" onClick={close} disabled={sending}>
+                Cancel
+              </Button>
+              <Button form="report-issue-form" type="submit" variant="primary" size="sm" disabled={sending}>
+                {sending ? <Loader2 size={14} className="animate-spin" /> : <Flag size={14} />}
+                {sending ? "Sending…" : "Send to team"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <form id="report-issue-form" className="grid gap-4" onSubmit={submit} noValidate>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-canvas p-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-xs font-semibold text-primary">
+              {(brandName || "Brand").charAt(0).toUpperCase()}
+            </div>
+            <span className="text-sm font-semibold text-ink">{brandName || "Selected brand"}</span>
+            <span className="text-xs text-fg-muted">·</span>
+            <span className="text-xs text-fg-muted">Agent: <strong className="font-medium text-ink">{agentName}</strong></span>
+          </div>
+          <span className="rounded-md bg-subtle px-2 py-0.5 text-[11px] font-mono text-fg-muted">
+            Session {String(sessionId || "").slice(-8)}
+          </span>
         </div>
 
         {targetMessage && (
-          <div className="grid gap-2 border-2 border-ink/20 bg-white p-3">
+          <div className="grid gap-1.5 rounded-xl border border-primary/25 bg-primary-tint/30 p-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-extrabold uppercase tracking-wider text-purple">Reply you're reporting</p>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-primary">Reported AI Reply</p>
               <button
                 type="button"
                 onClick={onClearTarget}
-                className="text-xs font-bold text-muted underline-offset-2 hover:text-ink hover:underline"
+                className="text-xs font-medium text-fg-muted underline-offset-2 hover:text-ink hover:underline"
               >
-                Report the whole chat instead
+                Report whole chat instead
               </button>
             </div>
-            <p className="line-clamp-3 whitespace-pre-wrap text-sm text-slate-700">{targetMessage.text}</p>
+            <p className="line-clamp-3 whitespace-pre-wrap text-xs leading-5 text-ink/80">{targetMessage.text}</p>
           </div>
         )}
 
         <fieldset className="grid gap-2" disabled={sending}>
-          <legend className="text-sm font-bold">
-            What went wrong? <span className="text-red-700" aria-hidden="true">*</span>
+          <legend className="text-xs font-semibold text-ink">
+            What went wrong? <span className="text-danger" aria-hidden="true">*</span>
           </legend>
           <div role="radiogroup" aria-label="Issue category" className="grid gap-2 sm:grid-cols-2">
-            {ISSUE_CATEGORIES.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="radio"
-                aria-checked={category === item.id}
-                aria-label={`${item.label}. ${item.hint}`}
-                onClick={() => setCategory(item.id)}
-                className={choiceClass(category === item.id)}
-              >
-                <span className="block text-sm font-extrabold">{item.label}</span>
-                <span className={`block text-xs font-medium ${category === item.id ? "text-white/80" : "text-muted"}`}>
-                  {item.hint}
-                </span>
-              </button>
-            ))}
+            {ISSUE_CATEGORIES.map((item) => {
+              const active = category === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  aria-label={`${item.label}. ${item.hint}`}
+                  onClick={() => setCategory(item.id)}
+                  className={choiceClass(active)}
+                >
+                  <span className={`block text-xs font-semibold ${active ? "text-white" : "text-ink"}`}>{item.label}</span>
+                  <span className={`mt-0.5 block text-[11px] leading-4 ${active ? "text-white/80" : "text-fg-muted"}`}>
+                    {item.hint}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </fieldset>
 
         <fieldset className="grid gap-2" disabled={sending}>
-          <legend className="text-sm font-bold">How serious is it?</legend>
-          <div role="radiogroup" aria-label="Severity" className="grid grid-cols-3 gap-2">
-            {SEVERITIES.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="radio"
-                aria-checked={severity === item.id}
-                onClick={() => setSeverity(item.id)}
-                className={`${choiceClass(severity === item.id)} text-center font-extrabold`}
-              >
-                {item.label}
-              </button>
-            ))}
+          <legend className="text-xs font-semibold text-ink">How serious is it?</legend>
+          <div role="radiogroup" aria-label="Severity" className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-subtle/50 p-1">
+            {SEVERITIES.map((item) => {
+              const active = severity === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setSeverity(item.id)}
+                  className={`rounded-lg py-1.5 text-center text-xs font-semibold transition-all duration-150 ${
+                    active
+                      ? "bg-white text-ink shadow-sm ring-1 ring-black/5"
+                      : "text-fg-muted hover:text-ink"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
           {severity === "high" && (
-            <p className="text-xs text-muted">High severity is flagged more prominently for the team in Slack.</p>
+            <p className="text-xs text-warning">High severity is flagged for immediate review.</p>
           )}
         </fieldset>
 
@@ -215,73 +263,49 @@ export default function ReportIssueModal({
         />
 
         <section className="grid gap-2" aria-label="Notify teammates">
-          <p className="text-sm font-bold">
-            Notify teammates <span className="font-medium text-muted">(optional)</span>
+          <p className="text-xs font-semibold text-ink">
+            Notify teammates <span className="font-normal text-fg-muted">(optional)</span>
           </p>
           <TeammatePicker brandId={brandId} active={open} value={tagged} onChange={setTagged} disabled={sending} variant="modal" />
         </section>
 
-        <section className="border-2 border-ink/20 bg-white" aria-label="Attached conversation">
+        <section className="rounded-xl border border-line bg-white overflow-hidden" aria-label="Attached conversation">
           <button
             type="button"
             onClick={() => setShowTranscript((value) => !value)}
             aria-expanded={showTranscript}
-            className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+            className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left transition hover:bg-subtle/40"
           >
-            <span className="text-sm font-bold">
+            <span className="text-xs font-semibold text-ink">
               Conversation attached
-              <span className="ml-2 font-medium text-muted">
+              <span className="ml-2 font-normal text-fg-muted">
                 {transcript.length} message{transcript.length === 1 ? "" : "s"}
                 {trimmedCount > 0 ? ` (latest ${MAX_MESSAGES} of ${transcript.length + trimmedCount})` : ""}
               </span>
             </span>
-            <ChevronDown size={16} className={`shrink-0 transition ${showTranscript ? "rotate-180" : ""}`} />
+            <ChevronDown size={15} className={`shrink-0 text-fg-muted transition-transform duration-200 ${showTranscript ? "rotate-180" : ""}`} />
           </button>
           {showTranscript && (
-            <ol className="max-h-56 space-y-2 overflow-y-auto border-t-2 border-ink/10 bg-slate-50 p-3">
+            <ol className="max-h-48 space-y-2 overflow-y-auto thin-scroll border-t border-line bg-subtle/30 p-3">
               {transcript.map((message) => {
                 const flagged = targetMessage?.id === message.id;
                 return (
                   <li
                     key={message.id}
-                    className={`border-2 bg-white p-2 text-xs ${flagged ? "border-orange" : "border-ink/10"}`}
+                    className={`rounded-lg border p-2 text-xs transition ${flagged ? "border-primary bg-primary-tint/20 ring-1 ring-primary/30" : "border-line bg-white"}`}
                   >
-                    <p className="mb-0.5 flex items-center gap-2 font-extrabold">
-                      {message.role === "user" ? "Tester" : agentName}
-                      <span className="font-medium text-muted">{timeLabel(new Date(message.created_at))}</span>
-                      {flagged && <span className="ml-auto text-orange">Reported reply</span>}
+                    <p className="mb-0.5 flex items-center gap-2 font-semibold text-ink">
+                      {message.role === "user" ? "You" : agentName}
+                      <span className="font-normal text-fg-muted">{timeLabel(new Date(message.created_at))}</span>
+                      {flagged && <span className="ml-auto text-[11px] font-medium text-primary">Reported reply</span>}
                     </p>
-                    <p className="line-clamp-4 whitespace-pre-wrap text-slate-700">{message.text}</p>
+                    <p className="line-clamp-4 whitespace-pre-wrap text-ink/80">{message.text}</p>
                   </li>
                 );
               })}
             </ol>
           )}
         </section>
-
-        {/* The footer is pinned, so an error shown inside it is always visible,
-            even when the tester has scrolled to the middle of the form. */}
-        <div className="sticky bottom-0 grid gap-3 border-t-2 border-ink/10 bg-white pt-4">
-          {error && (
-            <p role="alert" className="border-2 border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-              {error}
-            </p>
-          )}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="max-w-xs text-xs text-muted">
-              The full conversation and session ID are saved with this report and shared with the team on Slack.
-            </p>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={close} disabled={sending}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="purple" disabled={sending}>
-                {sending ? <Loader2 size={16} className="animate-spin" /> : <Flag size={16} />}
-                {sending ? "Sending…" : "Send to team"}
-              </Button>
-            </div>
-          </div>
-        </div>
       </form>
     </Modal>
   );

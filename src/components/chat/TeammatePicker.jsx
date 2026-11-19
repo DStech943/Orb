@@ -8,16 +8,16 @@ import { listBrandSlackPeople } from "../../services/orbApi";
 // from Orb; Slack user ids never reach the browser, only Orb's own directory ids do.
 const STYLES = {
   modal: {
-    chip: "inline-flex items-center gap-1 rounded-full border-2 border-ink bg-primary-tint py-0.5 pl-2.5 pr-1.5 text-xs font-bold hover:bg-white",
-    search: "flex items-center gap-2 rounded-md border-2 border-ink bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-purple",
-    list: "max-h-40 overflow-y-auto border-2 border-ink/20 bg-white",
-    row: "px-3 py-2 hover:bg-primary-tint",
-    rowOn: "bg-primary-tint/60",
-    name: "text-sm font-bold",
-    sub: "text-xs text-muted",
-    box: "h-5 w-5 border-2 border-ink",
-    boxOn: "bg-primary text-white",
-    note: "border-2 border-dashed border-ink/25 bg-slate-50 p-3 text-xs text-muted",
+    chip: "inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary-tint/70 py-0.5 pl-2.5 pr-1.5 text-xs font-semibold text-primary hover:bg-primary-tint",
+    search: "flex items-center gap-2 rounded-control border border-line bg-white px-3 py-2 text-sm transition-[border-color,box-shadow] duration-150 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10",
+    list: "max-h-36 overflow-y-auto thin-scroll rounded-control border border-line bg-white divide-y divide-line/60 shadow-xs",
+    row: "px-3 py-2 transition-colors hover:bg-subtle",
+    rowOn: "bg-primary-tint/40",
+    name: "text-xs font-semibold text-ink",
+    sub: "text-[11px] text-fg-muted",
+    box: "h-4 w-4 rounded border border-line-strong transition-colors",
+    boxOn: "border-primary bg-primary text-white",
+    note: "rounded-lg border border-dashed border-line bg-subtle/40 p-2.5 text-xs text-fg-muted",
     avatar: "!h-7 !w-7 shrink-0 !rounded-full !text-[10px]",
   },
   compact: {

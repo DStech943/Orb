@@ -2,12 +2,8 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
-  CheckCircle2,
   FlaskConical,
   MessageSquare,
-  Radio,
-  Smartphone,
-  Sparkles,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useBrand } from '../../context/BrandContext'
@@ -59,9 +55,8 @@ export default function LaaniOverview({ overview = {} }) {
             </div>
           </div>
           <p className="mt-4 text-sm leading-relaxed text-ink/85">
-            Your AI assistant {effectiveAgentName} is active and connected to your customer
-            channels. Test your assistant in the interactive playground or collaborate directly with
-            the team in Chatspace.
+            Test your assistant in the interactive playground or collaborate directly with the team
+            in Chatspace.
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Link to="/app/chat">
@@ -139,50 +134,6 @@ export default function LaaniOverview({ overview = {} }) {
                   <ArrowRight size={13} />
                 </Button>
               </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Assistant Status & Details */}
-      <section className="space-y-3">
-        <div>
-          <h3 className="font-display text-lg font-medium text-ink">
-            Assistant <em>Configuration</em>
-          </h3>
-          <p className="text-xs text-fg-muted">Live assistant details and connected channel</p>
-        </div>
-
-        <div className="rounded-card border border-line bg-surface p-6 shadow-card">
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-line">
-            <div className="pt-2 sm:pt-0 sm:pr-4">
-              <div className="flex items-center gap-2 text-xs font-semibold text-fg-muted uppercase tracking-wider">
-                <Radio size={14} className="text-success" />
-                <span>System Status</span>
-              </div>
-              <p className="mt-2 text-base font-bold text-success flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-success inline-block" />
-                Active & Responding
-              </p>
-              <p className="mt-1 text-xs text-fg-muted">Connected to live customer channels</p>
-            </div>
-
-            <div className="pt-4 sm:pt-0 sm:px-6">
-              <div className="flex items-center gap-2 text-xs font-semibold text-fg-muted uppercase tracking-wider">
-                <Smartphone size={14} className="text-primary" />
-                <span>Connected Channel</span>
-              </div>
-              <p className="mt-2 text-base font-bold text-ink">WhatsApp</p>
-              <p className="mt-1 text-xs text-fg-muted">+91 92655 33103</p>
-            </div>
-
-            <div className="pt-4 sm:pt-0 sm:pl-6">
-              <div className="flex items-center gap-2 text-xs font-semibold text-fg-muted uppercase tracking-wider">
-                <Sparkles size={14} className="text-amber-500" />
-                <span>Industry Scope</span>
-              </div>
-              <p className="mt-2 text-base font-bold text-ink">Beauty & Personal Care</p>
-              <p className="mt-1 text-xs text-fg-muted">Skincare & product consultation</p>
             </div>
           </div>
         </div>

@@ -3,7 +3,15 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import useFocusTrap from '../../hooks/useFocusTrap'
 
-export default function Modal({ open, onClose, title, description, children, maxWidth = 'max-w-lg' }) {
+export default function Modal({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  footer,
+  maxWidth = 'max-w-lg',
+}) {
   const ref = useRef(null)
   useFocusTrap(ref, open, onClose)
   if (!open || typeof document === 'undefined') return null
@@ -20,9 +28,9 @@ export default function Modal({ open, onClose, title, description, children, max
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className={`my-8 flex max-h-[90vh] w-full ${maxWidth} animate-pop-in flex-col glass-float rounded-2xl p-6`}
+        className={`my-8 flex max-h-[90vh] w-full ${maxWidth} animate-pop-in flex-col glass-float overflow-hidden rounded-2xl`}
       >
-        <div className="mb-4 flex shrink-0 items-start justify-between gap-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 p-6 pb-4">
           <div>
             <h2 id="modal-title" className="font-display text-xl font-medium">{title}</h2>
             {description && <p className="mt-1 text-sm text-fg-muted">{description}</p>}
@@ -31,7 +39,12 @@ export default function Modal({ open, onClose, title, description, children, max
             <X size={18} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        <div className={`min-h-0 flex-1 overflow-y-auto thin-scroll px-6 ${footer ? 'pb-2' : 'pb-6'}`}>{children}</div>
+        {footer && (
+          <div className="shrink-0 border-t border-line bg-white/95 px-6 py-4 backdrop-blur-sm">
+            {footer}
+          </div>
+        )}
       </section>
     </div>,
     document.body,
