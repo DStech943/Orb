@@ -179,8 +179,6 @@ export default function AgentChat({ embedded = false }) {
 
   useEffect(() => {
     setAgentNameOverride(null);
-    // Tagged teammates belong to one brand's team.
-    setNoteTagged([]);
   }, [activeBrand?.id]);
 
   useEffect(() => {
