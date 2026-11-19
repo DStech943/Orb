@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Orb from "../components/Orb";
 import ReportIssueModal, { issueCategoryLabel } from "../components/chat/ReportIssueModal";
+import ChatMessageText from "../components/chat/ChatMessageText";
 import Avatar from "../components/ui/Avatar";
 import { buildTranscript, newIdempotencyKey } from "../lib/transcript";
 import { timeAgo } from "../lib/format";
@@ -600,7 +601,7 @@ export default function AgentChat({ embedded = false }) {
                   <div
                     className={`max-w-[78%] px-4 py-3 text-[15px] leading-6 shadow-sm sm:max-w-[68%] ${message.role === "user" ? "rounded-2xl rounded-br-sm bg-primary text-white" : "rounded-2xl rounded-bl-sm border border-line bg-white text-ink"}`}
                   >
-                    <p className="whitespace-pre-wrap">{message.text}</p>
+                    <ChatMessageText text={message.text} isUser={message.role === "user"} />
                     <p
                       className={`mt-1 text-[10px] ${message.role === "user" ? "text-white/65" : "text-fg-muted"}`}
                     >

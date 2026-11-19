@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, CheckCircle2, Flag, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import Button from "../components/ui/Button";
 import { issueCategoryLabel } from "../components/chat/ReportIssueModal";
+import ChatMessageText from "../components/chat/ChatMessageText";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import {
@@ -277,7 +278,7 @@ export default function AgentReport() {
                       <span className="font-medium normal-case tracking-normal">{when(message.created_at)}</span>
                       {flagged && <span className="rounded bg-orange px-1.5 py-0.5 text-ink">Reported reply</span>}
                     </p>
-                    <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                    <ChatMessageText text={message.text} isUser={fromTester} />
                   </div>
                 </li>
               );
