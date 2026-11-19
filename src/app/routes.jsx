@@ -4,7 +4,6 @@ import ProtectedRoute from './ProtectedRoute'
 import ClientWorkspaceRoute from './ClientWorkspaceRoute'
 import AppLayout from '../layouts/AppLayout'
 import OrbLoader from '../components/ui/OrbLoader'
-import { BrutalStyle } from '../components/ui/UiStyle'
 
 const Landing = lazy(() => import('../pages/Landing'))
 const Login = lazy(() => import('../pages/Login'))
@@ -28,7 +27,7 @@ const Conversations = lazy(() => import('../pages/Conversations'))
 const BusinessIntelligence = lazy(() => import('../pages/BusinessIntelligence'))
 
 const Loading = () => (
-  <div className="min-h-screen bg-[#F7F8FC]">
+  <div className="public-shell">
     <OrbLoader label="Loading Orb" />
   </div>
 )
@@ -37,9 +36,9 @@ export default function AppRoutes() {
   return (
     <Suspense fallback={<Loading />}>
       <Routes>
-        <Route path="/" element={<BrutalStyle><Landing /></BrutalStyle>} />
-        <Route path="/login" element={<BrutalStyle><Login /></BrutalStyle>} />
-        <Route path="/signup" element={<BrutalStyle><Signup /></BrutalStyle>} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route element={<ClientWorkspaceRoute />}>
@@ -73,7 +72,7 @@ export default function AppRoutes() {
             </Route>
           </Route>
         </Route>
-        <Route path="*" element={<BrutalStyle><NotFound /></BrutalStyle>} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   )

@@ -520,3 +520,31 @@ body.in-app ol[class*="bg-ink"]:not([class*="rounded"]):not(.glass-pane):not(.gl
    warm card behind it, so no white rectangle shows. Cut-out photos keep their soft shadow. */
 .overview-product-card--raw { mix-blend-mode: multiply; }
 .overview-product-card--raw .overview-product-art { filter: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PUBLIC PAGES — landing, sign in, sign up and 404 share the signed-in app's look:
+   the same warm mesh canvas and the same glass cards (the app-only rules above are
+   scoped to `.app-shell main`, so these classes expose them elsewhere).
+   ══════════════════════════════════════════════════════════════════════════ */
+.public-shell { min-height: 100vh; background: var(--app-canvas); background-attachment: fixed; }
+.glass-card {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur-card);
+  -webkit-backdrop-filter: var(--glass-blur-card);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: var(--glass-edge), var(--glass-depth-1);
+  border-radius: 14px;
+  transition: box-shadow 180ms ease, transform 180ms ease, border-color 180ms ease;
+}
+.glass-card--lift:hover { transform: translateY(-2px); box-shadow: var(--glass-edge), var(--glass-depth-2); border-color: rgba(99, 91, 255, .22); }
+.glass-card--accent {
+  background: linear-gradient(145deg, #7A70FF 0%, #4F46E5 100%);
+  border-color: rgba(255, 255, 255, .25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 24px 56px -20px rgba(79, 70, 229, .65);
+  color: #fff;
+}
+.public-shell section[id] { scroll-margin-top: 5.5rem; }
+@media (prefers-reduced-transparency: reduce) {
+  .public-shell { background: #FFFAF3; }
+  .glass-card { background: #fff; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

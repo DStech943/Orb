@@ -163,7 +163,15 @@ export default function Sidebar({ mobile = false, onClose, collapsed = false, on
     <aside className={`flex h-full w-full flex-col overflow-hidden transition-[padding] duration-200 ${mobile ? 'bg-white/90' : 'glass-pane border-r'} ${isCollapsed ? 'px-2.5' : 'px-3'}`}>
       <div className={`flex shrink-0 items-center ${isCollapsed ? 'h-12' : 'h-14'} ${isCollapsed ? 'justify-center' : 'justify-between px-1'}`}>
         <NavLink to="/app" className="orb-wordmark text-xl font-extrabold tracking-tight text-ink" aria-label="Orb home">
-          {isCollapsed ? <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/80 text-lg shadow-sm">O<span className="text-primary">.</span></span> : <>Orb<span className="text-primary">.</span></>}
+          {isCollapsed ? (
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-line/60 bg-white shadow-sm transition hover:border-primary/30 hover:shadow-md">
+              <span className="inline-flex items-baseline text-lg font-extrabold leading-none tracking-tight text-ink">
+                O<span className="text-primary">.</span>
+              </span>
+            </span>
+          ) : (
+            <>Orb<span className="text-primary">.</span></>
+          )}
         </NavLink>
         {mobile ? (
           <button type="button" aria-label="Close navigation" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-fg-muted hover:bg-subtle hover:text-ink">

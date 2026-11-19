@@ -1,5 +1,36 @@
-import React from 'react'
-import { Link } from 'react-router-dom'
-import Doodle from '../components/ui/Doodle'
-import Button from '../components/ui/Button'
-export default function NotFound() { return <main className="grid min-h-screen place-items-center bg-peach px-4 text-center"><section className="max-w-md border-2 border-ink bg-white p-8 shadow-brutal-lg"><Doodle variant="loops" className="mx-auto h-20 w-20 text-purple" /><p className="mt-5 text-xs font-extrabold uppercase tracking-widest text-purple">404</p><h1 className="mt-2 text-4xl font-extrabold">This page drifted out of Orbit.</h1><p className="mt-4 text-sm text-muted">The link may be old, or the page may not exist yet.</p><Button href="/app" className="mt-6">Back to dashboard</Button><p className="mt-4 text-xs"><Link to="/" className="font-bold underline">Return home</Link></p></section></main> }
+import React from "react";
+import { Link } from "react-router-dom";
+import { Compass } from "lucide-react";
+import Button from "../components/ui/Button";
+
+export default function NotFound() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-canvas p-4 text-center">
+      <div className="relative mx-auto w-full max-w-md rounded-3xl border border-line bg-white p-8 shadow-card sm:p-10">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary-tint text-primary shadow-xs">
+          <Compass size={28} />
+        </div>
+        <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-primary">
+          404 Not Found
+        </p>
+        <h1 className="mt-2 font-display text-2xl font-normal text-ink sm:text-3xl">
+          This page drifted out of <em>Orbit</em>.
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-fg-muted">
+          The link may be broken, or the page may have been moved or archived.
+        </p>
+        <div className="mt-7 flex flex-col gap-2.5">
+          <Button href="/app" variant="primary" size="md" className="w-full">
+            Back to dashboard
+          </Button>
+          <Link
+            to="/"
+            className="text-xs font-semibold text-fg-muted transition hover:text-ink"
+          >
+            Return to homepage
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
