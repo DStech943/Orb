@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Check, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import Button from '../ui/Button'
@@ -513,11 +513,11 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
     })
   }, [data, isProduct, productSort, query, status])
 
-  const openItem = (item) => {
+  const openItem = useCallback((item) => {
     scrollPosition.current = window.scrollY
     setSelected(item)
     setConfirm(false)
-  }
+  }, [])
 
   useLayoutEffect(() => {
     if (!selected) return undefined
@@ -602,14 +602,17 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
     if (field) showToast(`Draft added to ${metafieldDisplayName(field)}. It has not been saved to Shopify.`)
   }
 
-  const columns = isSop
+  // Columns, the row click handler and the table are kept referentially stable so that typing in
+  // the open editor does not re-render every row of the list sitting behind it.
+  const columns = useMemo(() => {
+  const base = isSop
     ? [{ key: 'title', label: 'Title / situation', render: (item) => <div><strong>{item.title}</strong><p className="text-xs text-muted">{item.situation}</p></div> }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated', render: (item) => <div className="whitespace-nowrap"><p className="text-sm font-medium text-ink">{formatUpdatedAt(item.updated)}</p><p className="mt-0.5 text-xs text-muted">by {updatedByLabel(item)}</p></div> }]
     : isProduct
-      ? [{ key: 'name', label: 'Product', render: (item) => { const image = productThumbnail(item); return <div className="flex min-w-[220px] items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">{image ? <img src={image} alt="" className="h-full w-full object-cover" /> : <span className="h-4 w-4 rounded bg-slate-200" />}</span><strong className="line-clamp-2 text-sm text-ink">{item.name || 'Untitled product'}</strong></div> } }, { key: 'status', label: 'Status', render: (item) => { const active = String(item.status || '').toLowerCase() === 'active'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{item.status ? String(item.status).charAt(0).toUpperCase() + String(item.status).slice(1).toLowerCase() : '—'}</span> } }, { key: 'inventory', label: 'Inventory', render: (item) => <span className="whitespace-nowrap text-sm text-slate-700">{productInventory(item)}</span> }, { key: 'price', label: 'Price', render: (item) => <span className="whitespace-nowrap text-sm font-semibold text-ink">{productPrice(item)}</span> }]
+      ? [{ key: 'name', label: 'Product', render: (item) => { const image = productThumbnail(item); return <div className="flex min-w-[220px] items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">{image ? <img src={image} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" /> : <span className="h-4 w-4 rounded bg-slate-200" />}</span><strong className="line-clamp-2 text-sm text-ink">{item.name || 'Untitled product'}</strong></div> } }, { key: 'status', label: 'Status', render: (item) => { const active = String(item.status || '').toLowerCase() === 'active'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{item.status ? String(item.status).charAt(0).toUpperCase() + String(item.status).slice(1).toLowerCase() : '—'}</span> } }, { key: 'inventory', label: 'Inventory', render: (item) => <span className="whitespace-nowrap text-sm text-slate-700">{productInventory(item)}</span> }, { key: 'price', label: 'Price', render: (item) => <span className="whitespace-nowrap text-sm font-semibold text-ink">{productPrice(item)}</span> }]
       : [{ key: 'question', label: 'Question', render: (item) => <strong>{item.question}</strong> }, { key: 'status', label: 'Status', render: (item) => <StatusChip status={item.status} /> }, { key: 'source', label: 'Source' }, { key: 'updated', label: 'Updated', render: (item) => <div className="whitespace-nowrap"><p className="text-sm font-medium text-ink">{formatUpdatedAt(item.updated)}</p><p className="mt-0.5 text-xs text-muted">by {updatedByLabel(item)}</p></div> }]
 
   if (isProduct && trackedVariantMetafield?.field) {
-    columns.push({
+    base.push({
       key: 'tracked_variant_metafield',
       label: trackedVariantMetafield.label || 'Metafield',
       render: (item) => {
@@ -622,11 +625,15 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
       },
     })
   }
+  return base
+  }, [isSop, isProduct, trackedVariantMetafield]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectableColumns = useMemo(() => (isProduct || isReadOnly ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]), [columns, isProduct, isReadOnly, checked]) // eslint-disable-line react-hooks/exhaustive-deps
+  const mobileCard = useCallback((item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>, [isProduct])
 
   if (loading) return <OrbLoader label={`Loading ${title}`} />
   if (error) return <KnowledgeAccessState error={error} title={title} onRetry={reload} />
 
-  const selectableColumns = isProduct || isReadOnly ? columns : [{ key: 'select', label: '', render: (item) => <input aria-label={`Select ${item.title || item.question}`} type="checkbox" checked={checked.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggle(item.id)} /> }, ...columns]
   const matchingAssistantDraft = isProduct && selected && assistantDraft?.message && productMatchesAssistantDraft(selected, assistantDraft)
   const productEditor = <>{matchingAssistantDraft ? <ProductMetafieldDraftReview product={selected} draft={assistantDraft} onApply={applyAssistantDraftToMetafield} /> : null}<ShopifyProductWorkspace product={selected || {}} onChange={setSelected} loadVariantMetafields={loadVariantMetafields} loadThemeTemplates={loadThemeTemplates} saveVariantMetafields={saveVariantMetafields} onReload={reload} /></>
   const footer = selected && (
@@ -674,7 +681,7 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
         {extraFilterAction}
       </div>
       {!isReadOnly && !isProduct && rows.length > 0 && <div className="mt-4 flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" onClick={() => checked.length === rows.length && rows.every((item) => checked.includes(item.id)) ? setChecked([]) : selectAllVisible()}>{checked.length === rows.length && rows.every((item) => checked.includes(item.id)) ? 'Clear selection' : `Select all (${rows.length})`}</Button>{checked.length > 0 && <Button variant="outline" size="sm" onClick={() => setConfirm(true)}><Trash2 size={15} />Delete selected ({checked.length})</Button>}</div>}
-      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={(item) => <><strong>{item.title || item.question || item.name}</strong><p className="mt-2 text-xs text-muted">{item.category || item.description || 'Product information'}</p>{!isProduct && <StatusChip status={item.status} />}</>} /> : <EmptyState title={isFaq ? 'Your agent is ready to learn' : isSop ? 'Give your agent your business processes' : `No ${title} yet`} description={isFaq ? 'Start by adding your first frequently asked question.' : isSop ? 'Give your agent access to your business processes by adding your first SOP.' : ''} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
+      <div className="mt-5">{rows.length ? <DataTable columns={selectableColumns} rows={rows} onRowClick={openItem} mobileCard={mobileCard} /> : <EmptyState title={isFaq ? 'Your agent is ready to learn' : isSop ? 'Give your agent your business processes' : `No ${title} yet`} description={isFaq ? 'Start by adding your first frequently asked question.' : isSop ? 'Give your agent access to your business processes by adding your first SOP.' : ''} action={!isReadOnly ? (isProduct ? 'Generate content' : (isFaq ? 'Add FAQ' : 'Add SOP')) : undefined} onAction={!isReadOnly ? (isProduct ? () => navigate('/app?generate=1') : createBlank) : undefined} secondaryAction={!isReadOnly && !isProduct ? 'Bulk upload' : undefined} onSecondaryAction={!isReadOnly && !isProduct ? () => setBulkUploadOpen(true) : undefined} />}</div>
     </section>
     <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={isProduct ? 'Products' : isNewItem ? (isFaq ? 'New FAQ' : 'New SOP') : selected?.title || selected?.question || selected?.name || title} width="max-w-none" footer={footer}>{selected && <div className="detail-enter grid gap-4">{isSop ? <SopFlow sop={selected} onChange={isReadOnly ? undefined : setSelected} disabled={isReadOnly} /> : <div className="detail-enter">{isProduct ? productEditor : <div className="grid gap-4"><Input label="Question" disabled={isReadOnly} value={selected.question || ''} onChange={(event) => setSelected({ ...selected, question: event.target.value })} /><Textarea label="Answer" disabled={isReadOnly} value={selected.answer || ''} onChange={(event) => setSelected({ ...selected, answer: event.target.value })} /></div>}</div>}</div>}</Drawer>
     <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} onConfirm={deleteItems} title={selected || checked.length === 1 ? 'Delete this item?' : `Delete ${checked.length} items?`} description={selected || checked.length === 1 ? 'This item will be permanently removed from Qdrant.' : `These ${checked.length} selected items will be permanently removed from Qdrant.`} confirmLabel={selected || checked.length === 1 ? 'Delete' : 'Delete all selected'} />

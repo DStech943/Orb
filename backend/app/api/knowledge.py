@@ -199,6 +199,8 @@ class AgentFeedbackCreate(RequestModel):
     note: str = Field(default="", max_length=5_000)
     ideal_reply: str = Field(default="", max_length=5_000)
     conversation_history: list[dict[str, Any]] = Field(default_factory=list, max_length=250)
+    user_name: str = Field(default="", max_length=200)
+    user_email: str = Field(default="", max_length=320)
 
 
 class AgentFeedbackStatusPatch(RequestModel):
@@ -556,10 +558,13 @@ async def _supabase_rows(request: Request, table: str, params: dict[str, str]) -
 async def _supabase_service_rows(request: Request, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
     """Read a private table with the backend's service role, never the browser."""
     settings = request.app.state.settings
+    url = getattr(settings, "supabase_url", None)
+    if not url:
+        return []
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
-                f"{settings.supabase_url.rstrip('/')}/rest/v1/{table}",
+                f"{url.rstrip('/')}/rest/v1/{table}",
                 params=params,
                 headers=_supabase_service_headers(request),
             )
@@ -1787,9 +1792,24 @@ def _feedback_conversation_history(messages: list[dict[str, Any]]) -> list[dict[
     return history
 
 
-def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
+def _agent_feedback_out(row: dict[str, Any], user_info: dict[str, str] | None = None) -> dict[str, Any]:
     tags = row.get("tags") if isinstance(row.get("tags"), list) else []
     history = row.get("conversation_history") if isinstance(row.get("conversation_history"), list) else []
+    metadata = row.get("agent_metadata") if isinstance(row.get("agent_metadata"), dict) else {}
+
+    sub_name = (
+        str(row.get("submitted_by_name") or "").strip()
+        or (user_info.get("name") if user_info else "")
+        or str(metadata.get("user_name") or "").strip()
+    )
+    sub_email = (
+        str(row.get("submitted_by_email") or "").strip()
+        or (user_info.get("email") if user_info else "")
+        or str(metadata.get("user_email") or "").strip()
+    )
+    if not sub_name and sub_email:
+        sub_name = sub_email.split("@")[0].replace(".", " ").title()
+
     return {
         "id": str(row.get("id") or ""),
         "session_id": str(row.get("session_id") or ""),
@@ -1802,6 +1822,8 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
         "conversation_history": _feedback_conversation_history(history),
         "status": str(row.get("status") or "open"),
         "submitted_by": str(row.get("submitted_by") or ""),
+        "submitted_by_name": sub_name,
+        "submitted_by_email": sub_email,
         "created_at": row.get("created_at"),
         # Issue-report fields (migration 20261117). Plain feedback leaves them empty.
         "kind": str(row.get("kind") or "feedback"),
@@ -1823,7 +1845,103 @@ def _agent_feedback_out(row: dict[str, Any]) -> dict[str, Any]:
 # exactly these, so a migration that has not been applied yet degrades the list (it just lacks
 # the newer fields) instead of breaking it. Never add a migrated column here.
 _AGENT_FEEDBACK_LEGACY_COLUMNS = "id,submitted_by,session_id,scope,message_id,agent_reply,tags,note,ideal_reply,status,created_at"
-_AGENT_FEEDBACK_REPORT_COLUMNS = f"{_AGENT_FEEDBACK_LEGACY_COLUMNS},conversation_history,kind,category,severity,tagged_people,slack_delivery_status,slack_message_ts"
+_AGENT_FEEDBACK_REPORT_COLUMNS = f"{_AGENT_FEEDBACK_LEGACY_COLUMNS},conversation_history,kind,category,severity,tagged_people,slack_delivery_status,slack_message_ts,agent_metadata"
+
+
+async def _resolve_profiles_for_users(request: Request, user_ids: set[str], brand_id: str | None = None) -> dict[str, dict[str, str]]:
+    clean_ids = [uid for uid in user_ids if uid and uid != "None" and uid.strip()]
+    if not clean_ids:
+        return {}
+    results: dict[str, dict[str, str]] = {}
+    settings = request.app.state.settings
+
+    # 1. Look up user records in orb_profiles
+    try:
+        profiles = await _supabase_service_rows(
+            request,
+            "orb_profiles",
+            {"select": "id,full_name,email", "id": f"in.({','.join(clean_ids)})", "limit": str(max(len(clean_ids), 100))},
+        )
+        for row in profiles:
+            uid = str(row.get("id") or "").strip()
+            if uid:
+                results[uid] = {
+                    "name": str(row.get("full_name") or "").strip(),
+                    "email": str(row.get("email") or "").strip(),
+                }
+    except Exception as exc:
+        logger.warning("Could not batch resolve orb_profiles for feedback: %s", exc)
+
+    # 2. For users who signed in via Google Auth whose profile in orb_profiles lacks email or name,
+    # resolve them directly from Supabase Auth admin user records.
+    missing_ids = [uid for uid in clean_ids if not results.get(uid, {}).get("email") or not results.get(uid, {}).get("name")]
+    url = getattr(settings, "supabase_url", None)
+    service_key = getattr(settings, "supabase_service_role_key", None)
+    if missing_ids and url and service_key:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                for uid in missing_ids[:20]:
+                    res = await client.get(
+                        f"{url.rstrip('/')}/auth/v1/admin/users/{uid}",
+                        headers={
+                            "apikey": service_key,
+                            "Authorization": f"Bearer {service_key}",
+                        },
+                    )
+                    if res.status_code == 200:
+                        u_data = res.json()
+                        meta = u_data.get("user_metadata") if isinstance(u_data.get("user_metadata"), dict) else {}
+                        email = str(u_data.get("email") or meta.get("email") or "").strip()
+                        name = str(meta.get("full_name") or meta.get("name") or "").strip()
+                        if not name and email:
+                            name = email.split("@")[0].replace(".", " ").title()
+                        if uid not in results:
+                            results[uid] = {}
+                        if name and not results[uid].get("name"):
+                            results[uid]["name"] = name
+                        if email and not results[uid].get("email"):
+                            results[uid]["email"] = email
+        except Exception as exc:
+            logger.warning("Could not fetch user details from Supabase Auth admin: %s", exc)
+
+    # 3. Match against brand_assignments and admins by email for authoritative team/member names
+    emails = {info["email"].lower(): uid for uid, info in results.items() if info.get("email")}
+    if emails:
+        assignment_names: dict[str, str] = {}
+        admin_names: dict[str, str] = {}
+        try:
+            params = {"select": "name,email", "limit": "500"}
+            if brand_id:
+                params["brand_id"] = f"eq.{brand_id}"
+            assignments = await _supabase_service_rows(request, "brand_assignments", params)
+            for a in assignments:
+                em = str(a.get("email") or "").strip().lower()
+                nm = str(a.get("name") or "").strip()
+                if em and nm:
+                    assignment_names[em] = nm
+        except Exception as exc:
+            logger.warning("Could not read brand_assignments for feedback resolution: %s", exc)
+
+        try:
+            admins = await _supabase_service_rows(request, "admins", {"select": "name,email", "limit": "500"})
+            for a in admins:
+                em = str(a.get("email") or "").strip().lower()
+                nm = str(a.get("name") or "").strip()
+                if em and nm:
+                    admin_names[em] = nm
+        except Exception as exc:
+            logger.warning("Could not read admins for feedback resolution: %s", exc)
+
+        for email_lower, uid in emails.items():
+            name = (
+                assignment_names.get(email_lower)
+                or admin_names.get(email_lower)
+                or results[uid].get("name")
+                or email_lower.split("@")[0].replace(".", " ").title()
+            )
+            results[uid]["name"] = name
+
+    return results
 
 
 @router.get("/brands/{brand_id}/agent-feedback")
@@ -1857,7 +1975,20 @@ async def list_agent_feedback(
             raise
         params["select"] = _AGENT_FEEDBACK_LEGACY_COLUMNS
         rows = await _supabase_rows(request, "orb_agent_feedback", params)
-    return {"feedback": [_agent_feedback_out(row) for row in rows]}
+
+    user_ids = {str(row.get("submitted_by")) for row in rows if row.get("submitted_by")}
+    profiles = await _resolve_profiles_for_users(request, user_ids, brand_id=str(brand["id"]))
+    feedback_items = []
+    for row in rows:
+        sub_id = str(row.get("submitted_by") or "")
+        u_info = dict(profiles.get(sub_id, {}))
+        if str(user.id) == sub_id:
+            if not u_info.get("name") and user.name:
+                u_info["name"] = user.name
+            if not u_info.get("email") and user.email:
+                u_info["email"] = user.email
+        feedback_items.append(_agent_feedback_out(row, user_info=u_info))
+    return {"feedback": feedback_items}
 
 
 @router.post("/brands/{brand_id}/agent-feedback", status_code=status.HTTP_201_CREATED)
@@ -1873,31 +2004,59 @@ async def create_agent_feedback(
         raise HTTPException(status_code=422, detail="Reply feedback must include the AI response it refers to.")
     brand = await _remote_brand(request, brand_id)
     tags = list(dict.fromkeys(tag.strip()[:80] for tag in payload.tags if tag.strip()))
-    conversation_history = (
-        _feedback_conversation_history(payload.conversation_history)
-        if payload.scope == "conversation"
-        else []
-    )
-    rows = await _supabase_write(
-        request,
-        "POST",
-        "orb_agent_feedback",
-        payload={
-            "brand_id": brand["id"],
-            "submitted_by": str(user.id),
-            "session_id": payload.session_id,
-            "scope": payload.scope,
-            "message_id": payload.message_id.strip() or None,
-            "agent_reply": payload.agent_reply.strip(),
-            "tags": tags,
-            "note": payload.note.strip(),
-            "ideal_reply": payload.ideal_reply.strip(),
-            "conversation_history": conversation_history,
+    # Kept for reply feedback too, not only whole-conversation feedback: the team reads the
+    # surrounding chat from the feedback screen, and the agent's own session can be deleted.
+    conversation_history = _feedback_conversation_history(payload.conversation_history)
+    user_name = str(payload.user_name or user.name or "").strip()
+    user_email = str(payload.user_email or user.email or "").strip()
+    if not user_name or not user_email:
+        try:
+            resolved = await _resolve_profiles_for_users(request, {str(user.id)}, brand_id=str(brand["id"]))
+            u_info = resolved.get(str(user.id), {})
+            user_name = user_name or u_info.get("name", "")
+            user_email = user_email or u_info.get("email", "")
+        except Exception:
+            pass
+    if not user_name and user_email:
+        user_name = user_email.split("@")[0].replace(".", " ").title()
+
+    post_payload = {
+        "brand_id": brand["id"],
+        "submitted_by": str(user.id),
+        "session_id": payload.session_id,
+        "scope": payload.scope,
+        "message_id": payload.message_id.strip() or None,
+        "agent_reply": payload.agent_reply.strip(),
+        "tags": tags,
+        "note": payload.note.strip(),
+        "ideal_reply": payload.ideal_reply.strip(),
+        "conversation_history": conversation_history,
+        "agent_metadata": {
+            "user_name": user_name,
+            "user_email": user_email,
         },
-    )
+    }
+    try:
+        rows = await _supabase_write(
+            request,
+            "POST",
+            "orb_agent_feedback",
+            payload=post_payload,
+        )
+    except HTTPException as exc:
+        if exc.status_code == 503 and "agent_metadata" in str(exc.detail):
+            post_payload.pop("agent_metadata", None)
+            rows = await _supabase_write(
+                request,
+                "POST",
+                "orb_agent_feedback",
+                payload=post_payload,
+            )
+        else:
+            raise
     if not rows:
         raise HTTPException(status_code=503, detail="Supabase did not return the saved agent feedback.")
-    return {"feedback": _agent_feedback_out(rows[0])}
+    return {"feedback": _agent_feedback_out(rows[0], user_info={"name": user_name, "email": user_email})}
 
 
 @router.patch("/brands/{brand_id}/agent-feedback/{feedback_id}")

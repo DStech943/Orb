@@ -8,7 +8,7 @@ export default function Tabs({ tabs, active, onChange, label = 'Sections' }) {
     onChange(tabs[next].id)
   }
   return (
-    <div role="tablist" aria-label={label} className="flex gap-1 overflow-x-auto border-b border-line">
+    <div role="tablist" aria-label={label} className="mac-scroll flex gap-1 overflow-x-auto border-b border-line">
       {tabs.map((tab, index) => {
         const selected = active === tab.id
         return (

@@ -1,13 +1,12 @@
-import React, { Suspense, lazy } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import React, { Suspense, lazy, useEffect } from 'react'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import ProtectedRoute from './ProtectedRoute'
 import ClientWorkspaceRoute from './ClientWorkspaceRoute'
 import AppLayout from '../layouts/AppLayout'
 import OrbLoader from '../components/ui/OrbLoader'
 
 const Landing = lazy(() => import('../pages/Landing'))
-const Login = lazy(() => import('../pages/Login'))
-const Signup = lazy(() => import('../pages/Signup'))
+const Auth = lazy(() => import('../pages/Auth'))
 const Overview = lazy(() => import('../pages/Overview'))
 const Workspace = lazy(() => import('../pages/Workspace'))
 const ClientChat = lazy(() => import('../pages/ClientChat'))
@@ -32,13 +31,31 @@ const Loading = () => (
   </div>
 )
 
+// Once the app is idle, fetch the other dashboard pages in the background so the first visit
+// to each tab is instant. They are the same modules the lazy imports above resolve to.
+const preloadPages = () => Promise.allSettled([
+  import('../pages/Overview'), import('../pages/Workspace'), import('../pages/ClientChat'),
+  import('../pages/Operations'), import('../pages/AIsBrain'), import('../pages/AgentChat'),
+  import('../pages/Feedback'), import('../pages/Products'), import('../pages/FlowsSupabase'),
+  import('../pages/Templates'), import('../pages/Tools'), import('../pages/Settings'),
+  import('../pages/AiPerformance'), import('../pages/Conversations'), import('../pages/BusinessIntelligence'),
+])
+
 export default function AppRoutes() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (!pathname.startsWith('/app')) return undefined
+    const run = () => { preloadPages() }
+    if ('requestIdleCallback' in window) { const id = window.requestIdleCallback(run, { timeout: 4000 }); return () => window.cancelIdleCallback(id) }
+    const id = window.setTimeout(run, 1500)
+    return () => window.clearTimeout(id)
+  }, [pathname.startsWith('/app')]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
+        <Route path="/login" element={<Auth />} />
+        <Route path="/signup" element={<Auth />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route element={<ClientWorkspaceRoute />}>

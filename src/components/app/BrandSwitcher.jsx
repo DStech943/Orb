@@ -94,6 +94,8 @@ export default function BrandSwitcher({ collapsed = false }) {
   }
 
   const name = brand?.name || 'No workspace'
+  // Same card in both sidebar states: the avatar keeps its place and the text fades as the
+  // panel narrows, instead of swapping to a different layout.
   const trigger = (
     <button
       type="button"
@@ -101,23 +103,14 @@ export default function BrandSwitcher({ collapsed = false }) {
       aria-haspopup={canSwitch ? 'listbox' : undefined}
       aria-expanded={canSwitch ? open : undefined}
       aria-label={`Current workspace: ${name}${canSwitch ? '. Switch workspace' : ''}`}
-      className={`group flex w-full items-center gap-3 rounded-xl border border-line bg-white text-left shadow-card transition-[border-color,box-shadow] duration-150 ${canSwitch ? 'hover:border-primary/40 hover:shadow-pop' : 'cursor-default'} ${collapsed ? 'justify-center !border-transparent !bg-transparent !shadow-none p-0 hover:!bg-white/60' : 'p-2 pr-2.5'}`}
+      className={`mac-selected group flex w-full items-center gap-3 overflow-hidden rounded-[14px] p-1.5 pr-2.5 text-left transition-shadow duration-150 ${canSwitch ? 'hover:shadow-pop' : 'cursor-default'}`}
     >
-      <span className="relative shrink-0">
-        <Avatar name={name} shape="lg" className={`text-sm ${collapsed ? 'h-10 w-10 ring-2 ring-white shadow-md' : 'h-9 w-9'}`} />
-        {collapsed && canSwitch && (
-          <span aria-hidden="true" className="absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full border border-line bg-white text-fg-muted shadow-sm"><ChevronsUpDown size={9} /></span>
-        )}
+      <Avatar name={name} shape="lg" className="h-9 w-9 shrink-0 text-sm" />
+      <span aria-hidden={collapsed || undefined} className={`mac-fade min-w-0 flex-1 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+        <span className="block truncate whitespace-nowrap text-sm font-semibold leading-5 text-ink">{name}</span>
+        <span className="block truncate whitespace-nowrap text-xs leading-4 text-fg-muted">Brand workspace</span>
       </span>
-      {!collapsed && (
-        <>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold leading-5 text-ink">{name}</span>
-            <span className="block truncate text-xs leading-4 text-fg-muted">Brand workspace</span>
-          </span>
-          {canSwitch && <ChevronsUpDown size={16} className="shrink-0 text-fg-muted transition-colors group-hover:text-ink" aria-hidden="true" />}
-        </>
-      )}
+      {canSwitch && <ChevronsUpDown size={16} className={`mac-fade shrink-0 text-fg-muted transition-colors group-hover:text-ink ${collapsed ? 'opacity-0' : 'opacity-100'}`} aria-hidden="true" />}
     </button>
   )
 

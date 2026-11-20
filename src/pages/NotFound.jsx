@@ -1,36 +1,28 @@
-import React from "react";
-import { Link } from "react-router-dom";
-import { Compass } from "lucide-react";
-import Button from "../components/ui/Button";
+import React from 'react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
+import { FadeUp, RevealLines } from '../components/landing/primitives'
 
 export default function NotFound() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas p-4 text-center">
-      <div className="relative mx-auto w-full max-w-md rounded-3xl border border-line bg-white p-8 shadow-card sm:p-10">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary-tint text-primary shadow-xs">
-          <Compass size={28} />
+    <div className="lp relative grid min-h-[100svh] place-items-center overflow-hidden px-5 text-center">
+      <div aria-hidden="true" className="lp-grain" />
+      <div aria-hidden="true" className="lp-gridlines pointer-events-none absolute inset-0" />
+      <main className="relative">
+        <div aria-hidden="true" className="relative mx-auto flex items-center justify-center font-display text-[clamp(7rem,26vw,16rem)] font-[360] leading-none tracking-[-0.06em] text-ink">
+          4
+          <span className="lp-css-orb mx-[0.04em] inline-block h-[0.72em] w-[0.72em]"><span className="lp-css-orb__core" /></span>
+          4
         </div>
-        <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-primary">
-          404 Not Found
-        </p>
-        <h1 className="mt-2 font-display text-2xl font-normal text-ink sm:text-3xl">
-          This page drifted out of <em>Orbit</em>.
+        <h1 className="mt-4 font-display text-[clamp(2rem,5vw,3.25rem)] font-[380] leading-tight tracking-[-0.02em] text-ink">
+          <RevealLines delay={0.2} lines={[['This', 'page', 'drifted', 'out', 'of'], [{ em: 'orbit.' }]]} />
         </h1>
-        <p className="mt-3 text-sm leading-relaxed text-fg-muted">
-          The link may be broken, or the page may have been moved or archived.
-        </p>
-        <div className="mt-7 flex flex-col gap-2.5">
-          <Button href="/app" variant="primary" size="md" className="w-full">
-            Back to dashboard
-          </Button>
-          <Link
-            to="/"
-            className="text-xs font-semibold text-fg-muted transition hover:text-ink"
-          >
-            Return to homepage
-          </Link>
-        </div>
-      </div>
-    </main>
-  );
+        <FadeUp inView={false} delay={0.6} className="mx-auto mt-4 max-w-sm text-base leading-7 text-fg-muted">The link may be old, or the page may not exist yet.</FadeUp>
+        <FadeUp inView={false} delay={0.75} className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <Link to="/app" className="lp-btn-shine inline-flex h-12 items-center rounded-full bg-primary px-6 text-sm font-semibold text-white shadow-[0_18px_40px_-14px_rgba(99,91,255,0.9)] hover:bg-primary-dark">Back to dashboard</Link>
+          <Link to="/" className="inline-flex h-12 items-center gap-2 rounded-full border border-white/90 bg-white/70 px-5 text-sm font-semibold text-ink shadow-card hover:bg-white"><ArrowLeft size={15} aria-hidden="true" /> Return home</Link>
+        </FadeUp>
+      </main>
+    </div>
+  )
 }

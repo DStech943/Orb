@@ -28,7 +28,11 @@ from app.scraper.render import Renderer
 async def lifespan(app: FastAPI):
     settings = get_settings()
     app.state.settings = settings
-    app.state.db = await create_pool(settings)
+    try:
+        app.state.db = await create_pool(settings, max_attempts=2, connect_timeout=3)
+    except Exception as exc:
+        logging.getLogger("orb.api").warning("Database pool could not be initialized (%s). Running in offline/resilient mode.", exc)
+        app.state.db = None
     # Keep startup independent of the optional brand-content database. A
     # slow/unreachable Supabase connection must not make crawling, dashboard
     # polling, or health checks unavailable. Generation opens this pool only
@@ -45,7 +49,8 @@ async def lifespan(app: FastAPI):
         await app.state.fetcher.close()
         if app.state.generation_db is not None:
             await app.state.generation_db.close()
-        await app.state.db.close()
+        if app.state.db is not None:
+            await app.state.db.close()
 
 
 logger = logging.getLogger("orb.api")
@@ -84,5 +89,6 @@ app.include_router(chatspace_router)
 @app.get("/healthz")
 @app.get("/health")
 async def health(request: Request) -> dict[str, bool]:
-    await request.app.state.db.fetchval("SELECT 1")
+    if request.app.state.db is not None:
+        await request.app.state.db.fetchval("SELECT 1")
     return {"ok": True}

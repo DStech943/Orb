@@ -75,8 +75,8 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
         title="Assistant Intelligence & Outcomes"
         description={`How your customers' conversations with ${agentName} are going, from your real conversation data.`}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <DateRangeFilter value={range} onChange={setRange} />
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <DateRangeFilter value={range} onChange={setRange} className="w-full sm:w-auto" />
             <Button variant="secondary" size="sm" onClick={analytics.reload}>
               <RefreshCw size={14} className={analytics.status === 'loading' ? 'animate-spin' : ''} />
               Refresh
@@ -85,13 +85,13 @@ export default function AiPerformance({ defaultTab = 'overview' }) {
         }
       />
 
-      <div className="flex border-b border-line">
+      <div role="tablist" aria-label="Performance sections" className="grid grid-cols-2 gap-1 rounded-2xl border border-white/80 bg-white/60 p-1 shadow-card sm:inline-grid sm:grid-cols-4 sm:w-auto">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setParams({ tab: tab.id })}
-            className={`border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-fg-muted hover:border-line-strong hover:text-ink'}`}
+            role="tab" aria-selected={activeTab === tab.id} className={`rounded-xl px-3 py-2 text-center text-xs font-semibold leading-4 transition-colors sm:px-5 sm:text-sm ${activeTab === tab.id ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:bg-white hover:text-ink'}`}
           >
             {tab.label}
           </button>

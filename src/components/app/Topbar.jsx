@@ -55,8 +55,10 @@ export default function Topbar({ onMenu, collapsed = false, onToggleCollapse }) 
   const itemClass = 'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-ink transition-colors hover:bg-subtle'
 
   return (
-    <header className="glass-bar sticky top-0 z-20 border-b px-4 sm:px-6">
-      <div className="flex h-14 items-center gap-3">
+    // A floating glass toolbar (macOS 26): inset and rounded. AppLayout keeps it sticky
+    // 10px below the window edge.
+    <header className="mac-panel !rounded-[16px] px-3 sm:px-4">
+      <div className="flex h-[52px] items-center gap-3">
         <button type="button" className="grid h-9 w-9 place-items-center rounded-lg text-fg-muted hover:bg-subtle hover:text-ink lg:hidden" aria-label="Open navigation" onClick={onMenu}>
           <Menu size={20} />
         </button>

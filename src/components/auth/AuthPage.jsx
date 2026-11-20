@@ -1,159 +1,216 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  ArrowLeft,
-  Check,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, FileText, HelpCircle, Loader2, Mic, Package } from "lucide-react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import Orb from "../Orb";
 import { authBenefits } from "../../data/authContent";
 import { useAuth } from "../../context/AuthContext";
 import { rememberReturnPath, safeAppPath } from "../../lib/returnTo";
+import { ease, RevealLines } from "../landing/primitives";
 
 function GoogleIcon() {
   return (
-    <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
-      <path
-        fill="#4285F4"
-        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.98 0 12s.45 3.83 1.25 5.42l4.03-3.15z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
-      />
+    <svg className="h-[18px] w-[18px] shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
+      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.17 0 9.98 0 12s.45 3.83 1.25 5.42l4.03-3.15z" />
+      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
     </svg>
   );
 }
 
-function Field({ label, children }) {
+/** Input with a label that floats up out of the way on focus or once filled. */
+function FloatingInput({ id, label, type = "text", value, onChange, autoComplete, trailing }) {
   return (
-    <label className="block text-xs font-semibold text-ink">
-      {label}
-      <div className="relative mt-1.5">{children}</div>
-    </label>
-  );
-}
-
-function TextInput({
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  autoComplete,
-}) {
-  return (
-    <input
-      required
-      type={type}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      autoComplete={autoComplete}
-      className="w-full rounded-xl border border-line-strong bg-white px-3.5 py-2.5 text-sm font-normal text-ink placeholder:text-fg-muted/60 transition outline-none shadow-2xs focus:border-primary focus:ring-4 focus:ring-primary/10"
-    />
-  );
-}
-
-function PasswordInput({ value, onChange, autoComplete }) {
-  const [shown, setShown] = useState(false);
-  return (
-    <Field label="Password">
-      <TextInput
-        type={shown ? "text" : "password"}
+    <div className="group relative">
+      <input
+        id={id}
+        required
+        type={type}
         value={value}
         onChange={onChange}
-        placeholder="Enter your password"
         autoComplete={autoComplete}
+        placeholder=" "
+        className={`peer h-14 w-full rounded-2xl border border-ink/10 bg-white/80 px-4 pb-2 pt-6 text-[15px] text-ink shadow-[0_1px_2px_rgba(24,24,60,0.04)] outline-none backdrop-blur transition-[border-color,box-shadow,background-color] duration-300 hover:border-ink/20 focus:border-primary focus:bg-white focus:shadow-[0_0_0_4px_rgba(99,91,255,0.12)] ${trailing ? "pr-12" : ""}`}
       />
-      <button
-        type="button"
-        onClick={() => setShown(!shown)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-fg-muted transition hover:text-ink focus:outline-none"
-        aria-label={shown ? "Hide password" : "Show password"}
+      <label
+        htmlFor={id}
+        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[15px] text-fg-muted transition-all duration-200 peer-focus:top-[18px] peer-focus:text-[11px] peer-focus:font-medium peer-focus:text-primary peer-[:not(:placeholder-shown)]:top-[18px] peer-[:not(:placeholder-shown)]:text-[11px] peer-[:not(:placeholder-shown)]:font-medium"
       >
-        {shown ? <EyeOff size={16} /> : <Eye size={16} />}
-      </button>
-    </Field>
+        {label}
+      </label>
+      {trailing && <div className="absolute right-2 top-1/2 -translate-y-1/2">{trailing}</div>}
+    </div>
   );
 }
 
-export default function AuthPage({ mode = "login" }) {
+function passwordScore(password) {
+  let score = 0;
+  if (password.length >= 6) score++;
+  if (password.length >= 10) score++;
+  if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
+  if (/\d/.test(password) && /[^A-Za-z0-9]/.test(password)) score++;
+  return score;
+}
+const strengthLabels = ["Too short", "Weak", "Okay", "Strong", "Excellent"];
+const strengthColors = ["bg-danger", "bg-danger", "bg-warning", "bg-success", "bg-success"];
+
+function StrengthMeter({ password }) {
+  const score = passwordScore(password);
+  return (
+    <div className="flex items-center gap-3 px-1" aria-live="polite">
+      <div className="flex flex-1 gap-1.5">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className="h-1 flex-1 overflow-hidden rounded-full bg-ink/[0.07]">
+            <motion.span className={`block h-full rounded-full ${strengthColors[score]}`} initial={false} animate={{ scaleX: i < score ? 1 : 0 }} style={{ originX: 0 }} transition={{ duration: 0.4, ease }} />
+          </span>
+        ))}
+      </div>
+      <span className="w-16 text-right text-[11px] font-medium text-fg-muted">{password ? strengthLabels[score] : "6+ chars"}</span>
+    </div>
+  );
+}
+
+const chips = [
+  { label: "FAQs", icon: HelpCircle, className: "left-[8%] top-[22%]", delay: 0.9 },
+  { label: "SOPs", icon: FileText, className: "right-[6%] top-[30%]", delay: 1.05 },
+  { label: "Products", icon: Package, className: "left-[12%] bottom-[30%]", delay: 1.2 },
+  { label: "Brand voice", icon: Mic, className: "right-[10%] bottom-[24%]", delay: 1.35 },
+];
+
+/** The dark panel beside the form: a live orb, floating knowledge chips and rotating benefits. */
+function Showcase() {
+  const reduce = useReducedMotion();
+  const [benefit, setBenefit] = useState(0);
+  useEffect(() => {
+    if (reduce) return undefined;
+    const id = window.setInterval(() => setBenefit((b) => (b + 1) % authBenefits.length), 3400);
+    return () => window.clearInterval(id);
+  }, [reduce]);
+
+  return (
+    // Fixed to the viewport height and sticky, so a taller sign-up form never stretches it.
+    <aside className="relative hidden overflow-hidden rounded-[32px] bg-[#0D0B26] text-white lg:sticky lg:top-3 lg:flex lg:h-[calc(100svh-1.5rem)] lg:flex-col lg:self-start">
+      <div aria-hidden="true" className="lp-gridlines lp-gridlines--night pointer-events-none absolute inset-0" />
+      <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary/40 blur-[110px]" />
+      <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-orange/25 blur-[110px]" />
+
+      <div className="relative z-10 flex items-center justify-between p-8">
+        <Link to="/" className="orb-wordmark text-2xl font-extrabold tracking-tight text-white">Orb<span className="text-[#A9A3FF]">.</span></Link>
+        <Link to="/" className="group inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-xs font-medium text-white/75 backdrop-blur transition-colors hover:text-white">
+          <ArrowLeft size={13} className="transition-transform duration-300 group-hover:-translate-x-0.5" aria-hidden="true" /> Back to site
+        </Link>
+      </div>
+
+      <div className="relative flex-1" aria-hidden="true">
+        {/* Centring lives on the wrapper: the entrance `scale` would overwrite a translate on the same element. */}
+        <div className="absolute left-1/2 top-1/2 aspect-square w-[min(78%,460px)] -translate-x-1/2 -translate-y-1/2">
+          <motion.div initial={reduce ? false : { opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 1.6, ease, delay: 0.2 }} className="relative h-full w-full">
+            <div className="lp-ring inset-[-8%] !border-white/10" />
+            <div className="lp-ring inset-[-22%] !border-white/[0.05]" />
+            <Orb colors={["#9c43fe", "#4cc2e9", "#101499"]} backgroundColor="#0D0B26" size={0.95} glow={1.2} hoverIntensity={0.9} rotateOnHover followCursor intro />
+          </motion.div>
+        </div>
+        {chips.map(({ label, icon: Icon, className, delay }, i) => (
+          <motion.span
+            key={label}
+            className={`absolute ${className}`}
+            initial={reduce ? false : { opacity: 0, y: 16, scale: 0.9 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, y: [0, -8, 0], scale: 1 }}
+            transition={reduce ? undefined : { opacity: { delay, duration: 0.6 }, scale: { delay, duration: 0.6 }, y: { delay: delay + 0.6, duration: 4 + i * 0.6, repeat: Infinity, ease: "easeInOut" } }}
+          >
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.08] py-1.5 pl-1.5 pr-3.5 text-xs font-semibold text-white/90 backdrop-blur-md">
+              <span className="grid h-6 w-6 place-items-center rounded-full bg-white/15"><Icon size={12} /></span>{label}
+            </span>
+          </motion.span>
+        ))}
+      </div>
+
+      <div className="relative z-10 p-8 pt-0">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">With Orb you can</p>
+        <div className="relative mt-3 h-[4.5rem]">
+          <AnimatePresence mode="wait">
+            <motion.p key={benefit} initial={{ opacity: 0, y: 18, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: -14, filter: "blur(6px)" }} transition={{ duration: 0.6, ease }} className="absolute inset-0 font-display text-[1.7rem] font-[380] leading-tight tracking-[-0.01em]">
+              {authBenefits[benefit]}.
+            </motion.p>
+          </AnimatePresence>
+        </div>
+        <div className="mt-5 flex gap-1.5">
+          {authBenefits.map((item, i) => (
+            <button key={item} type="button" onClick={() => setBenefit(i)} aria-label={`Show benefit ${i + 1}`} className="h-1 flex-1 overflow-hidden rounded-full bg-white/15">
+              <span className={`block h-full rounded-full bg-white transition-all duration-500 ${i === benefit ? "w-full" : i < benefit ? "w-full opacity-40" : "w-0"}`} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/** Eases its height to whatever its content measures, so swapping panels never jumps.
+    The padding / negative-margin pair leaves room for focus rings and shadows inside the clip. */
+function AutoHeight({ children, className = "" }) {
+  const ref = useRef(null);
+  const [height, setHeight] = useState("auto");
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(() => setHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <motion.div className={`-mx-4 -mb-10 overflow-hidden ${className}`} initial={false} animate={{ height }} transition={{ duration: 0.55, ease }}>
+      <div ref={ref} className="relative px-4 pb-10">{children}</div>
+    </motion.div>
+  );
+}
+
+const panelVariants = {
+  enter: (dir) => ({ x: dir * 56, opacity: 0, filter: "blur(4px)" }),
+  center: { x: 0, opacity: 1, filter: "blur(0px)", transition: { duration: 0.55, ease } },
+  exit: (dir) => ({ x: dir * -56, opacity: 0, filter: "blur(4px)", transition: { duration: 0.35, ease } }),
+};
+
+export default function AuthPage() {
   const { user, loading, login, signup, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const isSignup = location.pathname === "/signup";
+  const mode = isSignup ? "signup" : "login";
+  // Create account sits to the right of Sign in, so it slides in from the right.
+  const direction = isSignup ? 1 : -1;
+  // The word-by-word headline reveal is for first load only; on a switch the panel moves as one.
+  const initialMode = useRef(mode);
+  const switchedRef = useRef(false);
+  if (mode !== initialMode.current) switchedRef.current = true;
+  const switched = switchedRef.current;
   const [submitting, setSubmitting] = useState(false);
-  const [visibleTicks, setVisibleTicks] = useState(0);
+  const [shown, setShown] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  });
-  const isSignup = mode === "signup";
-  const title = useMemo(
-    () => (isSignup ? "Create your account" : "Welcome back"),
-    [isSignup],
-  );
-  const subtext = isSignup
-    ? "Start giving your AI the verified context it deserves."
-    : "Sign in to continue managing your brand's AI knowledge.";
+  const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
 
-  useEffect(() => {
-    setVisibleTicks(0);
-    const starter = window.setTimeout(() => setVisibleTicks(1), 300);
-    const interval = window.setInterval(
-      () =>
-        setVisibleTicks((count) => {
-          if (count >= authBenefits.length) {
-            window.clearInterval(interval);
-            return count;
-          }
-          return count + 1;
-        }),
-      400,
-    );
-    return () => {
-      window.clearTimeout(starter);
-      window.clearInterval(interval);
-    };
-  }, [mode]);
+  // A message from the other mode would be confusing after switching tabs.
+  useEffect(() => setError(""), [isSignup]);
 
   // Signing in sets `user` before the submit handler below finishes, so this branch
   // must also honour the page the person came from, not only /app.
   if (user) return <Navigate to={safeAppPath(location.state?.from?.pathname) || "/app"} replace />;
 
-  const updateField = (field) => (event) => {
-    setForm((current) => ({ ...current, [field]: event.target.value }));
-  };
+  const updateField = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
 
   const submit = async (event) => {
     event.preventDefault();
     setError("");
-    if (isSignup && form.password !== form.confirmPassword)
-      return setError("Your passwords do not match.");
-    if (form.password.length < 6)
-      return setError("Use at least 6 characters for your password.");
+    if (isSignup && form.password !== form.confirmPassword) return setError("Your passwords do not match.");
+    if (form.password.length < 6) return setError("Use at least 6 characters for your password.");
     setSubmitting(true);
     try {
       if (isSignup) await signup(form);
       else await login(form);
       navigate(safeAppPath(location.state?.from?.pathname) || "/app", { replace: true });
     } catch (authError) {
-      const message =
-        authError.message || "Something went wrong. Please try again.";
-      setError(message);
+      setError(authError.message || "Something went wrong. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -171,211 +228,115 @@ export default function AuthPage({ mode = "login" }) {
     }
   };
 
+  // Keep the place the person was heading to when they switch between the two tabs.
+  const tabState = location.state;
+
   return (
-    <main className="relative flex min-h-screen items-center justify-center bg-canvas p-4 sm:p-8">
-      {/* Subtle atmospheric ambient glow matching dashboard */}
-      <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-orange/10 blur-3xl" />
+    <div className="lp min-h-[100svh]">
+      <div aria-hidden="true" className="lp-grain" />
+      <main className="grid min-h-[100svh] gap-3 p-3 lg:grid-cols-[1.05fr_1fr]">
+        <Showcase />
 
-      <div className="relative mx-auto grid w-full max-w-5xl overflow-hidden rounded-3xl border border-line bg-white shadow-pop lg:grid-cols-[1.1fr_1fr]">
-        {/* Left branded showcase panel */}
-        <aside className="relative flex flex-col justify-between overflow-hidden bg-gradient-to-br from-[#1C1844] via-[#2A2362] to-[#1C1844] p-8 text-white sm:p-12">
-          {/* Internal soft glows */}
-          <div className="pointer-events-none absolute -left-20 -top-16 h-64 w-64 rounded-full bg-primary/35 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-24 -right-20 h-72 w-72 rounded-full bg-[#FF9B3D]/25 blur-3xl" />
-
-          <div className="relative z-10">
-            <Link
-              to="/"
-              className="orb-wordmark inline-flex items-center text-xl font-extrabold tracking-tight text-white transition hover:opacity-90"
-              aria-label="Orb home"
-            >
-              Orb<span className="text-primary">.</span>
-            </Link>
-
-            <div className="mt-14 sm:mt-16">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-primary-tint backdrop-blur-xs">
-                <Sparkles size={12} className="text-primary-tint" />
-                Next-Gen Agent Ops
-              </span>
-              <h2 className="mt-4 font-display text-3xl font-normal leading-tight tracking-tight text-white sm:text-4xl">
-                The clearest way to prepare your business for{" "}
-                <em className="italic text-primary-tint">AI</em>.
-              </h2>
-              <p className="mt-4 max-w-md text-sm leading-relaxed text-white/75">
-                Make your operational knowledge trustworthy, compact, and ready
-                to guide every customer conversation across all channels.
-              </p>
-            </div>
-
-            <ul className="mt-8 space-y-3.5">
-              {authBenefits.map((benefit, index) => (
-                <li
-                  className={`flex items-start gap-3 text-sm font-medium text-white/90 transition-all duration-500 ${
-                    index < visibleTicks
-                      ? "translate-x-0 opacity-100"
-                      : "-translate-x-2 opacity-0"
-                  }`}
-                  key={benefit}
-                >
-                  <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-500/20 text-emerald-400">
-                    <Check size={12} strokeWidth={2.5} />
-                  </span>
-                  <span>{benefit}</span>
-                </li>
-              ))}
-            </ul>
+        <section className="relative flex flex-col px-3 py-6 sm:px-8 lg:py-8">
+          <div aria-hidden="true" className="lp-gridlines pointer-events-none absolute inset-0 lg:hidden" />
+          <div className="relative flex items-center justify-between lg:justify-end">
+            <Link to="/" className="orb-wordmark text-2xl font-extrabold tracking-tight text-ink lg:hidden">Orb<span className="text-primary">.</span></Link>
+            <motion.p key={mode} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, delay: 0.1 }} className="text-sm text-fg-muted">
+              {isSignup ? "Already with us?" : "New to Orb?"}{" "}
+              <Link to={isSignup ? "/login" : "/signup"} state={tabState} className="font-semibold text-ink underline decoration-ink/20 underline-offset-4 transition-colors hover:decoration-primary">
+                {isSignup ? "Sign in" : "Create an account"}
+              </Link>
+            </motion.p>
           </div>
 
-          <div className="relative z-10 mt-12 border-t border-white/10 pt-6">
-            <p className="text-xs text-white/50">
-              Trusted by fast-growing direct-to-consumer and enterprise brands.
-            </p>
-          </div>
-        </aside>
-
-        {/* Right authentication form section */}
-        <section className="flex min-h-[560px] items-center bg-white p-7 sm:p-12">
-          <div className="mx-auto w-full max-w-md">
-            <Link
-              to="/"
-              className="mb-8 inline-flex items-center gap-2 text-xs font-semibold text-fg-muted transition hover:text-ink"
-            >
-              <ArrowLeft size={14} /> Back to home
-            </Link>
-
-            <div className="animate-fade-in">
-              {loading ? (
-                <div className="grid min-h-72 place-items-center">
-                  <Loader2 className="animate-spin text-primary" size={32} />
+          <div className="relative mx-auto flex w-full max-w-[420px] flex-1 flex-col justify-start py-10 lg:pt-[9vh]">
+            {loading ? (
+              <div className="grid min-h-72 place-items-center"><Loader2 className="animate-spin text-primary" size={30} /></div>
+            ) : (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, ease }}>
+                <div className="relative grid grid-cols-2 rounded-full border border-white/80 bg-white/60 p-1 shadow-card backdrop-blur" role="tablist" aria-label="Account">
+                  {[{ to: "/login", label: "Sign in", active: !isSignup }, { to: "/signup", label: "Create account", active: isSignup }].map((tab) => (
+                    <Link key={tab.to} to={tab.to} state={tabState} replace role="tab" aria-selected={tab.active} className={`relative z-10 flex h-10 items-center justify-center rounded-full text-sm font-medium transition-colors duration-300 ${tab.active ? "text-white" : "text-ink/60 hover:text-ink"}`}>
+                      {tab.active && <motion.span layoutId="auth-tab" className="absolute inset-0 -z-10 rounded-full bg-ink shadow-[0_8px_20px_-8px_rgba(37,38,58,0.6)]" transition={{ type: "spring", stiffness: 380, damping: 36 }} />}
+                      {tab.label}
+                    </Link>
+                  ))}
                 </div>
-              ) : (
-                <>
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-tint text-primary shadow-xs">
-                    <KeyRound size={20} />
-                  </div>
 
-                  <h1 className="mt-5 text-2xl font-bold tracking-tight text-ink sm:text-3xl">
-                    {title}
-                  </h1>
-                  <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">
-                    {subtext}
-                  </p>
+                {/* One motion for the whole switch: the panel slides as a unit toward the tab that
+                    was picked, while the container eases to the new panel's height. */}
+                <AutoHeight className="mt-10">
+                  <AnimatePresence mode="popLayout" initial={false} custom={direction}>
+                    <motion.div key={mode} custom={direction} variants={panelVariants} initial="enter" animate="center" exit="exit" className="w-full">
+                      <h1 className="font-display text-[2.6rem] font-[380] leading-[1.02] tracking-[-0.03em] text-ink sm:text-5xl">
+                        {switched ? (
+                          isSignup ? <>Create your<br /><em className="text-primary">workspace.</em></> : <>Welcome<br /><em className="text-primary">back.</em></>
+                        ) : (
+                          <RevealLines stagger={0.05} lines={isSignup ? [["Create", "your"], [{ em: "workspace." }]] : [["Welcome"], [{ em: "back." }]]} />
+                        )}
+                      </h1>
+                      <p className="mt-3 text-[15px] leading-6 text-fg-muted">
+                        {isSignup ? "Give your AI agent the verified context it deserves." : "Sign in to keep shaping your brand’s AI knowledge."}
+                      </p>
 
-                  {error && (
-                    <p
-                      role="alert"
-                      className="mt-4 rounded-xl border border-danger/25 bg-danger-tint px-3.5 py-2.5 text-xs font-medium text-danger"
-                    >
-                      {error}
-                    </p>
-                  )}
+                      <button type="button" disabled={submitting} onClick={google} className="mt-8 flex h-12 w-full items-center justify-center gap-3 rounded-2xl border border-ink/10 bg-white text-sm font-semibold text-ink shadow-card transition-[box-shadow,border-color] duration-300 hover:border-ink/20 hover:shadow-[0_14px_30px_-16px_rgba(60,40,140,0.4)] disabled:pointer-events-none disabled:opacity-60">
+                        <GoogleIcon /> Continue with Google
+                      </button>
 
-                  <form className="mt-6 space-y-4" onSubmit={submit}>
-                    {isSignup && (
-                      <Field label="Full name">
-                        <TextInput
-                          value={form.name}
-                          onChange={updateField("name")}
-                          placeholder="Your name"
-                          autoComplete="name"
+                      <div className="my-6 flex items-center gap-3 text-xs text-fg-muted">
+                        <span className="h-px flex-1 bg-gradient-to-r from-transparent to-ink/15" />
+                        or with email
+                        <span className="h-px flex-1 bg-gradient-to-l from-transparent to-ink/15" />
+                      </div>
+
+                      <AnimatePresence>
+                        {error && (
+                          <motion.div role="alert" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto", x: [0, -8, 8, -5, 5, 0] }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.45 }} className="overflow-hidden">
+                            <p className="mb-4 rounded-2xl border border-danger/20 bg-danger-tint px-4 py-3 text-sm text-danger">{error}</p>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <form onSubmit={submit} className="grid gap-3">
+                        {isSignup && <FloatingInput id={`${mode}-name`} label="Full name" value={form.name} onChange={updateField("name")} autoComplete="name" />}
+                        <FloatingInput id={`${mode}-email`} label="Work email" type="email" value={form.email} onChange={updateField("email")} autoComplete="email" />
+                        <FloatingInput
+                          id={`${mode}-password`}
+                          label="Password"
+                          type={shown ? "text" : "password"}
+                          value={form.password}
+                          onChange={updateField("password")}
+                          autoComplete={isSignup ? "new-password" : "current-password"}
+                          trailing={
+                            <button type="button" onClick={() => setShown((v) => !v)} className="grid h-10 w-10 place-items-center rounded-xl text-fg-muted transition-colors hover:bg-ink/5 hover:text-ink" aria-label={shown ? "Hide password" : "Show password"}>
+                              {shown ? <EyeOff size={17} /> : <Eye size={17} />}
+                            </button>
+                          }
                         />
-                      </Field>
-                    )}
-                    <Field label="Email address">
-                      <TextInput
-                        type="email"
-                        value={form.email}
-                        onChange={updateField("email")}
-                        placeholder="you@company.com"
-                        autoComplete="email"
-                      />
-                    </Field>
-                    <PasswordInput
-                      value={form.password}
-                      onChange={updateField("password")}
-                      autoComplete={
-                        isSignup ? "new-password" : "current-password"
-                      }
-                    />
-                    {isSignup && (
-                      <>
-                        <Field label="Confirm password">
-                          <TextInput
-                            type="password"
-                            value={form.confirmPassword}
-                            onChange={updateField("confirmPassword")}
-                            placeholder="Repeat your password"
-                            autoComplete="new-password"
-                          />
-                        </Field>
-                        <p className="text-xs text-fg-muted">
-                          Use at least 6 characters to create your account.
-                        </p>
-                      </>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white shadow-card transition duration-150 hover:bg-primary-dark active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {submitting && (
-                        <Loader2 className="animate-spin" size={16} />
-                      )}
-                      {submitting
-                        ? "Please wait…"
-                        : isSignup
-                          ? "Create account"
-                          : "Sign in"}
-                    </button>
-                  </form>
-
-                  <div className="my-5 flex items-center gap-3 text-xs font-medium text-fg-muted">
-                    <span className="h-px flex-1 bg-line" />
-                    or continue with
-                    <span className="h-px flex-1 bg-line" />
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={google}
-                    className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-line-strong bg-white px-5 py-2.5 text-sm font-semibold text-ink shadow-2xs transition duration-150 hover:bg-subtle active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <GoogleIcon />
-                    Google
-                  </button>
-
-                  <div className="mt-6 text-center text-xs font-normal text-fg-muted">
-                    {isSignup ? (
-                      <>
-                        Already have an account?{" "}
-                        <Link
-                          className="font-semibold text-primary transition hover:underline underline-offset-2"
-                          to="/login"
-                        >
-                          Sign in
-                        </Link>
-                      </>
-                    ) : (
-                      <>
-                        New to Orb?{" "}
-                        <Link
-                          className="font-semibold text-primary transition hover:underline underline-offset-2"
-                          to="/signup"
-                        >
-                          Create an account
-                        </Link>
-                      </>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+                        {isSignup && (
+                          <>
+                            <StrengthMeter password={form.password} />
+                            <FloatingInput id={`${mode}-confirm`} label="Confirm password" type={shown ? "text" : "password"} value={form.confirmPassword} onChange={updateField("confirmPassword")} autoComplete="new-password"
+                              trailing={form.confirmPassword && form.confirmPassword === form.password ? <span className="mr-2 grid h-6 w-6 place-items-center rounded-full bg-success text-white"><Check size={12} strokeWidth={3} /></span> : null}
+                            />
+                          </>
+                        )}
+                        <button type="submit" disabled={submitting} aria-busy={submitting || undefined} className="lp-btn-shine group mt-3 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-[15px] font-semibold text-white shadow-[0_18px_40px_-16px_rgba(99,91,255,0.95)] transition-[background-color,transform] duration-300 hover:bg-primary-dark active:scale-[0.99] disabled:pointer-events-none disabled:opacity-70">
+                          {submitting ? <Loader2 className="animate-spin" size={18} aria-hidden="true" /> : null}
+                          {submitting ? "Just a moment…" : isSignup ? "Create account" : "Sign in"}
+                          {!submitting && <ArrowRight size={17} className="transition-transform duration-300 group-hover:translate-x-1" aria-hidden="true" />}
+                        </button>
+                      </form>
+                    </motion.div>
+                  </AnimatePresence>
+                </AutoHeight>
+              </motion.div>
+            )}
           </div>
+
+          <p className="relative text-center text-xs text-fg-muted lg:text-left">© {new Date().getFullYear()} Orb. All rights reserved.</p>
         </section>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

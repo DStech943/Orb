@@ -144,7 +144,7 @@ function ToolLogo({ tool }) {
 
 function ToolCard({ tool, onOpen }) {
   return (
-    <article role="button" tabIndex={0} onClick={() => onOpen?.(tool)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen?.(tool); } }} className="flex min-h-24 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-purple/40 hover:shadow-md">
+    <article role="button" tabIndex={0} onClick={() => onOpen?.(tool)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen?.(tool); } }} className="flex min-h-24 min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-purple/40 hover:shadow-md">
       <ToolLogo tool={tool} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -515,7 +515,7 @@ export default function Tools() {
         </label>
       </section>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-line">
+      <div className="mac-scroll flex gap-1 overflow-x-auto border-b border-line">
         {categories.map((item) => {
           const count = item.id === "all" ? workspaceTools.length : item.id === "installed" ? workspaceTools.filter((tool) => tool.installed).length : workspaceTools.filter((tool) => tool.category === item.id).length;
           return (

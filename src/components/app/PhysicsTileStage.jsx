@@ -207,7 +207,7 @@ export default function PhysicsTileStage({ status = 404, dark = false, fullBleed
   const allTiles = tileDefinitions
   return <div ref={stageRef} aria-hidden="true" className={`physics-tile-stage w-full overflow-hidden touch-pan-y ${fullBleed ? 'absolute inset-0 h-full' : 'relative h-[240px] md:h-[320px]'} ${dark ? 'bg-ink' : ''}`}>
     <div className={`absolute inset-0 [background-size:14px_14px] ${dark ? 'opacity-25 [background-image:radial-gradient(#E6E9FE_1px,transparent_1px)]' : 'opacity-70 [background-image:radial-gradient(#cbd5e1_1px,transparent_1px)]'}`} />
-    <div className={`absolute left-1/2 z-20 -translate-x-1/2 text-center ${fullBleed ? 'top-[58%]' : 'top-4'} ${dark ? 'text-white' : 'text-primary'}`}>
+    <div className={`absolute left-1/2 z-20 -translate-x-1/2 text-center ${fullBleed ? 'hidden top-[58%] sm:block' : 'top-4'} ${dark ? 'text-white' : 'text-primary'}`}>
       <p className={`text-[10px] font-extrabold uppercase tracking-[0.18em] ${dark ? 'text-primary-tint' : 'text-muted'}`}>Connection error</p>
       <p className="mt-0.5 text-6xl font-black leading-none tracking-[-0.08em]">{status || 404}</p>
     </div>

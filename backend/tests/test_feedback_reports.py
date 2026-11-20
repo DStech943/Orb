@@ -372,14 +372,22 @@ URL = f"/api/brands/{BRAND_ID}/agent-feedback/report"
 
 
 def test_report_is_saved_with_snapshot_and_delivery_is_queued(api) -> None:
-    response = api.post(URL, json=report_body(message_id="m2", tagged_people=[PERSON_ID]), headers={"Idempotency-Key": "key-0001-abcdef"})
+    response = api.post(
+        URL,
+        json=report_body(message_id="m2", tagged_people=[PERSON_ID], user_name="Priya Patel", user_email="priya@example.com"),
+        headers={"Idempotency-Key": "key-0001-abcdef"},
+    )
     assert response.status_code == 201
     saved = response.json()["feedback"]
     assert saved["kind"] == "issue_report" and saved["category"] == "hallucination" and saved["slack_delivery_status"] == "pending"
     assert saved["tagged_people"] == [{"id": PERSON_ID, "name": "Aarav Mehta"}]
+    assert saved["submitted_by_name"] == "Priya Patel"
+    assert saved["submitted_by_email"] == "priya@example.com"
     row = api.db.feedback[saved["id"]]
     assert row["scope"] == "reply" and row["agent_reply"] == "30 days, no questions asked"   # taken from the transcript, not trusted from the client
     assert row["agent_metadata"]["agent_host"] == "agent.example.com"
+    assert row["agent_metadata"]["user_name"] == "Priya Patel"
+    assert row["agent_metadata"]["user_email"] == "priya@example.com"
     assert saved["id"] in api.db.snapshots and len(api.db.snapshots[saved["id"]]["sha256"]) == 64
     assert api.delivered == [saved["id"]]
 

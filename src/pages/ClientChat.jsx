@@ -2122,7 +2122,7 @@ export default function ClientChat() {
           </div>
         </form>
         {dictationError && <p role="alert" className="mt-1.5 px-1 text-[11px] font-medium text-red-600">{dictationError}</p>}
-        <div className="flex justify-between items-center mt-1.5 px-1 text-[11px] text-slate-400">
+        <div className="mt-1.5 flex flex-col items-start gap-0.5 px-1 text-[11px] text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <span>Type @ to mention teams or members • Press Enter to send • Files stored in Supabase</span>
           <span>Right-click any message to react or reply</span>
         </div>

@@ -4,6 +4,7 @@ import Button from "../ui/Button";
 import Modal from "../ui/Modal";
 import Textarea from "../ui/Textarea";
 import TeammatePicker from "./TeammatePicker";
+import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import { reportBrandAgentIssue } from "../../services/orbApi";
 import { MAX_MESSAGES, buildTranscript, newIdempotencyKey } from "../../lib/transcript";
@@ -53,6 +54,7 @@ export default function ReportIssueModal({
   onClearTarget,
   onSubmitted,
 }) {
+  const { user } = useAuth();
   const { showToast } = useToast();
   const [category, setCategory] = useState("");
   const [severity, setSeverity] = useState("medium");
@@ -110,6 +112,8 @@ export default function ReportIssueModal({
           transcript,
           // Lets the server flag a transcript that was trimmed to the latest messages.
           total_message_count: (messages || []).length,
+          user_name: user?.name || "",
+          user_email: user?.email || "",
         },
         idempotencyKey.current,
       );

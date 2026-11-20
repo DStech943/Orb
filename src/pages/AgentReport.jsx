@@ -219,6 +219,12 @@ export default function AgentReport() {
         {[
           ["Brand", meta.brand_name],
           ["Agent", meta.agent_name],
+          [
+            "Reported by",
+            report.submitted_by_name
+              ? `${report.submitted_by_name}${report.submitted_by_email ? ` (${report.submitted_by_email})` : ""}`
+              : (report.submitted_by_email || ""),
+          ],
           ["Reported", when(report.created_at)],
           ["Session", report.session_id],
           ["Environment", meta.environment],

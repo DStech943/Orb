@@ -43,7 +43,7 @@ export default function PageHeader({ actions, className = '', ...title }) {
   return (
     <header className={`mb-6 flex flex-wrap items-end justify-between gap-4 ${className}`}>
       <PageTitle {...title} />
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto">{actions}</div>}
     </header>
   )
 }

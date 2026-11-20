@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Check, Loader2, RefreshCw, Wrench } from 'lucide-react'
 import ContentListPage from '../components/app/ContentListPage'
@@ -7,7 +7,9 @@ import { deleteProduct, listProducts, loadProductMetafields, loadProductThemeTem
 import { activeBrandId, activeBrandName, getShopifyCredentialStatus, getShopifyVariantMetafieldTracker, hasOrbApi } from '../services/orbApi'
 import { saveTrackedVariantMetafield } from '../services/overviewBlocks'
 
-const trackerStorageKey = (brandName) => `orb:variant-metafield-tracker:${String(brandName || '').trim().toLowerCase()}`
+const BACKGROUND_SYNC_MIN_MS = 15 * 60 * 1000
+const themeTemplateCache = new Map()
+const trackerStorageKey =(brandName) => `orb:variant-metafield-tracker:${String(brandName || '').trim().toLowerCase()}`
 const fieldId = (field) => `${field?.namespace || ''}.${field?.key || ''}`
 const truthyMetafieldValue = (value) => ['true', '1', 'yes'].includes(String(value || '').trim().toLowerCase())
 const readTrackedMetafield = (brandName) => {
@@ -225,6 +227,14 @@ export default function Products() {
     let active = true
     const syncInBackground = async () => {
       if (backgroundSyncInFlight.current) return
+      // A full Shopify sync is slow and competes with the page's own requests, so opening
+      // Products repeatedly must not re-run it. The manual Sync button always works.
+      const stampKey = `orb:products-last-sync:${String(brandName).trim().toLowerCase()}`
+      try {
+        const last = Number(window.localStorage.getItem(stampKey) || 0)
+        if (Date.now() - last < BACKGROUND_SYNC_MIN_MS) return
+        window.localStorage.setItem(stampKey, String(Date.now()))
+      } catch { /* storage unavailable: just sync */ }
       backgroundSyncInFlight.current = true
       try {
         await syncProductsForActiveBrand(brandName)
@@ -240,6 +250,21 @@ export default function Products() {
     const interval = window.setInterval(syncInBackground, 60 * 60 * 1000)
     return () => { active = false; window.clearInterval(interval) }
   }, [brandName, shopifyConnected])
+
+  // Stable callbacks: the editor reloads theme templates whenever this function's identity changes.
+  const syncProducts = useCallback(() => syncProductsForActiveBrand(brandName), [brandName])
+  const saveProductMetafields = useCallback((product) => saveProductMetafieldsToShopify(product, brandName), [brandName])
+  const saveVariantMetafields = useCallback((product, variant) => saveVariantMetafieldsToShopify(product, variant, brandName), [brandName])
+  const loadProductMetafieldsFor = useCallback((product) => loadProductMetafields(product, brandName), [brandName])
+  const loadVariantMetafieldsFor = useCallback((product, variantId) => loadProductVariantMetafields(product, brandName, variantId), [brandName])
+  const loadThemeTemplatesFor = useCallback(() => {
+    const cached = themeTemplateCache.get(brandName)
+    if (cached) return cached
+    const request = Promise.resolve(loadProductThemeTemplates(brandName)).catch((error) => { themeTemplateCache.delete(brandName); throw error })
+    themeTemplateCache.set(brandName, request)
+    return request
+  }, [brandName])
+  const trackedForList = useMemo(() => (trackedMetafield ? { ...trackedMetafield, variants: trackerVariants } : null), [trackedMetafield, trackerVariants])
 
   const spannerAction = shopifyConnected ? (
     <button
@@ -268,14 +293,14 @@ export default function Products() {
         update={saveProduct}
         remove={deleteProduct}
         extraFilterAction={spannerAction}
-        trackedVariantMetafield={trackedMetafield ? { ...trackedMetafield, variants: trackerVariants } : null}
+        trackedVariantMetafield={trackedForList}
         assistantDraft={assistantDraft.message ? assistantDraft : null}
-        syncProducts={shopifyConnected ? () => syncProductsForActiveBrand(brandName) : null}
-        saveProductMetafields={shopifyConnected ? (product) => saveProductMetafieldsToShopify(product, brandName) : null}
-        saveVariantMetafields={shopifyConnected ? (product, variant) => saveVariantMetafieldsToShopify(product, variant, brandName) : null}
-        loadProductMetafields={shopifyConnected ? (product) => loadProductMetafields(product, brandName) : null}
-        loadVariantMetafields={shopifyConnected ? (product, variantId) => loadProductVariantMetafields(product, brandName, variantId) : null}
-        loadThemeTemplates={shopifyConnected ? () => loadProductThemeTemplates(brandName) : null}
+        syncProducts={shopifyConnected ? syncProducts : null}
+        saveProductMetafields={shopifyConnected ? saveProductMetafields : null}
+        saveVariantMetafields={shopifyConnected ? saveVariantMetafields : null}
+        loadProductMetafields={shopifyConnected ? loadProductMetafieldsFor : null}
+        loadVariantMetafields={shopifyConnected ? loadVariantMetafieldsFor : null}
+        loadThemeTemplates={shopifyConnected ? loadThemeTemplatesFor : null}
       />
     </>
   )

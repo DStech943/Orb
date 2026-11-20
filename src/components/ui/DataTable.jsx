@@ -1,6 +1,6 @@
-import React from 'react'
+import React, { memo } from 'react'
 
-export default function DataTable({ columns, rows, onRowClick, mobileCard }) {
+function DataTable({ columns, rows, onRowClick, mobileCard }) {
   return (
     <>
       <div className="hidden overflow-x-auto rounded-card border border-line bg-white shadow-card md:block">
@@ -34,3 +34,5 @@ export default function DataTable({ columns, rows, onRowClick, mobileCard }) {
     </>
   )
 }
+
+export default memo(DataTable)

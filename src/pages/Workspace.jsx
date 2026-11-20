@@ -128,7 +128,7 @@ export default function Workspace() {
                 <Textarea label="About this brand" placeholder="What you sell, who it is for, and any key policies worth knowing." hint="Two or three sentences is plenty." value={profile.description} onChange={update('description')} disabled={loading || !brandId} />
               </div>
               <div
-                className={`sticky bottom-4 z-10 mt-8 flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-card border bg-white px-4 py-3 shadow-pop transition-[opacity,border-color] duration-180 ${dirty ? 'border-primary/30 opacity-100' : 'border-line opacity-80'}`}
+                className={`sticky bottom-[4.75rem] z-10 mt-8 sm:bottom-4 flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-card border bg-white px-4 py-3 shadow-pop transition-[opacity,border-color] duration-180 ${dirty ? 'border-primary/30 opacity-100' : 'border-line opacity-80'}`}
                 role="status"
               >
                 <p className="flex items-center gap-2 text-sm text-fg-muted">

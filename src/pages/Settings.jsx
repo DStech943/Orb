@@ -28,6 +28,7 @@ import { isOrbVoiceWakeEnabled, ORB_VOICE_WAKE_EVENT, ORB_VOICE_WAKE_STATUS_EVEN
 import { listBrands, invalidateBrandCache } from "../services/brands";
 import { getRemoteBrandAgentConnection, listBrandAgentFeedback, setRemoteBrandAgentConnection, updateBrandAgentFeedback, activeBrandId, activeBrandName, sendDailySlackReport } from "../services/orbApi";
 import { getDailySlackReport, saveDailySlackReport } from "../services/overviewBlocks";
+import { enrichFeedbackUsers } from "../lib/feedbackData";
 import PageHeader from '../components/ui/PageHeader'
 
 const tabs = [
@@ -279,7 +280,9 @@ export default function Settings() {
     setFeedbackError("");
     try {
       const result = await listBrandAgentFeedback(brandId);
-      setFeedbackItems(Array.isArray(result?.feedback) ? result.feedback : []);
+      const rawItems = Array.isArray(result?.feedback) ? result.feedback : [];
+      const items = await enrichFeedbackUsers(rawItems, brandId);
+      setFeedbackItems(items);
     } catch (error) {
       setFeedbackError(error.message || "Could not load AI feedback.");
     } finally {
@@ -802,6 +805,12 @@ export default function Settings() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${resolved ? "bg-emerald-100 text-emerald-700" : "bg-primary-tint text-primary"}`}>{resolved ? "Resolved" : item.status.replaceAll("_", " ")}</span><span className="text-xs text-muted">{item.scope === "reply" ? "Reply feedback" : "Conversation feedback"} · {feedbackDate(item.created_at)}</span></div>
+                          {(item.submitted_by_name || item.submitted_by_email) && (
+                            <p className="mt-1 text-xs text-muted">
+                              By <strong className="font-semibold text-slate-700">{item.submitted_by_name || "Workspace member"}</strong>
+                              {item.submitted_by_email && ` (${item.submitted_by_email})`}
+                            </p>
+                          )}
                           {item.tags?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.tags.map((tag) => <span key={tag} className="rounded-full border border-ink/10 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{tag}</span>)}</div>}
                         </div>
                         <button type="button" onClick={() => updateFeedbackStatus(item, resolved ? "open" : "resolved")} disabled={Boolean(feedbackUpdatingId)} className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-extrabold transition disabled:opacity-50 ${resolved ? "border-slate-300 bg-white text-slate-700 hover:border-primary hover:text-primary" : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"}`}>

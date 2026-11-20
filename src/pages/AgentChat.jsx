@@ -429,15 +429,15 @@ export default function AgentChat({ embedded = false }) {
     if (!tags.length && !note.trim() && !ideal.trim()) return;
     setSavingFeedback(true);
     try {
-      const conversationHistory = scope === "conversation"
-        ? messages.map((message) => ({
-            role: message.role,
-            text: message.text,
-            created_at: message.createdAt instanceof Date
-              ? message.createdAt.toISOString()
-              : new Date(message.createdAt || Date.now()).toISOString(),
-          }))
-        : [];
+      // Every piece of feedback keeps the chat it came from (reply feedback included), so
+      // the team can read the whole conversation later, even if the session is deleted.
+      const conversationHistory = messages.map((message) => ({
+        role: message.role,
+        text: message.text,
+        created_at: message.createdAt instanceof Date
+          ? message.createdAt.toISOString()
+          : new Date(message.createdAt || Date.now()).toISOString(),
+      }));
       const result = await createBrandAgentFeedback(activeBrand.id, {
         session_id: sessionId,
         scope,
@@ -447,6 +447,8 @@ export default function AgentChat({ embedded = false }) {
         note: note.trim(),
         ideal_reply: ideal.trim(),
         conversation_history: conversationHistory,
+        user_name: user?.name || "",
+        user_email: user?.email || "",
       });
       if (result?.feedback) setFeedback((items) => [...items, result.feedback]);
       if (scope === "reply") resetReplyFeedback();
@@ -470,7 +472,7 @@ export default function AgentChat({ embedded = false }) {
 
   const chatWorkspace = (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[100] h-[100dvh] w-screen min-h-0 max-w-none overflow-hidden bg-canvas" : `mx-auto ${embedded ? "h-[calc(100dvh-13rem)] min-h-[42rem] max-w-7xl" : "h-[calc(100dvh-6.5rem)] min-h-[34rem] max-w-7xl"}`}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[100] h-[100dvh] w-screen min-h-0 max-w-none overflow-hidden bg-canvas" : `mx-auto max-w-7xl ${embedded ? "lg:h-[calc(100dvh-13rem)] lg:min-h-[42rem]" : "lg:h-[calc(100dvh-6.5rem)] lg:min-h-[34rem]"}`}`}
       role={isFullscreen ? "dialog" : undefined}
       aria-modal={isFullscreen || undefined}
       aria-label={isFullscreen ? `${title} full screen` : undefined}
@@ -544,8 +546,10 @@ export default function AgentChat({ embedded = false }) {
           </div>
         </div>
       </div>
-      <section className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-white lg:flex-row ${isFullscreen ? "rounded-none border-0 shadow-none" : "rounded-2xl border border-line shadow-card"}`}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:border-r lg:border-line">
+      <section className={`flex min-h-0 flex-1 flex-col bg-white lg:flex-row lg:overflow-hidden ${isFullscreen ? "overflow-y-auto rounded-none border-0 shadow-none" : "overflow-hidden rounded-2xl border border-line shadow-card"}`}>
+        {/* On phones the conversation gets a fixed, screen-sized panel and the feedback column
+            simply follows it down the page, instead of both fighting for one short box. */}
+        <div className={`flex min-w-0 shrink-0 flex-col lg:min-h-0 lg:flex-1 lg:shrink lg:border-r lg:border-line ${isFullscreen ? "h-[calc(100dvh-9rem)]" : "h-[calc(100dvh-11rem)]"} min-h-[26rem] lg:h-auto`}>
           <header className="flex items-center gap-3 border-b border-line bg-white px-5 py-4 sm:px-6">
             <AgentOrb className="h-10 w-10 shadow-sm" />
             <div className="min-w-0">

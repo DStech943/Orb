@@ -27,6 +27,7 @@ from app.api.knowledge import (
     _admin,
     _agent_feedback_out,
     _remote_brand,
+    _resolve_profiles_for_users,
     _supabase_rows,
     _supabase_service_rows,
     _supabase_service_write,
@@ -94,6 +95,8 @@ class AgentIssueReport(RequestModel):
     transcript: list[TranscriptMessage] = Field(min_length=1, max_length=MAX_MESSAGES)
     # How many messages the tester's chat held, so a trimmed transcript is flagged.
     total_message_count: int | None = Field(default=None, ge=1, le=100_000)
+    user_name: str = Field(default="", max_length=200)
+    user_email: str = Field(default="", max_length=320)
 
     @field_validator("description", "expected_behavior", "message_id", mode="before")
     @classmethod
@@ -568,6 +571,19 @@ async def create_agent_issue_report(
             raise HTTPException(status_code=422, detail="One or more tagged teammates are not available for this brand.")
         tagged = [{"id": str(pid), "name": directory[str(pid)]["name"]} for pid in dict.fromkeys(payload.tagged_people)]
 
+    user_name = str(payload.user_name or user.name or "").strip()
+    user_email = str(payload.user_email or user.email or "").strip()
+    if not user_name or not user_email:
+        try:
+            resolved = await _resolve_profiles_for_users(request, {str(user.id)}, brand_id=brand_uuid)
+            u_info = resolved.get(str(user.id), {})
+            user_name = user_name or u_info.get("name", "")
+            user_email = user_email or u_info.get("email", "")
+        except Exception:
+            pass
+    if not user_name and user_email:
+        user_name = user_email.split("@")[0].replace(".", " ").title()
+
     config = slack.platform_config(brand.get("platform_config"))
     metadata = {
         "brand_name": str(brand.get("name") or ""),
@@ -575,6 +591,8 @@ async def create_agent_issue_report(
         "agent_host": urlparse(str(config.get("ai_support_agent_url") or "")).hostname or "",
         "environment": request.app.state.settings.env,
         "snapshot_source": snapshot["snapshot_source"],
+        "user_name": user_name,
+        "user_email": user_email,
     }
     row = {
         "brand_id": brand_uuid,
@@ -616,7 +634,7 @@ async def create_agent_issue_report(
         raise HTTPException(status_code=503, detail="The report was saved but its conversation could not be attached. Send it again to finish.") from exc
 
     background_tasks.add_task(deliver_report_to_slack, request, str(saved["id"]))
-    return {"feedback": _agent_feedback_out(saved)}
+    return {"feedback": _agent_feedback_out(saved, user_info={"name": user_name, "email": user_email})}
 
 
 @router.get("/brands/{brand_id}/agent-feedback/{feedback_id}")
@@ -638,7 +656,17 @@ async def get_agent_issue_report(
         "orb_agent_feedback_snapshots",
         {"select": "messages,message_count,truncated,snapshot_source,sha256,created_at", "feedback_id": f"eq.{feedback_id}", "limit": "1"},
     )
-    report = _agent_feedback_out(rows[0])
+    sub_id = str(rows[0].get("submitted_by") or "")
+    user_info = {}
+    if sub_id:
+        p_map = await _resolve_profiles_for_users(request, {sub_id}, brand_id=str(brand["id"]))
+        user_info = dict(p_map.get(sub_id, {}))
+        if str(user.id) == sub_id:
+            if not user_info.get("name") and user.name:
+                user_info["name"] = user.name
+            if not user_info.get("email") and user.email:
+                user_info["email"] = user.email
+    report = _agent_feedback_out(rows[0], user_info=user_info)
     report["agent_metadata"] = rows[0].get("agent_metadata") if isinstance(rows[0].get("agent_metadata"), dict) else {}
     if await _is_admin(request, user):
         report["slack_last_error"] = rows[0].get("slack_last_error")

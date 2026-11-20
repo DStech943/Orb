@@ -41,6 +41,7 @@ export default function DateRangeFilter({ value, onChange, className = '' }) {
   const [to, setTo] = useState('')
   const [touched, setTouched] = useState(false)
   const root = useRef(null)
+  const strip = useRef(null)
   const today = toInputDate(new Date())
   const isCustom = value.id === 'custom'
   const problem = customRangeProblem(from, to)
@@ -79,18 +80,26 @@ export default function DateRangeFilter({ value, onChange, className = '' }) {
     setOpen(false)
   }
 
+  // On phones the options sit in one swipeable row; keep the chosen one in view.
+  useEffect(() => {
+    const active = strip.current?.querySelector('[aria-pressed="true"]')
+    if (!active || !strip.current) return
+    const box = strip.current
+    box.scrollTo({ left: active.offsetLeft - (box.clientWidth - active.offsetWidth) / 2, behavior: 'smooth' })
+  }, [value.id, value.from, value.to])
+
   const presets = DATE_RANGES.filter((range) => range.id !== 'custom')
 
   return (
-    <div ref={root} className={`relative flex flex-wrap items-center gap-2 ${className}`}>
-      <div className="flex flex-wrap rounded-control border border-line-strong bg-white p-1 shadow-card" role="group" aria-label="Date range">
+    <div ref={root} className={`relative flex min-w-0 max-w-full items-center gap-2 ${className}`}>
+      <div ref={strip} className="mac-scroll flex min-w-0 max-w-full flex-nowrap gap-0.5 overflow-x-auto rounded-control border border-line-strong bg-white p-1 shadow-card sm:flex-wrap sm:overflow-visible" role="group" aria-label="Date range">
         {presets.map((range) => (
           <button
             key={range.id}
             type="button"
             aria-pressed={value.id === range.id}
             onClick={() => { setOpen(false); onChange({ id: range.id }) }}
-            className={`rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${value.id === range.id ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:text-ink'}`}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors sm:py-1 ${value.id === range.id ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:text-ink'}`}
           >
             {range.label}
           </button>
@@ -101,7 +110,7 @@ export default function DateRangeFilter({ value, onChange, className = '' }) {
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => (open ? setOpen(false) : openPicker())}
-          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${isCustom ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:text-ink'}`}
+          className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs sm:py-1 font-semibold transition-colors ${isCustom ? 'bg-primary text-white shadow-sm' : 'text-fg-muted hover:text-ink'}`}
         >
           <CalendarDays size={13} />
           {isCustom ? `${shortDate(value.from)} – ${shortDate(value.to)}` : 'Custom range'}

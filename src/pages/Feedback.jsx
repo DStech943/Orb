@@ -8,6 +8,7 @@ import Select from '../components/ui/Select'
 import Skeleton from '../components/ui/Skeleton'
 import StatusChip from '../components/ui/StatusChip'
 import { issueCategoryLabel } from '../components/chat/ReportIssueModal'
+import FeedbackConversation from '../components/chat/FeedbackConversation'
 import { useAuth } from '../context/AuthContext'
 import { useBrand } from '../context/BrandContext'
 import { useToast } from '../context/ToastContext'
@@ -37,6 +38,29 @@ const itemTitle = (item) => {
 }
 const itemSummary = (item) => item.note || item.ideal_reply || item.agent_reply || (item.tags || []).join(', ') || 'No additional details.'
 
+export const submitterName = (item, currentUser, scope) => {
+  if (item?.submitted_by_name && item.submitted_by_name !== 'Workspace member' && item.submitted_by_name !== 'Google Account') {
+    return item.submitted_by_name
+  }
+  if (currentUser && item?.submitted_by === currentUser.id && currentUser.name) return currentUser.name
+  if (item?.submitted_by_email) {
+    const local = item.submitted_by_email.split('@')[0]
+    return local.replace(/[._]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+  }
+  if (scope === 'sessions' && currentUser?.name) return currentUser.name
+  if (currentUser && item?.submitted_by === currentUser.id && currentUser.email) {
+    return currentUser.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+  }
+  return item?.submitted_by_name || 'Team member'
+}
+
+export const submitterEmail = (item, currentUser, scope) => {
+  if (item?.submitted_by_email) return item.submitted_by_email
+  if (currentUser && item?.submitted_by === currentUser.id && currentUser.email) return currentUser.email
+  if (scope === 'sessions' && currentUser?.email) return currentUser.email
+  return ''
+}
+
 function StatusTrail({ status }) {
   const current = Math.max(0, STATUS_STEPS.findIndex((step) => step.id === status))
   return (
@@ -59,9 +83,11 @@ function StatusTrail({ status }) {
   )
 }
 
-function Detail({ item, isAdmin, brandId, onStatus }) {
+function Detail({ item, currentUser, scope, isAdmin, brandId, agentName, onStatus }) {
   const { showToast } = useToast()
   const [saving, setSaving] = useState(false)
+  const name = submitterName(item, currentUser, scope)
+  const email = submitterEmail(item, currentUser, scope)
   const change = async (status) => {
     setSaving(true)
     try {
@@ -82,6 +108,26 @@ function Detail({ item, isAdmin, brandId, onStatus }) {
           <h3 className="mt-1 text-lg font-semibold tracking-tight">{itemTitle(item)}</h3>
         </div>
         <StatusChip status={item.status} />
+      </div>
+
+      {/* Submitter Info Card */}
+      <div className="flex items-center gap-3 rounded-xl border border-line bg-canvas/70 p-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary-tint text-sm font-bold text-primary">
+          {(name || email || 'U').charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-semibold text-ink">{name}</p>
+            <span className="rounded-full bg-subtle px-2 py-0.5 text-[10px] font-medium text-fg-muted">
+              Submitted by
+            </span>
+          </div>
+          {email ? (
+            <p className="truncate text-xs text-fg-muted">{email}</p>
+          ) : (
+            <p className="text-xs text-fg-muted/70">Email not provided</p>
+          )}
+        </div>
       </div>
       {item.note && (
         <section>
@@ -111,6 +157,7 @@ function Detail({ item, isAdmin, brandId, onStatus }) {
       {(item.tagged_people || []).length > 0 && (
         <p className="text-xs text-fg-muted">Shared with {item.tagged_people.map((person) => person.name).filter(Boolean).join(', ')}</p>
       )}
+      <FeedbackConversation item={item} brandId={brandId} agentName={agentName} />
       <section>
         <h4 className="mb-3 text-xs font-medium text-fg-muted">Where this stands</h4>
         <StatusTrail status={item.status} />
@@ -118,7 +165,7 @@ function Detail({ item, isAdmin, brandId, onStatus }) {
       <div className="flex flex-wrap items-end gap-3 border-t border-line pt-4">
         {item.kind === 'issue_report' && (
           <Link to={`/app/reports/${brandId}/${item.id}`} className="inline-flex h-8 items-center gap-2 rounded-control border border-line-strong bg-white px-3 text-xs font-medium shadow-card transition-colors hover:border-primary/40 hover:bg-subtle">
-            View conversation <ArrowUpRight size={14} />
+            Open full report <ArrowUpRight size={14} />
           </Link>
         )}
         {isAdmin && (
@@ -217,30 +264,49 @@ export default function Feedback() {
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <ul className="grid gap-2" aria-label={pluralize(visible.length, 'item')}>
-            {visible.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  aria-pressed={selected?.id === item.id}
-                  className={`w-full rounded-card border bg-white p-4 text-left shadow-card transition-[border-color,box-shadow] duration-150 hover:border-primary/40 ${selected?.id === item.id ? 'border-primary ring-4 ring-primary/10' : 'border-line'}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="flex items-center gap-2 text-sm font-medium">
-                      {isPositive(item) && <ThumbsUp size={14} className="text-success" aria-hidden="true" />}
-                      {itemTitle(item)}
-                    </p>
-                    <StatusChip status={item.status} />
-                  </div>
-                  <p className="mt-1.5 line-clamp-2 text-sm text-fg-muted">{itemSummary(item)}</p>
-                  <p className="mt-2 text-xs text-fg-muted/80">{item.kind === 'issue_report' ? 'Issue report' : 'Feedback'} · {timeAgo(item.created_at)}</p>
-                </button>
-              </li>
-            ))}
+            {visible.map((item) => {
+              const name = submitterName(item, user)
+              const email = submitterEmail(item, user)
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(item.id)}
+                    aria-pressed={selected?.id === item.id}
+                    className={`w-full rounded-card border bg-white p-4 text-left shadow-card transition-[border-color,box-shadow] duration-150 hover:border-primary/40 ${selected?.id === item.id ? 'border-primary ring-4 ring-primary/10' : 'border-line'}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="flex items-center gap-2 text-sm font-medium">
+                        {isPositive(item) && <ThumbsUp size={14} className="text-success" aria-hidden="true" />}
+                        {itemTitle(item)}
+                      </p>
+                      <StatusChip status={item.status} />
+                    </div>
+                    <p className="mt-1.5 line-clamp-2 text-sm text-fg-muted">{itemSummary(item)}</p>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 border-t border-line/60 pt-2.5 text-xs">
+                      <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-ink/90">
+                        <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-tint text-[10px] font-bold text-primary">
+                          {(name || email || 'U').charAt(0).toUpperCase()}
+                        </span>
+                        <span className="truncate max-w-[140px] sm:max-w-[180px]">{name}</span>
+                        {email && (
+                          <span className="truncate max-w-[140px] sm:max-w-[200px] font-normal text-fg-muted">
+                            ({email})
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-fg-muted/80">
+                        {item.kind === 'issue_report' ? 'Issue report' : 'Feedback'} · {timeAgo(item.created_at)}
+                      </span>
+                    </div>
+                  </button>
+                </li>
+              )
+            })}
           </ul>
           <aside className="rounded-card border border-line bg-white p-5 shadow-card lg:sticky lg:top-20" aria-live="polite">
             {selected ? (
-              <Detail item={selected} isAdmin={isAdmin} brandId={brandId} onStatus={updateStatus} />
+              <Detail item={selected} currentUser={user} isAdmin={isAdmin} brandId={brandId} agentName={agentName} onStatus={updateStatus} />
             ) : (
               <p className="py-10 text-center text-sm text-fg-muted">Select an item to see the details and where it stands.</p>
             )}

@@ -1,220 +1,197 @@
-import React, { useEffect, useState } from 'react'
-import {
-  ArrowLeft,
-  CheckCircle2,
-  Clock,
-  ExternalLink,
-  Filter,
-  MessageSquare,
-  RefreshCw,
-  Search,
-  Star,
-  User,
-  X,
-  XCircle,
-  AlertTriangle,
-} from 'lucide-react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Clock, Loader2, MessageSquare, RefreshCw, Search } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import Button from '../components/ui/Button'
 import Drawer from '../components/ui/Drawer'
-import { useBrand } from '../context/BrandContext'
-import { useAuth } from '../context/AuthContext'
-import { listBrandConversations } from '../services/conversations'
-import { activeBrandId, activeBrandName } from '../services/orbApi'
 import OrbLoader from '../components/ui/OrbLoader'
-import ChatMessageText from '../components/chat/ChatMessageText'
+import { useBrand } from '../context/BrandContext'
+import { DEFAULT_RANGE } from '../services/aiAnalytics'
+import DateRangeFilter from '../components/analytics/DateRangeFilter'
+import { getConversationMessages, listBrandConversations } from '../services/conversations'
+import { SENDER_META } from '../components/analytics/parts'
 
-const OUTCOME_FILTERS = [
-  { id: 'all', label: 'All Outcomes' },
-  { id: 'successful', label: 'Successful' },
-  { id: 'escalated', label: 'Escalated' },
-  { id: 'unsuccessful', label: 'Unsuccessful' },
+const STATUS_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'open', label: 'Open' },
+  { id: 'resolved', label: 'Resolved' },
 ]
+const PAGE_SIZE = 25
+const CHANNELS = { zoko: 'WhatsApp', instagram: 'Instagram', facebook: 'Facebook' }
+const channelName = (platform) => CHANNELS[String(platform).toLowerCase()] || String(platform || 'Unknown')
+
+const when = (value, withDate = true) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return withDate
+    ? date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function StatusBadge({ status }) {
+  return status === 'resolved' ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-success"><CheckCircle2 size={12} /> Resolved</span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700"><Clock size={12} /> Open</span>
+  )
+}
 
 export default function Conversations() {
-  const { brand, brandName, agentName } = useBrand()
-  const { isAdmin } = useAuth()
+  const { brand, brandId, agentName, loading: brandsLoading } = useBrand()
+  const usable = Boolean(brandId) && !brand?.isPlaceholder
 
-  const effectiveBrandId =
-    brand?.id || activeBrandId() || '00000000-0000-0000-0000-000000000002'
-  const effectiveBrandName =
-    brandName || activeBrandName() || 'Nutrova'
-  const effectiveAgentName =
-    agentName || brand?.ai_agent_name || `${effectiveBrandName} AI`
-
-  const [conversations, setConversations] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [range, setRange] = useState(DEFAULT_RANGE)
+  const rangeKey = `${range.id}|${range.from || ''}|${range.to || ''}`
+  const [status, setStatus] = useState('all')
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [outcomeFilter, setOutcomeFilter] = useState('all')
-  const [selectedConv, setSelectedConv] = useState(null)
+  const [page, setPage] = useState(0)
+  const [state, setState] = useState({ status: 'loading', items: [], total: 0, error: '' })
+  const [selected, setSelected] = useState(null)
+  const [detail, setDetail] = useState({ status: 'idle', conversation: null, messages: [], error: '' })
+  const ticket = useRef(0)
 
-  const loadConversations = async () => {
-    setLoading(true)
-    try {
-      const items = await listBrandConversations(effectiveBrandId, effectiveBrandName, {
-        search,
-        outcome: outcomeFilter,
-        isAdmin,
-      })
-      setConversations(items || [])
-    } finally {
-      setLoading(false)
+  const load = useCallback(async () => {
+    if (!usable) {
+      setState({ status: brandsLoading ? 'loading' : 'idle', items: [], total: 0, error: '' })
+      return
     }
-  }
+    const mine = ++ticket.current
+    setState((current) => ({ ...current, status: 'loading', error: '' }))
+    try {
+      const result = await listBrandConversations(brandId, { range, status, search, limit: PAGE_SIZE, offset: page * PAGE_SIZE })
+      if (mine === ticket.current) setState({ status: 'ready', items: result.items || [], total: result.total || 0, error: '' })
+    } catch (cause) {
+      if (mine === ticket.current) setState({ status: 'error', items: [], total: 0, error: cause?.message || 'Could not load conversations.' })
+    }
+  }, [usable, brandsLoading, brandId, rangeKey, status, search, page])
 
   useEffect(() => {
-    loadConversations()
-  }, [effectiveBrandId, effectiveBrandName, outcomeFilter, isAdmin])
+    load()
+  }, [load])
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault()
-    loadConversations()
-  }
+  // Any change to what is being listed starts again from the first page.
+  useEffect(() => {
+    setPage(0)
+  }, [brandId, rangeKey, status, search])
 
-  const outcomeBadge = (outcome) => {
-    switch (outcome) {
-      case 'successful':
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-success">
-            <CheckCircle2 size={12} /> Resolved by AI
-          </span>
-        )
-      case 'escalated':
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-            <AlertTriangle size={12} /> Handed Off
-          </span>
-        )
-      case 'unsuccessful':
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-semibold text-danger">
-            <XCircle size={12} /> Issue Reported
-          </span>
-        )
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-            Completed
-          </span>
-        )
+  const openConversation = async (item) => {
+    setSelected(item)
+    setDetail({ status: 'loading', conversation: null, messages: [], error: '' })
+    try {
+      const result = await getConversationMessages(brandId, item.id)
+      setDetail({ status: 'ready', conversation: result.conversation, messages: result.messages || [], error: '' })
+    } catch (cause) {
+      setDetail({ status: 'error', conversation: null, messages: [], error: cause?.message || 'Could not load this conversation.' })
     }
   }
+
+  const submitSearch = (event) => {
+    event.preventDefault()
+    setSearch(searchInput.trim())
+  }
+
+  const first = state.total === 0 ? 0 : page * PAGE_SIZE + 1
+  const last = Math.min(state.total, page * PAGE_SIZE + state.items.length)
+  const hasNext = (page + 1) * PAGE_SIZE < state.total
 
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
         eyebrow="Customer Experience"
         title="Customer Conversations"
-        description={`Browse customer interactions handled by ${agentName} across your active sales channels.`}
+        description={`Real conversations your customers have had with ${agentName} and your team. A conversation is listed if it started or had a message in the selected period.`}
         actions={
-          <Button variant="secondary" size="sm" onClick={loadConversations}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <Button variant="secondary" size="sm" onClick={load}>
+            <RefreshCw size={14} className={state.status === 'loading' ? 'animate-spin' : ''} />
             Refresh
           </Button>
         }
       />
 
-      {/* Search and Filters Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface p-4 shadow-card">
-        <form onSubmit={handleSearchSubmit} className="relative min-w-[280px] flex-1">
+        <form onSubmit={submitSearch} className="relative min-w-[260px] flex-1">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-muted" />
           <input
-            type="text"
-            placeholder="Search conversations by keyword, customer, or ID…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            type="search"
+            placeholder="Search the latest message or customer name…"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            aria-label="Search conversations"
             className="w-full rounded-control border border-line-strong bg-white py-2 pl-9 pr-3 text-sm text-ink placeholder:text-fg-muted focus:border-primary focus:outline-none"
           />
         </form>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          {OUTCOME_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setOutcomeFilter(f.id)}
-              className={`rounded-control px-3 py-1.5 text-xs font-semibold transition-colors ${outcomeFilter === f.id
-                ? 'bg-primary text-white shadow-sm'
-                : 'border border-line-strong bg-white text-fg-muted hover:bg-subtle hover:text-ink'
-                }`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex gap-1.5" role="group" aria-label="Status">
+            {STATUS_FILTERS.map((f) => (
+              <button key={f.id} type="button" onClick={() => setStatus(f.id)} aria-pressed={status === f.id}
+                className={`rounded-control px-3 py-1.5 text-xs font-semibold transition-colors ${status === f.id ? 'bg-primary text-white shadow-sm' : 'border border-line-strong bg-white text-fg-muted hover:bg-subtle hover:text-ink'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <DateRangeFilter value={range} onChange={setRange} className="w-full sm:w-auto" />
         </div>
       </div>
 
-      {/* Conversations List */}
-      {loading && !conversations.length ? (
+      {state.status === 'idle' ? (
+        <div className="rounded-card border border-line bg-surface p-12 text-center shadow-card text-sm text-fg-muted">Pick a brand in the top bar to see its conversations.</div>
+      ) : state.status === 'loading' && !state.items.length ? (
         <OrbLoader label="Loading conversations" />
-      ) : conversations.length === 0 ? (
+      ) : state.status === 'error' ? (
+        <div className="rounded-card border border-red-200 bg-red-50 p-6" role="alert">
+          <h3 className="text-base font-bold text-ink">Conversations could not be loaded</h3>
+          <p className="mt-1 text-sm text-fg-muted">{state.error}</p>
+          <Button className="mt-3" variant="secondary" size="sm" onClick={load}><RefreshCw size={14} /> Try again</Button>
+        </div>
+      ) : state.items.length === 0 ? (
         <div className="rounded-card border border-line bg-surface p-12 text-center shadow-card">
           <MessageSquare size={36} className="mx-auto text-fg-muted/60" />
           <h3 className="mt-3 text-base font-bold text-ink">No conversations found</h3>
-          <p className="mt-1 text-sm text-fg-muted">
-            {search ? 'Try adjusting your search terms or filters.' : 'Conversations handled by your AI assistant will appear here.'}
-          </p>
+          <p className="mt-1 text-sm text-fg-muted">{search || status !== 'all' ? 'Try a different search, status or time range.' : 'No customer conversations were active in this period.'}</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
-          <div className="divide-y divide-line">
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                onClick={() => setSelectedConv(conv)}
-                className="group flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:bg-subtle/60 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-primary">{conv.id}</span>
-                    <span className="text-xs text-line-strong">•</span>
-                    <span className="font-semibold text-ink">{conv.customerName}</span>
-                    <span className="rounded-full bg-subtle px-2 py-0.5 text-[10px] font-medium text-fg-muted">
-                      {conv.channel}
-                    </span>
-                    {conv.rating && (
-                      <span className="flex items-center gap-0.5 text-xs font-bold text-amber-500">
-                        <Star size={12} className="fill-amber-400 text-amber-400" />
-                        {conv.rating}.0
-                      </span>
-                    )}
+          <ul className="divide-y divide-line">
+            {state.items.map((conv) => (
+              <li key={conv.id}>
+                <button type="button" onClick={() => openConversation(conv)} className="group flex w-full flex-col gap-3 p-4 text-left transition-colors hover:bg-subtle/60 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-ink">{conv.customer_name}</span>
+                      {conv.contact && <span className="text-xs text-fg-muted">{conv.contact}</span>}
+                      <span className="rounded-full bg-subtle px-2 py-0.5 text-[10px] font-medium text-fg-muted">{channelName(conv.platform)}</span>
+                      {conv.topics.slice(0, 2).map((topic) => <span key={topic} className="rounded-full bg-primary-tint px-2 py-0.5 text-[10px] font-semibold text-primary">{topic}</span>)}
+                    </div>
+                    <p className="truncate text-sm text-fg-muted">{conv.summary || conv.preview || 'No message preview'}</p>
                   </div>
-                  <p className="truncate text-sm text-fg-muted">{conv.summary}</p>
-                </div>
-
-                <div className="flex shrink-0 items-center justify-between gap-4 sm:justify-end">
-                  <div className="text-right">
-                    <div className="flex justify-end">{outcomeBadge(conv.outcome)}</div>
-                    <span className="mt-1 block text-[11px] text-fg-muted">
-                      {new Date(conv.startedAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                  <div className="shrink-0 text-right">
+                    <StatusBadge status={conv.status} />
+                    <span className="mt-1 block text-[11px] text-fg-muted">Last activity {when(conv.last_activity_at)}</span>
                   </div>
-                </div>
-              </div>
+                </button>
+              </li>
             ))}
+          </ul>
+          <div className="flex items-center justify-between border-t border-line bg-subtle/40 px-4 py-2.5 text-xs text-fg-muted">
+            <span>{first}–{last} of {state.total.toLocaleString()}</span>
+            <div className="flex items-center gap-1.5">
+              <Button variant="secondary" size="sm" disabled={page === 0 || state.status === 'loading'} onClick={() => setPage((p) => Math.max(0, p - 1))}><ChevronLeft size={14} /> Previous</Button>
+              <Button variant="secondary" size="sm" disabled={!hasNext || state.status === 'loading'} onClick={() => setPage((p) => p + 1)}>Next <ChevronRight size={14} /></Button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Conversation Detail Drawer */}
-      <Drawer
-        open={Boolean(selectedConv)}
-        onClose={() => setSelectedConv(null)}
-        title={selectedConv ? `${selectedConv.customerName} · ${selectedConv.id}` : 'Conversation'}
-        width="max-w-xl"
-      >
-        {selectedConv && (
-          <div className="flex h-full flex-col justify-between space-y-4">
-            {/* Metadata Header */}
+      <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={selected ? `${selected.customer_name}${selected.contact ? ` · ${selected.contact}` : ''}` : 'Conversation'} width="max-w-xl">
+        {selected && (
+          <div className="flex h-full flex-col space-y-4">
             <div className="rounded-xl border border-line bg-subtle/50 p-3.5 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-ink">Channel: <span className="font-normal text-fg-muted">{selectedConv.channel}</span></span>
-                <div>{outcomeBadge(selectedConv.outcome)}</div>
+                <span className="font-semibold text-ink">Channel: <span className="font-normal text-fg-muted">{channelName(selected.platform)}</span></span>
+                <StatusBadge status={selected.status} />
               </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-fg-muted">
-                <span>Date: {new Date(selectedConv.startedAt).toLocaleString()}</span>
-                <span>Messages: {selectedConv.messageCount}</span>
-              </div>
+              <p className="mt-2 text-fg-muted">Started {when(selected.started_at)}{selected.resolved_at ? ` · Resolved ${when(selected.resolved_at)}` : ''}</p>
+              {selected.summary && <p className="mt-2 text-fg-muted"><span className="font-semibold text-ink">Summary: </span>{selected.summary}</p>}
             </div>
 
             {detail.status === 'loading' && <p className="flex items-center gap-2 text-sm text-fg-muted" role="status"><Loader2 size={15} className="animate-spin" /> Loading messages…</p>}
@@ -232,7 +209,7 @@ export default function Conversations() {
                           {customer ? selected.customer_name : (SENDER_META[msg.sender]?.label || 'Reply')}
                         </span>
                         <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${customer ? 'rounded-tl-sm border border-line-strong bg-white text-ink' : msg.sender === 'ai' ? 'rounded-tr-sm bg-primary text-white' : msg.sender === 'team' ? 'rounded-tr-sm border border-emerald-200 bg-emerald-50 text-ink' : msg.sender === 'automated' ? 'rounded-tr-sm border border-[#FF9B3D]/30 bg-[#FFFAF3] text-ink' : 'rounded-tr-sm border border-line-strong bg-subtle text-ink'}`}>
-                          {msg.text ? <ChatMessageText text={msg.text} isUser={msg.sender === 'ai'} /> : <p className="italic opacity-80">{msg.media_type ? `[${msg.media_type}]` : '[no text]'}</p>}
+                          {msg.text ? <p className="whitespace-pre-wrap break-words">{msg.text}</p> : <p className="italic opacity-80">{msg.media_type ? `[${msg.media_type}]` : '[no text]'}</p>}
                           {msg.media_url && <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="mt-1 block text-xs underline">Open attachment</a>}
                         </div>
                         <span className="mt-1 text-[10px] text-fg-muted">{when(msg.timestamp, false)}</span>
