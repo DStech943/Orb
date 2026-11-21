@@ -41,7 +41,7 @@ function Source({ item, progress }) {
   const opacity = useTransform(progress, [0, 0.08, 0.42, 0.5], [0, 1, 1, 0])
   const Icon = item.icon
   return (
-    <motion.div style={{ x, y, rotate, scale, opacity }} className="absolute left-1/2 top-1/2 -ml-[78px] -mt-[22px] flex w-[156px] items-center gap-2 rounded-xl border border-white/10 bg-white/[0.07] p-2 backdrop-blur-md">
+    <motion.div style={{ x, y, rotate, scale, opacity }} className="absolute left-1/2 top-1/2 -ml-[78px] -mt-[22px] flex w-[156px] items-center gap-2 rounded-xl border border-white/10 bg-white/[0.07] p-2">
       <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br ${item.tint} text-white`}><Icon size={14} /></span>
       <span className="truncate text-xs font-medium text-white/85">{item.label}</span>
     </motion.div>

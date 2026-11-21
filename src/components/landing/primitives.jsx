@@ -1,4 +1,4 @@
-import React, { useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from 'motion/react'
 
 export const ease = [0.22, 1, 0.36, 1]
@@ -123,11 +123,24 @@ export function ScrollWords({ text, className = '' }) {
   )
 }
 
+// One observer for every animated pill: while a pill is offscreen its border animation is
+// paused, so the page does not restyle and repaint them 60 times a second for nothing.
+const pillObserver = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+  entries.forEach((entry) => entry.target.toggleAttribute('data-offscreen', !entry.isIntersecting))
+}, { rootMargin: '120px' })
+
 /** Small uppercase eyebrow used above every section title. */
 export function Eyebrow({ children, tone = 'light', className = '' }) {
+  const pill = useRef(null)
+  useEffect(() => {
+    const el = pill.current
+    if (!el || !pillObserver) return undefined
+    pillObserver.observe(el)
+    return () => pillObserver.unobserve(el)
+  }, [])
   const colors = tone === 'night' ? 'border-white/15 bg-white/[0.06] text-white/80' : 'border-white/80 bg-white/70 text-ink/70 shadow-card'
   return (
-    <span className={`lp-shine inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] backdrop-blur ${colors} ${className}`}>
+    <span ref={pill} className={`lp-shine inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] backdrop-blur ${colors} ${className}`}>
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-gradient-to-br from-primary to-orange" />
       {children}
     </span>

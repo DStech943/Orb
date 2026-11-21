@@ -55,7 +55,7 @@ const request = async (path, options = {}) => {
     throw new Error("Orb API backend is offline (cooldown active)");
   }
   const { cacheTtl = 0, invalidateCache = true, ...fetchOptions } = options;
-  const { data } = await supabase?.auth.getSession();
+  const { data } = (await supabase?.auth.getSession()) || {};
   const token = data?.session?.access_token;
   if (!token && !localBrowser && !mockAuth)
     throw new Error("Sign in again to access brand knowledge.");
@@ -175,7 +175,7 @@ export const sendSlackEscalation = async (
   brandName = activeBrandName(),
 ) => {
   if (!hasOrbApi) throw new Error("Orb API is unavailable.");
-  const { data } = await supabase?.auth.getSession();
+  const { data } = (await supabase?.auth.getSession()) || {};
   const token = data?.session?.access_token;
   if (!token && !localBrowser && !mockAuth)
     throw new Error("Sign in again to send an escalation.");
@@ -336,7 +336,11 @@ export const updateBrandAgentFeedback = (brandId, feedbackId, payload) =>
     method: "PATCH",
     body: JSON.stringify(payload),
   });
-export const syncBrandAgentSettings = (brandId, payload) =>
+export const deleteBrandAgentFeedback = (brandId, feedbackId) =>
+  request(`/api/brands/${encodeURIComponent(brandId)}/agent-feedback/${encodeURIComponent(feedbackId)}`, {
+    method: "DELETE",
+  });
+export const syncBrandAgentSettings =(brandId, payload) =>
   agentRequest(`/api/v1/brands/${encodeURIComponent(brandId)}/agent`, {
     method: "PUT",
     body: JSON.stringify(payload),

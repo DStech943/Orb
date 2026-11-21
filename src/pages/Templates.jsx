@@ -36,7 +36,7 @@ export default function Templates() {
   const [query, setQuery] = useState('')
   const loadTemplates = useCallback(() => listMessageTemplates(brandName), [brandName])
   const { data, loading, error, refreshing, reload } = useAsync(loadTemplates, [loadTemplates])
-  const templates = Array.isArray(data?.templates) ? data.templates : []
+  const templates = useMemo(() => (Array.isArray(data?.templates) ? data.templates : []), [data])
   const languages = useMemo(() => [...new Set(templates.map((template) => String(template.language || 'en')))].sort(), [templates])
   const visibleTemplates = useMemo(() => templates.filter((template) => {
     const matchesType = type === 'All' || String(template.type || 'Other').toLowerCase() === type.toLowerCase()

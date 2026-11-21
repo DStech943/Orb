@@ -2083,6 +2083,23 @@ async def update_agent_feedback_status(
     return {"feedback": _agent_feedback_out(rows[0])}
 
 
+@router.delete("/brands/{brand_id}/agent-feedback/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_agent_feedback(brand_id: str, feedback_id: str, request: Request, _: User = Depends(_admin)) -> Response:
+    """Permanently remove one feedback item or issue report (its report snapshot cascades)."""
+    brand = await _remote_brand(request, brand_id)
+    # The caller is already verified as an admin. Deletes go through the service role because
+    # no browser-facing role has DELETE on this table (see 20261126_agent_feedback_delete.sql).
+    rows = await _supabase_service_write(
+        request,
+        "DELETE",
+        "orb_agent_feedback",
+        params={"id": f"eq.{feedback_id}", "brand_id": f"eq.{brand['id']}", "select": "id"},
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Feedback item not found.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.patch("/brands/{brand_id}/category")
 async def set_brand_category(brand_id: str, payload: CategoryPatch, request: Request, _: User = Depends(_admin)) -> dict[str, Any]:
     settings = request.app.state.settings

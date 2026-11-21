@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Bot, CheckCircle2, Clock, Headset, MessageSquare, RefreshCw, Smartphone, ThumbsDown, ThumbsUp, UserCheck, Users, Zap } from 'lucide-react'
+import { Bot, Clock, Headset, MessageSquare, RefreshCw, Smartphone, ThumbsDown, ThumbsUp, UserCheck, Users, Zap } from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import PageHeader from '../components/ui/PageHeader'
 import Button from '../components/ui/Button'

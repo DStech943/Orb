@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowUpRight, Check, FlaskConical, MessageSquareWarning, ThumbsUp } from 'lucide-react'
+import { ArrowUpRight, Check, FlaskConical, MessageSquareWarning, ThumbsUp, Trash2 } from 'lucide-react'
 import Button from '../components/ui/Button'
 import EmptyState from '../components/ui/EmptyState'
 import PageHeader from '../components/ui/PageHeader'
@@ -14,7 +14,7 @@ import { useBrand } from '../context/BrandContext'
 import { useToast } from '../context/ToastContext'
 import { formatDateTime, pluralize, timeAgo } from '../lib/format'
 import { loadFeedback } from '../lib/feedbackData'
-import { hasOrbApi, updateBrandAgentFeedback } from '../services/orbApi'
+import { deleteBrandAgentFeedback, hasOrbApi, updateBrandAgentFeedback } from '../services/orbApi'
 
 // The status values are the backend contract (`AgentFeedbackStatusPatch`).
 const STATUS_STEPS = [
@@ -24,7 +24,6 @@ const STATUS_STEPS = [
   { id: 'resolved', label: 'Resolved', hint: 'This is done.' },
 ]
 const GROUPS = [
-  { id: 'all', label: 'All', match: () => true },
   { id: 'open', label: 'Open', match: (item) => item.status === 'open' },
   { id: 'progress', label: 'In progress', match: (item) => ['updated_in_knowledge', 'retested'].includes(item.status) },
   { id: 'resolved', label: 'Resolved', match: (item) => item.status === 'resolved' },
@@ -83,9 +82,23 @@ function StatusTrail({ status }) {
   )
 }
 
-function Detail({ item, currentUser, scope, isAdmin, brandId, agentName, onStatus }) {
+function Detail({ item, currentUser, scope, isAdmin, brandId, agentName, onStatus, onDeleted }) {
   const { showToast } = useToast()
   const [saving, setSaving] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  useEffect(() => { setConfirmingDelete(false) }, [item.id])
+  const remove = async () => {
+    setDeleting(true)
+    try {
+      await deleteBrandAgentFeedback(brandId, item.id)
+      onDeleted(item.id)
+      showToast(item.kind === 'issue_report' ? 'Issue deleted.' : 'Feedback deleted.')
+    } catch (failure) {
+      showToast(failure?.message || 'Could not delete this item.', 'error')
+      setDeleting(false)
+    }
+  }
   const name = submitterName(item, currentUser, scope)
   const email = submitterEmail(item, currentUser, scope)
   const change = async (status) => {
@@ -173,6 +186,21 @@ function Detail({ item, currentUser, scope, isAdmin, brandId, agentName, onStatu
             {STATUS_STEPS.map((step) => <option key={step.id} value={step.id}>{step.label}</option>)}
           </Select>
         )}
+        {isAdmin && (
+          confirmingDelete ? (
+            <div className="ml-auto flex flex-wrap items-center gap-2" role="alert">
+              <span className="text-xs text-fg-muted">Delete this permanently?</span>
+              <Button size="sm" variant="secondary" onClick={() => setConfirmingDelete(false)} disabled={deleting}>Cancel</Button>
+              <button type="button" onClick={remove} disabled={deleting} className="inline-flex h-8 items-center gap-1.5 rounded-control bg-danger px-3 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60">
+                <Trash2 size={13} /> {deleting ? 'Deleting…' : 'Yes, delete'}
+              </button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setConfirmingDelete(true)} className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-control border border-danger/30 bg-white px-3 text-xs font-medium text-danger transition-colors hover:bg-danger-tint">
+              <Trash2 size={13} /> Delete
+            </button>
+          )
+        )}
       </div>
     </div>
   )
@@ -183,7 +211,7 @@ export default function Feedback() {
   const { brandId, brandName, agentName, loading: brandLoading } = useBrand()
   const navigate = useNavigate()
   const [state, setState] = useState({ loading: true, items: [], scope: 'sessions', error: '' })
-  const [group, setGroup] = useState('all')
+  const [group, setGroup] = useState('open')
   const [selectedId, setSelectedId] = useState('')
 
   const load = useCallback(async () => {
@@ -210,6 +238,8 @@ export default function Feedback() {
   const selected = visible.find((item) => item.id === selectedId) || null
   const counts = useMemo(() => Object.fromEntries(GROUPS.map((entry) => [entry.id, state.items.filter(entry.match).length])), [state.items])
   const updateStatus = (id, status) => setState((current) => ({ ...current, items: current.items.map((item) => (item.id === id ? { ...item, status } : item)) }))
+
+  const removeItem = (id) => { setSelectedId(''); setState((current) => ({ ...current, items: current.items.filter((item) => item.id !== id) })) }
 
   if (brandLoading) return <Skeleton className="h-64" />
 
@@ -260,7 +290,7 @@ export default function Feedback() {
           onAction={() => navigate('/app/chat')}
         />
       ) : visible.length === 0 ? (
-        <EmptyState icon={Check} title="Nothing in this view" description="No feedback matches this filter right now." action="Show all" onAction={() => setGroup('all')} />
+        <EmptyState icon={Check} title="Nothing in this view" description="No feedback matches this filter right now." action={group === 'open' ? undefined : 'Show open'} onAction={group === 'open' ? undefined : () => setGroup('open')} />
       ) : (
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <ul className="grid gap-2" aria-label={pluralize(visible.length, 'item')}>
@@ -306,7 +336,7 @@ export default function Feedback() {
           </ul>
           <aside className="rounded-card border border-line bg-white p-5 shadow-card lg:sticky lg:top-20" aria-live="polite">
             {selected ? (
-              <Detail item={selected} currentUser={user} isAdmin={isAdmin} brandId={brandId} agentName={agentName} onStatus={updateStatus} />
+              <Detail item={selected} currentUser={user} isAdmin={isAdmin} brandId={brandId} agentName={agentName} onStatus={updateStatus} onDeleted={removeItem} />
             ) : (
               <p className="py-10 text-center text-sm text-fg-muted">Select an item to see the details and where it stands.</p>
             )}

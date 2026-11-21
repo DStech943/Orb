@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import TransitionLink from '../ui/TransitionLink'
+import { arrivedViaTransition } from '../../lib/viewTransition'
 import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform } from 'motion/react'
 import { ArrowDown, ArrowRight, Check, FileText, Play, UserRound } from 'lucide-react'
 import Orb from '../Orb'
@@ -29,7 +30,7 @@ const words = (list, start) => list.map((word, i) => (
 
 /* ---------- things orbiting the orb ---------- */
 const bubble = 'whitespace-nowrap rounded-2xl text-[13px] font-medium shadow-[0_16px_36px_-14px_rgba(60,40,140,0.45)]'
-const chip = `${bubble} flex items-center gap-2 border border-white bg-white/85 py-1.5 pl-1.5 pr-3.5 text-ink backdrop-blur-md`
+const chip = `${bubble} flex items-center gap-2 border border-white bg-white/85 py-1.5 pl-1.5 pr-3.5 text-ink`
 const satellites = [
   <div className={`${bubble} rounded-br-md bg-primary px-4 py-2.5 text-white`}>Where’s my order?</div>,
   <div className={chip}><span className="grid h-6 w-6 place-items-center rounded-lg bg-[#E7F8EE]"><span className="h-2 w-2 rounded-full bg-[#25D366]" /></span>WhatsApp</div>,
@@ -107,6 +108,7 @@ function LiveFeed() {
 
 /* ---------- hero ---------- */
 export default function Hero() {
+  const [arrived] = useState(arrivedViaTransition)
   const ref = useRef(null)
   const titleRef = useRef(null)
   const reduce = useReducedMotion()
@@ -136,17 +138,17 @@ export default function Hero() {
           {/* The stage: the orb and its ring sit centred between the two headline lines, with a
               live inbox on the right. Presentation only, so it is hidden from screen readers. */}
           <div aria-hidden="true" className="absolute inset-0 z-10">
-            <motion.div style={motionStyle({ scale: orbScale })} className="absolute left-1/2 top-1/2 aspect-square w-[min(86vw,420px)] -translate-x-1/2 -translate-y-1/2 lg:w-[min(58vh,40vw)]">
+            <motion.div style={{ x: '-50%', y: '-50%', ...(reduce ? {} : { scale: orbScale }) }} className="absolute left-1/2 top-1/2 aspect-square w-[min(86vw,420px)] will-change-transform lg:w-[min(58vh,40vw)]">
               <motion.div
                 className="absolute inset-0 z-10"
-                initial={reduce ? false : { opacity: 0, scale: 0.6 }}
+                initial={reduce || arrived ? false : { opacity: 0, scale: 0.6 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 1.8, ease, delay: 0.3 }}
               >
                 <div className="absolute inset-[18%] rounded-full bg-primary/25 blur-[70px]" />
                 {/* The canvas paints a flat background; the mask feathers it into the page. */}
-                <div className="absolute inset-0 [mask-image:radial-gradient(circle,#000_55%,transparent_71%)]">
-                  <Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#FFF9F1" size={0.92} glow={1.2} hoverIntensity={0.9} rotateOnHover followCursor intro />
+                <div data-vt-orb className="absolute inset-0 [mask-image:radial-gradient(circle,#000_55%,transparent_71%)]">
+                  <Orb colors={['#9c43fe', '#4cc2e9', '#101499']} backgroundColor="#FFF9F1" size={0.92} glow={1.2} hoverIntensity={0.9} rotateOnHover followCursor intro={!arrived} dpr={1.5} />
                 </div>
               </motion.div>
               <motion.div className="absolute inset-0" initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 1.2, delay: 1.4 }}>
@@ -163,11 +165,11 @@ export default function Hero() {
           {/* Pointer events pass through the heading to the orb behind it; the letters still
               track the cursor through a window listener. */}
           <h1 id="hero-title" ref={titleRef} className="pointer-events-none relative z-20 flex flex-1 flex-col font-sans text-[clamp(2.7rem,6.8vw,8rem)] font-extrabold leading-[0.95] tracking-[-0.05em] text-ink">
-            <motion.span style={motionStyle({ x: leftX })} className="block lg:whitespace-nowrap">
+            <motion.span style={motionStyle({ x: leftX })} className="block will-change-transform lg:whitespace-nowrap">
               {words(['Customer', 'support,'], 0.15)}
             </motion.span>
             <span aria-hidden="true" className="block h-[min(86vw,420px)] lg:h-auto lg:min-h-[380px] lg:flex-1" />
-            <motion.span style={motionStyle({ x: rightX })} className="block lg:whitespace-nowrap lg:text-right">
+            <motion.span style={motionStyle({ x: rightX })} className="block will-change-transform lg:whitespace-nowrap lg:text-right">
               {words(['written', 'in', 'your'], 0.35)}
               <Rise delay={0.6}>
                 <RotatingText words={['voice.', 'tone.', 'style.', 'words.']} startDelay={2600} interval={2600} className="font-display font-[360] italic tracking-[-0.03em] text-primary" />
@@ -184,10 +186,10 @@ export default function Hero() {
             </FadeUp>
             <FadeUp inView={false} delay={1.05} className="mt-7 flex flex-wrap items-center gap-3">
               <Magnetic>
-                <Link to="/signup" className="lp-btn-shine group inline-flex h-12 items-center gap-2 rounded-full bg-primary pl-6 pr-5 text-sm font-semibold text-white shadow-[0_18px_40px_-14px_rgba(99,91,255,0.9)] transition-colors hover:bg-primary-dark">
+                <TransitionLink to="/signup" className="lp-btn-shine group inline-flex h-12 items-center gap-2 rounded-full bg-primary pl-6 pr-5 text-sm font-semibold text-white shadow-[0_18px_40px_-14px_rgba(99,91,255,0.9)] transition-colors hover:bg-primary-dark">
                   Start building free
                   <ArrowRight size={16} aria-hidden="true" className="transition-transform duration-300 group-hover:translate-x-1" />
-                </Link>
+                </TransitionLink>
               </Magnetic>
               <Magnetic strength={0.2}>
                 <a href="#how" className="group inline-flex h-12 items-center gap-2.5 rounded-full border border-white/90 bg-white/70 pl-2 pr-5 text-sm font-semibold text-ink shadow-card backdrop-blur transition-colors hover:bg-white">

@@ -2708,7 +2708,7 @@ function Builder({
     document.addEventListener("click", guardNavigation, true);
     return () => document.removeEventListener("click", guardNavigation, true);
   }, [isDirty, navigate]);
-  const canDelete = deletePhrase.trim().toLowerCase() === "keith is the goat";
+  const canDelete = deletePhrase.trim().toLowerCase() === "delete";
   const erase = async () => {
     if (!draft.id) return onBack();
     if (!canDelete || deleting) return;
@@ -2791,16 +2791,16 @@ function Builder({
               {draft.title || "this flow"}
             </span>
             . Type{" "}
-            <span className="font-bold text-slate-800">keith is the goat</span>{" "}
+            <span className="font-bold text-slate-800">delete</span>{" "}
             to confirm.
           </p>
           <input
             value={deletePhrase}
             onChange={(event) => setDeletePhrase(event.target.value)}
             autoFocus
-            placeholder="keith is the goat"
+            placeholder="delete"
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-100"
-            aria-label="Type keith is the goat to delete this flow"
+            aria-label="Type delete to confirm deleting this flow"
           />
           <div className="flex flex-wrap justify-end gap-2">
             <Button

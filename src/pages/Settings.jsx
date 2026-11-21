@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Check, Mail, Mic, MicOff, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react";
+import { Check, Mail, Mic, MicOff, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import Avatar from "../components/ui/Avatar";
 import Button from "../components/ui/Button";
-import ConfirmDialog from "../components/ui/ConfirmDialog";
 import Input from "../components/ui/Input";
 import Modal from "../components/ui/Modal";
 import Select from "../components/ui/Select";
@@ -36,9 +35,6 @@ const tabs = [
   { id: "team", label: "Team" },
   { id: "notifications", label: "Notifications" },
   { id: "billing", label: "Billing" },
-];
-const team = [
-  { name: "Keith Fernandes", email: "keith@example.com", role: "Admin" },
 ];
 const setupGuideSteps = [
   "Add a knowledge source",
@@ -169,8 +165,6 @@ export default function Settings() {
     url: "",
     description: "",
   });
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [deleteAccount, setDeleteAccount] = useState(false);
   const [voiceWakeEnabled, setVoiceWakeEnabled] = useState(isOrbVoiceWakeEnabled);
   const [voiceWakeSaving, setVoiceWakeSaving] = useState(false);
   const [voiceWakeStatus, setVoiceWakeStatus] = useState("off");
@@ -459,19 +453,6 @@ export default function Settings() {
                 </div>
                 <p className="mt-3 border-t border-primary/10 pt-3 text-xs text-muted">{voiceWakeEnabled && voiceWakeStatus === "listening" ? "Listening for “Hey Orb” while this app tab is visible." : voiceWakeEnabled && voiceWakeStatus === "starting" ? "Starting your microphone…" : voiceWakeEnabled && voiceWakeStatus === "retrying" ? "Reconnecting to speech recognition…" : voiceWakeEnabled && voiceWakeStatus === "paused" ? "Paused until you return to an eligible app page." : voiceWakeStatus === "permission-denied" ? "Microphone access was denied, so voice activation has been turned off." : voiceWakeStatus === "microphone-unavailable" ? "No microphone is available, so voice activation has been turned off." : voiceWakeStatus === "unsupported" ? "This browser does not support voice activation, so it has been turned off." : voiceWakeStatus === "connection-error" ? "Speech recognition could not connect. Orb will retry while this tab stays open." : voiceWakeEnabled ? "Preparing voice activation for this browser…" : "Off by default. Enabling it requests microphone permission and saves the choice only in this browser."}</p>
               </section>
-              <div className="mt-8 border-t border-red-200 pt-5">
-                <h3 className="font-extrabold text-red-700">Danger zone</h3>
-                <p className="mt-1 text-sm text-muted">
-                  Permanently delete this account and its local data.
-                </p>
-                <Button
-                  variant="dark"
-                  className="mt-3"
-                  onClick={() => setDeleteAccount(true)}
-                >
-                  Delete account
-                </Button>
-              </div>
             </div>
           )}
           {active === "business" && (
@@ -592,10 +573,6 @@ export default function Settings() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline">
-                    <Upload size={15} />
-                    Import CSV
-                  </Button>
                   <Button
                     variant="purple"
                     onClick={() => setProductModal(true)}
@@ -676,25 +653,25 @@ export default function Settings() {
                 <div>
                   <h3 className="text-xl font-extrabold">Team</h3>
                   <p className="text-sm text-muted">
-                    Invite teammates to help review generated content.
+                    Teammates are currently added by your Orb administrator.
                   </p>
                 </div>
-                <Button variant="purple" onClick={() => setInviteOpen(true)}>
+                <Button variant="purple" disabled title="Invites are not available yet">
                   <Mail size={15} />
                   Invite
                 </Button>
               </div>
               <div className="mt-5 divide-y border-y">
-                {team.map((member) => (
+                {[{ name: profile.name || user?.name || "You", email: user?.email || "" }].map((member) => (
                   <div
-                    key={member.email}
+                    key={member.email || "you"}
                     className="flex items-center justify-between py-3"
                   >
                     <div>
                       <strong>{member.name}</strong>
                       <p className="text-xs text-muted">{member.email}</p>
                     </div>
-                    <StatusChip status="Admin" />
+                    <StatusChip status={isAdmin ? "Admin" : "Member"} />
                   </div>
                 ))}
               </div>
@@ -839,9 +816,6 @@ export default function Settings() {
                 <p className="mt-2 text-sm text-muted">
                   0 generations this month
                 </p>
-                <Button variant="orange" className="mt-4">
-                  Upgrade
-                </Button>
               </article>
               <div>
                 <h3 className="text-xl font-extrabold">Invoices</h3>
@@ -890,39 +864,10 @@ export default function Settings() {
           </Button>
         </form>
       </Modal>
-      <Modal
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        title="Invite a teammate"
-      >
-        <Input
-          label="Email address"
-          type="email"
-          placeholder="name@company.com"
-        />
-        <Button
-          variant="purple"
-          className="mt-4"
-          onClick={() => {
-            setInviteOpen(false);
-            showToast("Invite sent.");
-          }}
-        >
-          Send invite
-        </Button>
-      </Modal>
       <Modal open={setupGuideOpen} onClose={closeSetupGuide} title="Setup guide">
         <p className="text-sm leading-6 text-muted">This guide is read-only. Complete each step from the Overview to prepare your brand workspace.</p>
         <ol className="mt-4 grid gap-2">{setupGuideSteps.map((step, index) => <li key={step} className="flex items-center gap-3 rounded-lg border border-ink/10 px-3 py-2 text-sm"><span className="grid h-6 w-6 place-items-center rounded-full border border-ink/20 text-xs font-extrabold">{index + 1}</span>{step}</li>)}</ol>
       </Modal>
-      <ConfirmDialog
-        open={deleteAccount}
-        onClose={() => setDeleteAccount(false)}
-        title="Delete account?"
-        description="This demo action only closes this dialog; it does not delete your account."
-        confirmLabel="Delete account"
-        onConfirm={() => setDeleteAccount(false)}
-      />
     </div>
   );
 }

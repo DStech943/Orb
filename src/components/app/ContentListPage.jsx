@@ -415,7 +415,7 @@ export default function ContentListPage({ kind, list, update, remove, removeMany
   }, [])
 
   const { data: fetchedData, loading, error, reload } = useAsync(list, [list, brandVersion])
-  const data = Array.isArray(fetchedData) ? fetchedData : []
+  const data = useMemo(() => (Array.isArray(fetchedData) ? fetchedData : []), [fetchedData])
   useEffect(() => {
     if (!isProduct) return undefined
     const refreshAfterBackgroundSync = () => reload()

@@ -1,4 +1,5 @@
 import React, { useRef } from 'react'
+import TransitionLink from '../ui/TransitionLink'
 import { Link } from 'react-router-dom'
 import { motion, useReducedMotion, useScroll, useTransform } from 'motion/react'
 import { ArrowRight } from 'lucide-react'
@@ -27,12 +28,12 @@ export default function Cta() {
           <FadeUp delay={0.35} className="mx-auto mt-6 max-w-md text-base leading-7 text-white/65">Set up your workspace in an afternoon. Your customers will notice by the evening.</FadeUp>
           <FadeUp delay={0.5} className="mt-10 flex flex-wrap items-center justify-center gap-3">
             <Magnetic>
-              <Link to="/signup" className="lp-btn-shine group inline-flex h-14 items-center gap-2 rounded-full bg-white pl-7 pr-6 text-[15px] font-semibold text-ink shadow-[0_20px_50px_-15px_rgba(169,163,255,0.8)]">
+              <TransitionLink to="/signup" className="lp-btn-shine group inline-flex h-14 items-center gap-2 rounded-full bg-white pl-7 pr-6 text-[15px] font-semibold text-ink shadow-[0_20px_50px_-15px_rgba(169,163,255,0.8)]">
                 Create your workspace
                 <ArrowRight size={17} aria-hidden="true" className="transition-transform duration-300 group-hover:translate-x-1" />
-              </Link>
+              </TransitionLink>
             </Magnetic>
-            <Link to="/login" className="inline-flex h-14 items-center rounded-full px-6 text-[15px] font-medium text-white/75 transition-colors hover:text-white">I already have an account</Link>
+            <TransitionLink to="/login" className="inline-flex h-14 items-center rounded-full px-6 text-[15px] font-medium text-white/75 transition-colors hover:text-white">I already have an account</TransitionLink>
           </FadeUp>
         </div>
       </motion.div>

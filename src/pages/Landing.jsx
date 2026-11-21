@@ -13,7 +13,7 @@ import Footer from '../components/landing/Footer'
 
 export default function Landing() {
   return (
-    <div className="lp min-h-screen">
+    <div data-vt-page="landing" className="lp min-h-screen">
       <div aria-hidden="true" className="lp-grain" />
       <Cursor />
       <Navbar />

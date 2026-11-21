@@ -11,7 +11,6 @@ import {
   MessageCircleMore,
   Minimize2,
   Plus,
-  Search,
   ThumbsUp,
   X,
 } from "lucide-react";
@@ -19,8 +18,6 @@ import Orb from "../components/Orb";
 import ReportIssueModal, { issueCategoryLabel } from "../components/chat/ReportIssueModal";
 import ChatMessageText from "../components/chat/ChatMessageText";
 import Avatar from "../components/ui/Avatar";
-import { buildTranscript, newIdempotencyKey } from "../lib/transcript";
-import { timeAgo } from "../lib/format";
 import { listTestSessions, removeTestSession, touchTestSession } from "../lib/testSessions";
 import { listBrands } from "../services/brands";
 import {
@@ -31,7 +28,6 @@ import {
   hasBrandAgentApi,
   hasOrbApi,
   listBrandAgentFeedback,
-  reportBrandAgentIssue,
 } from "../services/orbApi";
 import useAsync from "../hooks/useAsync";
 import { useToast } from "../context/ToastContext";
@@ -345,18 +341,15 @@ export default function AgentChat({ embedded = false }) {
   // Starts a fresh test but keeps the previous one available in the session list.
   const newConversation = () => {
     resetConversationState();
-    setSessionId(sessionForBrand());
-    setSessionsOpen(false);
+    setSessionId(sessionForBrand());
   };
 
   const openSession = (id) => {
-    if (id === sessionId) {
-      setSessionsOpen(false);
+    if (id === sessionId) {
       return;
     }
     resetConversationState();
-    setSessionId(id);
-    setSessionsOpen(false);
+    setSessionId(id);
   };
 
   const deleteSession = async (id) => {

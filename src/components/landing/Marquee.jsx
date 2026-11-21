@@ -29,7 +29,7 @@ export default function Marquee() {
         <ul className="lp-marquee-track items-center">
           {[...tools, ...tools].map((tool, i) => (
             <li key={`${tool.name}-${i}`} aria-hidden={i >= tools.length || undefined} className="mx-3 shrink-0">
-              <div className="group flex h-16 items-center gap-3 rounded-2xl border border-white/80 bg-white/55 px-5 shadow-card backdrop-blur transition-colors duration-300 hover:bg-white">
+              <div className="group flex h-16 items-center gap-3 rounded-2xl border border-white/80 bg-white/55 px-5 shadow-card transition-colors duration-300 hover:bg-white">
                 <img src={tool.src} alt="" loading="lazy" className="h-7 w-7 rounded-md object-contain opacity-70 grayscale transition duration-300 group-hover:opacity-100 group-hover:grayscale-0" />
                 <span className="whitespace-nowrap text-sm font-semibold text-ink/55 transition-colors group-hover:text-ink">{tool.name}</span>
               </div>

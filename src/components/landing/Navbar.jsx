@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import TransitionLink from '../ui/TransitionLink'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion, useMotionValueEvent, useScroll } from 'motion/react'
 import { ArrowUpRight, Menu, X } from 'lucide-react'
@@ -55,12 +56,12 @@ export default function Navbar() {
           </div>
 
           <div className="hidden items-center gap-1 lg:flex">
-            <Link to="/login" className="rounded-full px-4 py-2 text-sm font-medium text-ink/70 transition-colors hover:text-ink">Sign in</Link>
+            <TransitionLink to="/login" className="rounded-full px-4 py-2 text-sm font-medium text-ink/70 transition-colors hover:text-ink">Sign in</TransitionLink>
             <Magnetic strength={0.25}>
-              <Link to="/signup" className="lp-btn-shine group inline-flex h-10 items-center gap-1.5 rounded-full bg-ink pl-5 pr-4 text-sm font-medium text-white shadow-[0_10px_24px_-10px_rgba(37,38,58,0.7)] transition-colors hover:bg-primary">
+              <TransitionLink to="/signup" className="lp-btn-shine group inline-flex h-10 items-center gap-1.5 rounded-full bg-ink pl-5 pr-4 text-sm font-medium text-white shadow-[0_10px_24px_-10px_rgba(37,38,58,0.7)] transition-colors hover:bg-primary">
                 Get started
                 <ArrowUpRight size={15} className="transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
-              </Link>
+              </TransitionLink>
             </Magnetic>
           </div>
 
@@ -96,8 +97,8 @@ export default function Navbar() {
               ))}
             </ul>
             <motion.div className="grid grid-cols-2 gap-3" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.6, ease }}>
-              <Link to="/login" className="grid h-12 place-items-center rounded-full border border-ink/15 bg-white text-sm font-medium text-ink">Sign in</Link>
-              <Link to="/signup" className="grid h-12 place-items-center rounded-full bg-ink text-sm font-medium text-white">Get started</Link>
+              <TransitionLink to="/login" className="grid h-12 place-items-center rounded-full border border-ink/15 bg-white text-sm font-medium text-ink">Sign in</TransitionLink>
+              <TransitionLink to="/signup" className="grid h-12 place-items-center rounded-full bg-ink text-sm font-medium text-white">Get started</TransitionLink>
             </motion.div>
           </motion.div>
         )}

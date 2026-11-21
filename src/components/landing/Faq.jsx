@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import TransitionLink from '../ui/TransitionLink'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowRight, Plus } from 'lucide-react'
@@ -17,10 +18,10 @@ export default function Faq() {
           </h2>
           <FadeUp delay={0.2} className="mt-5 max-w-sm text-base leading-7 text-fg-muted">The short version: bring what your team already knows, and Orb does the shaping.</FadeUp>
           <FadeUp delay={0.3}>
-            <Link to="/signup" className="group mt-7 inline-flex items-center gap-2 text-sm font-semibold text-primary">
+            <TransitionLink to="/signup" className="group mt-7 inline-flex items-center gap-2 text-sm font-semibold text-primary">
               Try it with your own docs
               <ArrowRight size={15} className="transition-transform duration-300 group-hover:translate-x-1" aria-hidden="true" />
-            </Link>
+            </TransitionLink>
           </FadeUp>
         </div>
 

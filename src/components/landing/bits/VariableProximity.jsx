@@ -18,12 +18,14 @@ export function useProximity(containerRef, { radius = 220, from = 800, to = 300 
     const paint = () => {
       raf = 0
       const letters = root.querySelectorAll('[data-prox]')
+      // Pass 1: read every position. Pass 2: write every weight. Interleaving them made the
+      // browser recalculate layout once per letter, on every frame.
+      const centers = pointer ? Array.from(letters, (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] }) : null
       let still = false
-      letters.forEach((el) => {
+      letters.forEach((el, i) => {
         let weight = from
-        if (pointer) {
-          const r = el.getBoundingClientRect()
-          const d = Math.hypot(pointer.x - (r.left + r.width / 2), pointer.y - (r.top + r.height / 2))
+        if (centers) {
+          const d = Math.hypot(pointer.x - centers[i][0], pointer.y - centers[i][1])
           if (d < radius) {
             const t = 1 - d / radius
             weight = from + (to - from) * t * t * (3 - 2 * t)
@@ -33,7 +35,8 @@ export function useProximity(containerRef, { radius = 220, from = 800, to = 300 
         const next = current + (weight - current) * 0.28
         if (Math.abs(next - weight) > 0.5) still = true
         el.dataset.w = String(next)
-        el.style.fontWeight = String(Math.round(next))
+        const rounded = String(Math.round(next))
+        if (el.style.fontWeight !== rounded) el.style.fontWeight = rounded
       })
       if (still || active) raf = requestAnimationFrame(paint)
     }

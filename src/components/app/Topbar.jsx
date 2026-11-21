@@ -1,5 +1,5 @@
 import React from 'react'
-import { ChevronDown, Eye, LogOut, Menu, PanelLeftClose, PanelLeftOpen, UserRound, Users } from 'lucide-react'
+import { ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, UserRound, Users } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Avatar from '../ui/Avatar'
 import Dropdown from '../ui/Dropdown'

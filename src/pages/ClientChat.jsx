@@ -669,7 +669,13 @@ export default function ClientChat() {
   }, [brandName, user])
 
   useEffect(() => {
-    const timer = window.setInterval(() => setTypingUsers((current) => current.filter((person) => person.expiresAt > Date.now())), 1000)
+    // Return the same array when nobody expired, otherwise this re-renders the whole chat every second.
+    const timer = window.setInterval(() => setTypingUsers((current) => {
+      if (!current.length) return current
+      const now = Date.now()
+      const next = current.filter((person) => person.expiresAt > now)
+      return next.length === current.length ? current : next
+    }), 1000)
     return () => window.clearInterval(timer)
   }, [])
 

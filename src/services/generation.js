@@ -1,5 +1,5 @@
 import { emptyOrbData, sampleData } from '../data/mock/generation'
-import { activeBrandName, deleteKnowledge, deleteKnowledgeBulk, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createAssistantFaq, createManualSop, bulkCreateKnowledge } from './orbApi'
+import { activeBrandName, deleteKnowledge, deleteKnowledgeBulk, getShopifyProductMetafields, getShopifyProductTemplates, getShopifyVariantMetafields, hasOrbApi, listKnowledge, saveShopifyProductMetafields, syncShopifyProducts, updateKnowledge, createManualSop, bulkCreateKnowledge } from './orbApi'
 const KEY = 'orb_generation_data_v1'
 const KNOWLEDGE_CACHE_MS = 20_000
 const knowledgeCache = new Map()

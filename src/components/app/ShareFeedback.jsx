@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { LifeBuoy, Loader2, Paperclip, X } from 'lucide-react'
+import { LifeBuoy, Paperclip, X } from 'lucide-react'
 import Avatar from '../ui/Avatar'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'

@@ -361,6 +361,7 @@ const Orb = ({
     };
     let raf = 0;
     let last = 0;
+    let lastDraw = 0;
     let visible = true;
     let hasReportedDrawError = false;
     const onContextLost = event => {
@@ -444,6 +445,10 @@ const Orb = ({
     const frame = now => {
       raf = 0;
       if (!visible || document.hidden) return;
+      // Small avatars (sidebar, chat guide, message headers) animate on every page, so they
+      // draw at ~30fps; the difference is invisible at that size and it halves the GPU work.
+      if (view.width <= 96 && lastDraw && now - lastDraw < 30) { raf = requestAnimationFrame(frame); return; }
+      lastDraw = now;
       const s = settingsRef.current;
       const dt = last ? clamp((now - last) / 1000, 0.0005, 0.05) : 1 / 60;
       last = now;
